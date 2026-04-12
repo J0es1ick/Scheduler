@@ -35,7 +35,7 @@ func (r *UniversityRepository) GetUniversityByID(ctx context.Context, id string)
 	err := r.db.GetContext(ctx, &university, query, id)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil // Университет не найден
+			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get university by id: %w", err)
 	}	
@@ -48,7 +48,7 @@ func (r *UniversityRepository) GetUniversityByName(ctx context.Context, name str
 	err := r.db.GetContext(ctx, &university, query, name)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil // Университет не найден
+			return nil, nil
 		}	
 		return nil, fmt.Errorf("failed to get university by name: %w", err)
 	}
