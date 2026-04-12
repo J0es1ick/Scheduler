@@ -10,9 +10,9 @@ import (
 )
 
 type Config struct {
-	ServerPort string `mapstructure:"SERVER_PORT"`;
-	BotToken   string `mapstructure:"BOT_TOKEN"`;
-	Database string   `mapstructure:",squash"`;
+	ServerPort string 		  `mapstructure:"SERVER_PORT"`;
+	BotToken   string 		  `mapstructure:"BOT_TOKEN"`;
+	Database   DatabaseConfig `mapstructure:",squash"`;
 }
 
 type DatabaseConfig struct {

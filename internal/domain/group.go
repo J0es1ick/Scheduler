@@ -2,12 +2,11 @@ package domain
 
 import "time"
 
-type User struct {
+type Group struct {
 	ID           string    `db:"id"`
-	Username     string    `db:"username"`
-	IsAdmin      bool      `db:"is_admin"`
 	UniversityID string    `db:"university_id"`
-	GroupID      string    `db:"group_id"`
+	Name         string    `db:"name"`
+	IsActive     bool      `db:"is_active"`
 	CreatedAt    time.Time `db:"created_at"`
 	UpdatedAt    time.Time `db:"updated_at"`
 }
