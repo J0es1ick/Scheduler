@@ -36,7 +36,7 @@ func (r *DataSourceRepository) GetDataSourceByID(ctx context.Context, id string)
 	err := r.db.GetContext(ctx, &ds, query, id)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, nil // Not found
+			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get data source: %w", err)
 	}
@@ -60,6 +60,17 @@ func (r *DataSourceRepository) DeleteDataSource(ctx context.Context, id string) 
 		return fmt.Errorf("failed to delete data source: %w", err)
 	}
 	return nil
+}
+
+func (r *DataSourceRepository) ListActiveDataSources(ctx context.Context) ([]*domain.DataSource, error) {
+	query := `SELECT id, university_id, adapter_type, config, update_interval, last_run_at, last_error, created_at, updated_at
+			  FROM data_sources WHERE (last_run_at IS NULL OR last_run_at + (update_interval || ' seconds')::interval < NOW())`
+	var dataSources []*domain.DataSource
+	err := r.db.SelectContext(ctx, &dataSources, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list active data sources: %w", err)
+	}
+	return dataSources, nil
 }
 
 // func (r *DataSourceRepository) ListDataSourcesByUniversityID(ctx context.Context, universityID string) ([]*domain.DataSource, error) {
