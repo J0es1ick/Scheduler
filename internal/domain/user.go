@@ -6,8 +6,6 @@ type User struct {
 	ID           string    `db:"id"`
 	Username     string    `db:"username"`
 	IsAdmin      bool      `db:"is_admin"`
-	UniversityID string    `db:"university_id"`
-	GroupID      string    `db:"group_id"`
 	CreatedAt    time.Time `db:"created_at"`
 	UpdatedAt    time.Time `db:"updated_at"`
 }
