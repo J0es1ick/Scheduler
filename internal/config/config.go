@@ -1,23 +1,48 @@
 package config
 
 import (
+	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
-	"github.com/joho/godotenv"
+	"github.com/spf13/viper"
 )
 
 type Config struct {
-	BotToken string
+	ServerPort string 		  `mapstructure:"SERVER_PORT"`;
+	BotToken   string 		  `mapstructure:"BOT_TOKEN"`;
+	Database   DatabaseConfig `mapstructure:",squash"`;
 }
 
-func Load() *Config {
-	if err := godotenv.Load(); err != nil {
-		log.Println("Файл .env не найден, используем переменные окружения")
+type DatabaseConfig struct {
+	Host string 	`mapstructure:"DB_HOST"`;
+	Port string 	`mapstructure:"DB_PORT"`;
+	Name string 	`mapstructure:"DB_NAME"`;
+	User string 	`mapstructure:"DB_USER"`;
+	Password string `mapstructure:"DB_PASSWORD"`;
+}
+
+func InitConfig() (*Config, error) {
+	exePath, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
 	}
-	token := os.Getenv("BOT_TOKEN")
-	if token == "" {
-		log.Fatal("BOT_TOKEN не задан")
+
+	rootPath := filepath.Dir(filepath.Dir(exePath))
+
+	viper.SetConfigName(".env")
+	viper.SetConfigType("env")
+	viper.AddConfigPath(rootPath)
+
+	if err := viper.ReadInConfig(); err != nil {
+		return nil, fmt.Errorf("failed to read config: %w", err)
 	}
-	return &Config{BotToken: token}
+
+	var cfg Config
+	if err := viper.Unmarshal(&cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	return &cfg, nil;
 }
