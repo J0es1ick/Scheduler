@@ -1,0 +1,5 @@
+[build]
+  cmd = "go build -o ./tmp/bot.exe ./cmd/bot"
+  bin = "./tmp/bot.exe"
+  include_ext = ["go"]
+  exclude_dir = ["tmp", "vendor"]
