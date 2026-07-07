@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
+	"github.com/J0es1ick/Scheduler/internal/helpers"
 	"github.com/J0es1ick/Scheduler/internal/repository"
 )
 
@@ -27,12 +29,9 @@ func NewScheduleService(
 	}
 }
 
-// GetScheduleForGroup возвращает расписание для группы на конкретную дату.
-// Работает с двумя типами занятий:
-// - шаблонные (special_date IS NULL) – проверяются day_of_week + week_type
-// - конкретные (special_date = дата) – берутся напрямую
 func (s *ScheduleService) GetScheduleForGroup(ctx context.Context, groupID string, date time.Time) ([]domain.Lesson, error) {
-	// Получаем группу, чтобы узнать universityID
+	date = helpers.NormalizeDate(date)
+
 	group, err := s.groupRepo.GetGroupByID(ctx, groupID)
 	if err != nil {
 		return nil, err
@@ -41,7 +40,6 @@ func (s *ScheduleService) GetScheduleForGroup(ctx context.Context, groupID strin
 		return nil, fmt.Errorf("group not found")
 	}
 
-	// Определяем семестр для даты
 	semester, err := s.semesterRepo.GetSemesterByDate(ctx, group.UniversityID, date)
 	if err != nil {
 		return nil, err
@@ -50,29 +48,25 @@ func (s *ScheduleService) GetScheduleForGroup(ctx context.Context, groupID strin
 		return nil, fmt.Errorf("no semester found for date %v", date)
 	}
 
-	// Получаем все занятия группы в этом семестре (оптимизировано одним запросом)
 	allLessons, err := s.lessonRepo.GetLessonsByGroupID(ctx, groupID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Фильтруем по семестру и дате
 	var result []domain.Lesson
-	weekType := determineWeekType(date, semester.StartDate) // odd/even
-	dayOfWeek := int(date.Weekday()) // 0=воскресенье, преобразуем в 1-7
+	weekType := helpers.DetermineWeekType(date, semester.StartDate)
+	dayOfWeek := helpers.Weekday(date)
 
 	for _, lesson := range allLessons {
 		if lesson.SemesterID != semester.ID {
 			continue
 		}
-		// Конкретное занятие на эту дату
-		if lesson.SpecialDate != nil && lesson.SpecialDate.Equal(date) {
+		if lesson.SpecialDate != nil && helpers.NormalizeDate(*lesson.SpecialDate).Equal(date) {
 			result = append(result, lesson)
 			continue
 		}
-		// Шаблонное занятие: проверяем день недели и тип недели
 		if lesson.SpecialDate == nil {
-			if lesson.DayOfWeek == dayOfWeek && matchesWeekType(lesson.WeekType, weekType) {
+			if lesson.DayOfWeek == dayOfWeek && helpers.MatchesWeekType(lesson.WeekType, weekType) {
 				result = append(result, lesson)
 			}
 		}
@@ -81,88 +75,85 @@ func (s *ScheduleService) GetScheduleForGroup(ctx context.Context, groupID strin
 }
 
 func (s *ScheduleService) GetScheduleForGroupRange(ctx context.Context, groupID string, from, to time.Time) (map[time.Time][]domain.Lesson, error) {
-    group, err := s.groupRepo.GetGroupByID(ctx, groupID)
-    if err != nil || group == nil {
-        return nil, fmt.Errorf("group not found")
-    }
+	from = helpers.NormalizeDate(from)
+	to = helpers.NormalizeDate(to)
 
-    // Определяем семестры, которые пересекаются с диапазоном
-    semesters, err := s.semesterRepo.GetSemestersByUniversityID(ctx, group.UniversityID)
-    if err != nil {
-        return nil, err
-    }
+	group, err := s.groupRepo.GetGroupByID(ctx, groupID)
+	if err != nil || group == nil {
+		return nil, fmt.Errorf("group not found")
+	}
 
-    // Получаем все занятия группы (шаблонные и конкретные)
-    allLessons, err := s.lessonRepo.GetLessonsByGroupID(ctx, groupID)
-    if err != nil {
-        return nil, err
-    }
+	semesters, err := s.semesterRepo.GetSemestersByUniversityID(ctx, group.UniversityID)
+	if err != nil {
+		return nil, err
+	}
 
-    // Фильтруем по семестрам и датам
-    result := make(map[time.Time][]domain.Lesson)
-    for date := from; !date.After(to); date = date.AddDate(0, 0, 1) {
-        result[date] = []domain.Lesson{}
-    }
+	allLessons, err := s.lessonRepo.GetLessonsByGroupID(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
 
-    for _, lesson := range allLessons {
-        // Проверяем, попадает ли занятие в нужный семестр
-        var semester *domain.Semester
-        for _, s := range semesters {
-            if s.ID == lesson.SemesterID {
-                semester = &s
-                break
-            }
-        }
-        if semester == nil {
-            continue
-        }
+	result := make(map[time.Time][]domain.Lesson)
+	for date := from; !date.After(to); date = date.AddDate(0, 0, 1) {
+		result[date] = []domain.Lesson{}
+	}
 
-        // Конкретное занятие
-        if lesson.SpecialDate != nil {
-            if _, ok := result[*lesson.SpecialDate]; ok {
-                result[*lesson.SpecialDate] = append(result[*lesson.SpecialDate], lesson)
-            }
-            continue
-        }
+	for _, lesson := range allLessons {
+		var semester *domain.Semester
+		for _, s := range semesters {
+			if s.ID == lesson.SemesterID {
+				semester = &s
+				break
+			}
+		}
+		if semester == nil {
+			continue
+		}
 
-        // Шаблонное занятие – разворачиваем на все даты диапазона
-        for date := from; !date.After(to); date = date.AddDate(0, 0, 1) {
-            dayOfWeek := int(date.Weekday()) // приведение к 1..7
-            weekType := determineWeekType(date, semester.StartDate)
-            if lesson.DayOfWeek == dayOfWeek && matchesWeekType(lesson.WeekType, weekType) {
-                result[date] = append(result[date], lesson)
-            }
-        }
-    }
-    return result, nil
+		if lesson.SpecialDate != nil {
+			normalized := helpers.NormalizeDate(*lesson.SpecialDate)
+			if _, ok := result[normalized]; ok {
+				result[normalized] = append(result[normalized], lesson)
+			}
+			continue
+		}
+
+		for date := from; !date.After(to); date = date.AddDate(0, 0, 1) {
+			dayOfWeek := helpers.Weekday(date)
+			weekType := helpers.DetermineWeekType(date, semester.StartDate)
+			if lesson.DayOfWeek == dayOfWeek && helpers.MatchesWeekType(lesson.WeekType, weekType) {
+				result[date] = append(result[date], lesson)
+			}
+		}
+	}
+	return result, nil
 }
 
 func (s *ScheduleService) GetScheduleForTeacher(ctx context.Context, teacherName string, date time.Time) ([]domain.Lesson, error) {
-	// Получаем все занятия преподавателя (по имени, может быть несколько)
+	date = helpers.NormalizeDate(date)
+
 	lessons, err := s.lessonRepo.GetLessonsByTeacher(ctx, teacherName)
 	if err != nil {
 		return nil, err
 	}
 
-	// Фильтруем по дате (аналогично методу для группы)
 	var result []domain.Lesson
 	for _, lesson := range lessons {
-		// Получаем группу, чтобы узнать universityID
 		group, err := s.groupRepo.GetGroupByID(ctx, lesson.GroupID)
 		if err != nil || group == nil {
 			continue
 		}
-		// Определяем семестр для даты
 		semester, err := s.semesterRepo.GetSemesterByDate(ctx, group.UniversityID, date)
 		if err != nil || semester == nil {
 			continue
 		}
-		weekType := determineWeekType(date, semester.StartDate)
-		dayOfWeek := int(date.Weekday())
-		if lesson.SpecialDate != nil && lesson.SpecialDate.Equal(date) {
+		weekType := helpers.DetermineWeekType(date, semester.StartDate)
+		dayOfWeek := helpers.Weekday(date)
+		if lesson.SpecialDate != nil && helpers.NormalizeDate(*lesson.SpecialDate).Equal(date) {
 			result = append(result, lesson)
+			continue
 		}
-		if lesson.SpecialDate == nil && lesson.DayOfWeek == dayOfWeek && matchesWeekType(lesson.WeekType, weekType) {
+		if lesson.SpecialDate == nil && lesson.DayOfWeek == dayOfWeek && helpers.MatchesWeekType(lesson.WeekType, weekType) {
 			result = append(result, lesson)
 		}
 	}
@@ -170,71 +161,75 @@ func (s *ScheduleService) GetScheduleForTeacher(ctx context.Context, teacherName
 }
 
 func (s *ScheduleService) GetScheduleForTeacherRange(ctx context.Context, teacherName string, from, to time.Time) (map[time.Time][]domain.Lesson, error) {
-	// Получаем все занятия преподавателя (по имени, может быть несколько)
+	from = helpers.NormalizeDate(from)
+	to = helpers.NormalizeDate(to)
+
 	lessons, err := s.lessonRepo.GetLessonsByTeacher(ctx, teacherName)
 	if err != nil {
 		return nil, err
 	}
 
-	// Фильтруем по дате (аналогично методу для группы)
 	result := make(map[time.Time][]domain.Lesson)
 	for date := from; !date.After(to); date = date.AddDate(0, 0, 1) {
 		result[date] = []domain.Lesson{}
 	}
 
-	date := from
-	for !date.After(to) {
-			dayOfWeek := int(date.Weekday())
-			for _, lesson := range lessons {
-				// Получаем группу, чтобы узнать universityID
-				group, err := s.groupRepo.GetGroupByID(ctx, lesson.GroupID)
-				if err != nil || group == nil {
-					continue
-				}
-				// Определяем семестр для даты
-				semester, err := s.semesterRepo.GetSemesterByDate(ctx, group.UniversityID, date)
-				if err != nil || semester == nil {
-					continue
-				}
-				weekType := determineWeekType(date, semester.StartDate)
-				if lesson.SpecialDate != nil && lesson.SpecialDate.Equal(date) {
-					result[date] = append(result[date], lesson)
-				}
-				if lesson.SpecialDate == nil && lesson.DayOfWeek == dayOfWeek && matchesWeekType(lesson.WeekType, weekType) {
-					result[date] = append(result[date], lesson)
-				}
+	if len(lessons) == 0 {
+		return result, nil
+	}
+
+	// Загружаем семестры одним батчем по уникальным group_id → university_id,
+	// чтобы избежать N+1 запросов (по одному на каждую пару занятие×дата).
+	semCache, err := s.buildSemesterCacheForLessons(ctx, lessons)
+	if err != nil {
+		return nil, err
+	}
+
+	for date := from; !date.After(to); date = date.AddDate(0, 0, 1) {
+		dayOfWeek := helpers.Weekday(date)
+		for _, lesson := range lessons {
+			sem, ok := semCache[lesson.SemesterID]
+			if !ok {
+				continue
 			}
-			date = date.AddDate(0, 0, 1)
+			weekType := helpers.DetermineWeekType(date, sem.StartDate)
+			if lesson.SpecialDate != nil && helpers.NormalizeDate(*lesson.SpecialDate).Equal(date) {
+				result[date] = append(result[date], lesson)
+				continue
+			}
+			if lesson.SpecialDate == nil && lesson.DayOfWeek == dayOfWeek && helpers.MatchesWeekType(lesson.WeekType, weekType) {
+				result[date] = append(result[date], lesson)
+			}
+		}
 	}
 	return result, nil
 }
 
 func (s *ScheduleService) GetScheduleForRoom(ctx context.Context, room string, date time.Time) ([]domain.Lesson, error) {
-	// Получаем все занятия в аудитории
+	date = helpers.NormalizeDate(date)
+
 	lessons, err := s.lessonRepo.GetLessonsByRoom(ctx, room)
 	if err != nil {
 		return nil, err
 	}
 
-	// Фильтруем по дате (аналогично методу для группы)
 	var result []domain.Lesson
 	for _, lesson := range lessons {
-		// Получаем группу, чтобы узнать universityID
 		group, err := s.groupRepo.GetGroupByID(ctx, lesson.GroupID)
 		if err != nil || group == nil {
 			continue
 		}
-		// Определяем семестр для даты
 		semester, err := s.semesterRepo.GetSemesterByDate(ctx, group.UniversityID, date)
 		if err != nil || semester == nil {
 			continue
 		}
-		weekType := determineWeekType(date, semester.StartDate)
-		dayOfWeek := int(date.Weekday())
-		if lesson.SpecialDate != nil && lesson.SpecialDate.Equal(date) {
+		weekType := helpers.DetermineWeekType(date, semester.StartDate)
+		dayOfWeek := helpers.Weekday(date)
+		if lesson.SpecialDate != nil && helpers.NormalizeDate(*lesson.SpecialDate).Equal(date) {
 			result = append(result, lesson)
+			continue
 		}
-		if lesson.SpecialDate == nil && lesson.DayOfWeek == dayOfWeek && matchesWeekType(lesson.WeekType, weekType) {
+		if lesson.SpecialDate == nil && lesson.DayOfWeek == dayOfWeek && helpers.MatchesWeekType(lesson.WeekType, weekType) {
 			result = append(result, lesson)
 		}
 	}
@@ -242,87 +237,130 @@ func (s *ScheduleService) GetScheduleForRoom(ctx context.Context, room string, d
 }
 
 func (s *ScheduleService) GetScheduleForRoomRange(ctx context.Context, room string, from, to time.Time) (map[time.Time][]domain.Lesson, error) {
-	// Получаем все занятия в аудитории
+	from = helpers.NormalizeDate(from)
+	to = helpers.NormalizeDate(to)
+
 	lessons, err := s.lessonRepo.GetLessonsByRoom(ctx, room)
 	if err != nil {
 		return nil, err
 	}
 
-	// Фильтруем по дате (аналогично методу для группы)
 	result := make(map[time.Time][]domain.Lesson)
 	for date := from; !date.After(to); date = date.AddDate(0, 0, 1) {
 		result[date] = []domain.Lesson{}
 	}
 
-	date := from
-	for !date.After(to) {
-			dayOfWeek := int(date.Weekday())
-			for _, lesson := range lessons {
-				// Получаем группу, чтобы узнать universityID
-				group, err := s.groupRepo.GetGroupByID(ctx, lesson.GroupID)
-				if err != nil || group == nil {
-					continue
-				}
-				// Определяем семестр для даты
-				semester, err := s.semesterRepo.GetSemesterByDate(ctx, group.UniversityID, date)
-				if err != nil || semester == nil {
-					continue
-				}
-				weekType := determineWeekType(date, semester.StartDate)
-				if lesson.SpecialDate != nil && lesson.SpecialDate.Equal(date) {
-					result[date] = append(result[date], lesson)
-				}
-				if lesson.SpecialDate == nil && lesson.DayOfWeek == dayOfWeek && matchesWeekType(lesson.WeekType, weekType) {
-					result[date] = append(result[date], lesson)
-				}
+	if len(lessons) == 0 {
+		return result, nil
+	}
+
+	semCache, err := s.buildSemesterCacheForLessons(ctx, lessons)
+	if err != nil {
+		return nil, err
+	}
+
+	for date := from; !date.After(to); date = date.AddDate(0, 0, 1) {
+		dayOfWeek := helpers.Weekday(date)
+		for _, lesson := range lessons {
+			sem, ok := semCache[lesson.SemesterID]
+			if !ok {
+				continue
 			}
-			date = date.AddDate(0, 0, 1)
+			weekType := helpers.DetermineWeekType(date, sem.StartDate)
+			if lesson.SpecialDate != nil && helpers.NormalizeDate(*lesson.SpecialDate).Equal(date) {
+				result[date] = append(result[date], lesson)
+				continue
+			}
+			if lesson.SpecialDate == nil && lesson.DayOfWeek == dayOfWeek && helpers.MatchesWeekType(lesson.WeekType, weekType) {
+				result[date] = append(result[date], lesson)
+			}
+		}
 	}
 	return result, nil
 }
 
-// SaveLessonsBatch сохраняет список занятий (для использования парсерами).
-// Сначала удаляет старые занятия за тот же семестр и группу (или по датам).
-func (s *ScheduleService) SaveLessonsBatch(ctx context.Context, lessons []domain.Lesson) error {
-	// Группируем по семестру и группе для очистки
-	type key struct{ semesterID, groupID string }
-	keysMap := make(map[key]bool)
+// buildSemesterCacheForLessons загружает все уникальные семестры из среза занятий
+// одним батч-запросом и возвращает map[semesterID]*Semester.
+// Устраняет N+1: вместо запроса на каждое занятие — один IN-запрос.
+func (s *ScheduleService) buildSemesterCacheForLessons(ctx context.Context, lessons []domain.Lesson) (map[string]*domain.Semester, error) {
+	semIDs := make(map[string]bool, len(lessons))
 	for _, l := range lessons {
-		keysMap[key{l.SemesterID, l.GroupID}] = true
+		semIDs[l.SemesterID] = true
+	}
+	ids := make([]string, 0, len(semIDs))
+	for id := range semIDs {
+		ids = append(ids, id)
 	}
 
-	// Удаляем старые записи (можно реализовать метод в LessonRepository: DeleteBySemesterAndGroup)
-	// Пока заглушка – для каждого ключа удаляем вручную.
-	for k := range keysMap {
-		// Здесь нужен отдельный метод репозитория, например:
-		// err := s.lessonRepo.DeleteBySemesterAndGroup(ctx, k.semesterID, k.groupID)
-		// if err != nil { return err }
-		_ = k
+	sems, err := s.semesterRepo.GetSemestersByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
 	}
 
-	// Вставляем новые
+	cache := make(map[string]*domain.Semester, len(sems))
+	for i := range sems {
+		cache[sems[i].ID] = &sems[i]
+	}
+	return cache, nil
+}
+
+// SplitMessage разбивает длинный текст на части не длиннее maxLen символов,
+// разрезая по блокам (двойной перевод строки между днями расписания).
+// Нужен для обхода лимита Telegram в 4096 символов на одно сообщение.
+func SplitMessage(text string, maxLen int) []string {
+	if len([]rune(text)) <= maxLen {
+		return []string{text}
+	}
+
+	var parts []string
+	blocks := strings.Split(text, "\n\n")
+	var current strings.Builder
+
+	for _, block := range blocks {
+		// +2 для разделителя "\n\n"
+		if current.Len() > 0 && len([]rune(current.String()))+len([]rune(block))+2 > maxLen {
+			parts = append(parts, strings.TrimRight(current.String(), "\n"))
+			current.Reset()
+		}
+		if current.Len() > 0 {
+			current.WriteString("\n\n")
+		}
+		current.WriteString(block)
+	}
+	if current.Len() > 0 {
+		parts = append(parts, current.String())
+	}
+	return parts
+}
+// Если занятие с таким ID уже существует — обновляет его поля.
+// Все занятия одной группы+семестра сначала удаляются, затем вставляются заново,
+// чтобы гарантировать отсутствие «призрачных» занятий, которых больше нет на сайте.
+func (s *ScheduleService) SaveLessonsBatch(ctx context.Context, lessons []domain.Lesson) error {
+	if len(lessons) == 0 {
+		return nil
+	}
+
+	// Собираем уникальные пары (semesterID, groupID) для предварительной очистки.
+	type key struct{ semesterID, groupID string }
+	pairs := make(map[key]bool, len(lessons))
+	for _, l := range lessons {
+		if l.SemesterID != "" && l.GroupID != "" {
+			pairs[key{l.SemesterID, l.GroupID}] = true
+		}
+	}
+
+	// Удаляем старые занятия для каждой пары, чтобы не оставалось «мёртвых» записей.
+	for k := range pairs {
+		if err := s.lessonRepo.DeleteLessonsByGroupAndSemester(ctx, k.groupID, k.semesterID); err != nil {
+			return fmt.Errorf("SaveLessonsBatch: clear old lessons: %w", err)
+		}
+	}
+
+	// Вставляем новые занятия через upsert.
 	for _, lesson := range lessons {
-		_, err := s.lessonRepo.CreateLesson(ctx, lesson)
-		if err != nil {
-			return fmt.Errorf("failed to insert lesson: %w", err)
+		if err := s.lessonRepo.UpsertLesson(ctx, lesson); err != nil {
+			return fmt.Errorf("SaveLessonsBatch: upsert lesson id=%s: %w", lesson.ID, err)
 		}
 	}
 	return nil
-}
-
-// вспомогательные функции
-func determineWeekType(date, semesterStart time.Time) domain.WeekType {
-	daysDiff := int(date.Sub(semesterStart).Hours() / 24)
-	weekNumber := daysDiff/7 + 1
-	if weekNumber%2 == 1 {
-		return domain.WeekTypeOdd
-	}
-	return domain.WeekTypeEven
-}
-
-func matchesWeekType(lessonWeekType, currentWeekType domain.WeekType) bool {
-	if lessonWeekType == domain.WeekTypeEvery {
-		return true
-	}
-	return lessonWeekType == currentWeekType
 }

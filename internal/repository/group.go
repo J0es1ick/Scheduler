@@ -89,9 +89,8 @@ func (r *GroupRepository) UpdateGroup(ctx context.Context, id string, name strin
 func (r *GroupRepository) DeleteGroup(ctx context.Context, id string) error {
 	query := `DELETE FROM groups WHERE id = $1`
 	_, err := r.db.ExecContext(ctx, query, id)
-	if err != nil {	
+	if err != nil {
 		return fmt.Errorf("failed to delete group: %w", err)
 	}
 	return nil
 }
-

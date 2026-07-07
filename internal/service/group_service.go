@@ -45,3 +45,8 @@ func (s *GroupService) FindOrCreateGroup(ctx context.Context, universityID, grou
 func (s *GroupService) GetGroupByID(ctx context.Context, groupID string) (*domain.Group, error) {
 	return s.groupRepo.GetGroupByID(ctx, groupID)
 }
+
+// GetGroupByName ищет группу по имени, не создаёт если не найдена.
+func (s *GroupService) GetGroupByName(ctx context.Context, universityID, groupName string) (*domain.Group, error) {
+	return s.groupRepo.GetGroupByName(ctx, universityID, groupName)
+}
