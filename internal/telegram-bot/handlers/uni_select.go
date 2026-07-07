@@ -1,33 +1,41 @@
 package handlers
 
 import (
-	"fmt"
-	"log"
+	"log/slog"
 
-	"github.com/J0es1ick/Scheduler/internal/domain"
-	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
-	tele "gopkg.in/telebot.v3"
+	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
+	tgbotapi "gopkg.in/telebot.v3"
 )
 
-func HandleUniversitySelect(c tele.Context) error {
-	universityID := c.Args()[0]
+func (h *Handler) HandleUniversitySelect(c tgbotapi.Context) error {
+	args := c.Args()
+	if len(args) == 0 {
+		return c.Respond(&tgbotapi.CallbackResponse{Text: "Некорректный запрос"})
+	}
+	universityID := args[0]
+	userID := c.Sender().ID
 
-	var selected *domain.University
-	for i, u := range domain.SupportedUniversities {
-		if u.ID == universityID {
-			selected = &domain.SupportedUniversities[i]
-			break
-		}
+	ctx, cancel := reqCtx()
+	defer cancel()
+
+	selected, err := h.UniversityService.GetByID(ctx, universityID)
+	if err != nil {
+		slog.Error("get university failed", "id", universityID, "err", err)
+		return c.Respond(&tgbotapi.CallbackResponse{Text: "Ошибка сервера"})
 	}
 	if selected == nil {
-		return c.Respond(&tele.CallbackResponse{Text: "Университет не найден"})
+		return c.Respond(&tgbotapi.CallbackResponse{Text: "Университет не найден"})
 	}
-	if err := c.Respond(); err != nil {
-		log.Printf("Respond error: %v", err)
+
+	_ = c.Respond()
+
+	state := &dto.UserState{
+		UniversityID: selected.ID,
+		University:   selected.Name,
+		SearchType:   dto.SearchTypeGroup,
+		Step:         "awaiting_query",
 	}
-	if err := c.Edit("Университет выбран."); err != nil {
-		log.Printf("Edit error: %v", err)
-	}
-	text := fmt.Sprintf("Университет: *%s*\n\nВыберите нужный раздел в меню ниже.", selected.Name)
-	return c.Send(text, &tele.SendOptions{ParseMode: tele.ModeMarkdown}, keyboards.MainMenu())
+	h.StateManager.Set(userID, state)
+
+	return c.Edit("Введите номер группы (пример: 3/147):")
 }

@@ -75,4 +75,3 @@ func (r *ParseLogRepository) DeleteParseLog(ctx context.Context, id string) erro
 	}
 	return nil
 }
-

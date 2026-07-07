@@ -1,4 +1,3 @@
-// internal/service/subscription_service.go
 package service
 
 import (
@@ -17,48 +16,19 @@ func NewSubscriptionService(subRepo *repository.SubscriptionRepository) *Subscri
 	return &SubscriptionService{subRepo: subRepo}
 }
 
-// Subscribe подписывает пользователя на объект (group, teacher, room).
 func (s *SubscriptionService) Subscribe(ctx context.Context, userID, objectID, objectType string) error {
-	// Проверяем, нет ли уже такой подписки
-	subs, err := s.subRepo.GetSubscriptionsByUserID(ctx, userID)
-	if err != nil {
-		return err
-	}
-	for _, sub := range subs {
-		if sub.ObjectID == objectID && sub.ObjectType == objectType {
-			return nil // уже подписан
-		}
-	}
-
 	id := uuid.New().String()
-	_, err = s.subRepo.CreateSubscription(ctx, id, userID, objectID, objectType)
-	return err
+	return s.subRepo.UpsertSubscription(ctx, id, userID, objectID, objectType)
 }
 
-// Unsubscribe отписывает пользователя от объекта.
 func (s *SubscriptionService) Unsubscribe(ctx context.Context, userID, objectID, objectType string) error {
-	subs, err := s.subRepo.GetSubscriptionsByUserID(ctx, userID)
-	if err != nil {
-		return err
-	}
-	for _, sub := range subs {
-		if sub.ObjectID == objectID && sub.ObjectType == objectType {
-			return s.subRepo.DeleteSubscription(ctx, sub.ID)
-		}
-	}
-	return nil // не найдено – считаем успехом
+	return s.subRepo.DeleteSubscriptionByObject(ctx, userID, objectID, objectType)
 }
 
-// GetUserSubscriptions возвращает все подписки пользователя.
 func (s *SubscriptionService) GetUserSubscriptions(ctx context.Context, userID string) ([]domain.Subscription, error) {
 	return s.subRepo.GetSubscriptionsByUserID(ctx, userID)
 }
 
-// GetSubscribers возвращает список ID пользователей, подписанных на объект.
-func (s *SubscriptionService) GetSubscribers(ctx context.Context, objectID string, objectType string) ([]string, error) {
-	userIDs, err := s.subRepo.GetUserIDsByObject(ctx, objectID, objectType)
-	if err != nil {
-		return nil, err
-	}
-	return userIDs, nil
+func (s *SubscriptionService) GetSubscribers(ctx context.Context, objectID, objectType string) ([]string, error) {
+	return s.subRepo.GetUserIDsByObject(ctx, objectID, objectType)
 }
