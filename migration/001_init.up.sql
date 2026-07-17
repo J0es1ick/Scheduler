@@ -1,5 +1,5 @@
 CREATE TYPE week_type AS ENUM ('every', 'odd', 'even', 'date');
-CREATE TYPE lesson_type AS ENUM ('lecture', 'practice', 'lab', 'seminar');
+CREATE TYPE lesson_type AS ENUM ('lecture', 'practice', 'lab', 'seminar', 'exam', 'credit', 'consultation');
 CREATE TYPE subscription_object_type AS ENUM ('group', 'teacher', 'room');
 CREATE TYPE parse_log_status AS ENUM ('running', 'success', 'failed');
 
@@ -47,10 +47,16 @@ CREATE TABLE lessons (
     room          TEXT NOT NULL DEFAULT '',
     group_id      TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     subgroup      INT DEFAULT 0,
+    valid_from    DATE,
+    valid_to      DATE,
     updated_at    TIMESTAMP NOT NULL DEFAULT NOW(),
-    CHECK (
+    CONSTRAINT lessons_schedule_shape_check CHECK (
         (week_type = 'date' AND special_date IS NOT NULL AND day_of_week IS NULL) OR
-        (week_type != 'date' AND special_date IS NULL AND day_of_week BETWEEN 1 AND 6)
+        (week_type != 'date' AND special_date IS NULL AND day_of_week BETWEEN 1 AND 7)
+    ),
+    CONSTRAINT lessons_validity_check CHECK (
+        (valid_from IS NULL AND valid_to IS NULL) OR
+        (valid_from IS NOT NULL AND valid_to IS NOT NULL AND valid_from <= valid_to)
     )
 );
 
@@ -110,6 +116,7 @@ CREATE INDEX idx_lessons_teacher ON lessons(teacher);
 CREATE INDEX idx_lessons_room ON lessons(room);
 CREATE INDEX idx_lessons_date_range ON lessons(special_date) WHERE special_date IS NOT NULL;
 CREATE INDEX idx_lessons_week_day ON lessons(day_of_week, week_type) WHERE week_type != 'date';
+CREATE INDEX idx_lessons_validity ON lessons(valid_from, valid_to);
 
 CREATE INDEX idx_subscriptions_user_id ON subscriptions(user_id);
 CREATE INDEX idx_subscriptions_object ON subscriptions(object_id, object_type);

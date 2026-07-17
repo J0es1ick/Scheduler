@@ -1,23 +1,20 @@
-// Package isuct реализует SourceAdapter для ИГХТУ (ИГХТУ, Иваново).
-//
-// Механизм: обычная HTML-форма POST /student/schedule (Drupal).
-// Никакого отдельного JSON API нет — расписание возвращается прямо внутри
-// HTML страницы в виде таблицы <table class="schedule">.
-//
-// FetchGroups  — GET автокомплит-endpoint, возвращает JSON-список групп.
-// FetchSchedule — POST формы с idgrid=<внутренний_id> → парсинг таблицы.
 package isuct
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
@@ -26,137 +23,138 @@ import (
 )
 
 const (
-	// UniversityID — slug, совпадающий с domain.University.ID в БД.
 	UniversityID = "isuct"
 
-	baseURL      = "https://www.isuct.ru"
-	scheduleURL  = baseURL + "/student/schedule"
-	autocomplURL = baseURL + "/index.php"
+	defaultBaseURL = "https://www.isuct.ru"
+	httpTimeout    = 45 * time.Second
 
-	httpTimeout = 30 * time.Second
+	autocompleteLimit       = 15
+	autocompleteConcurrency = 4
+	maxHTTPAttempts         = 3
+	maxScheduleAttempts     = 3
 )
-
-// Маппинг CSS-класса ячейки → domain.LessonType
-var cssToLessonType = map[string]domain.LessonType{
-	"type-lk":   domain.LessonTypeLecture,
-	"type-pz":   domain.LessonTypePractice,
-	"type-lab":  domain.LessonTypeLab,
-	"type-sem":  domain.LessonTypeSeminar,
-	"type-kons": domain.LessonTypeSeminar, // консультация → семинар как ближайший тип
-}
-
-// Порядок столбцов в таблице: после ячеек "нед" и "Время" идут Пн=1 … Сб=6.
-var colToDayOfWeek = []int{1, 2, 3, 4, 5, 6}
 
 var (
-	reDates   = regexp.MustCompile(`с\s+(\d{2}\.\d{2}\.\d{4})\s+по\s+(\d{2}\.\d{2}\.\d{4})`)
-	reTime    = regexp.MustCompile(`^(\d{2}:\d{2})-(\d{2}:\d{2})$`)
-	reTeacher = regexp.MustCompile(`\s+([А-ЯЁ][а-яёА-ЯЁ]+(?:\s+[А-ЯЁ]\.[А-ЯЁ]\.)+(?:,\s*[А-ЯЁ][а-яёА-ЯЁ]+(?:\s+[А-ЯЁ]\.[А-ЯЁ]\.)+)*)$`)
+	cssToLessonType = map[string]domain.LessonType{
+		"type-lk":   domain.LessonTypeLecture,
+		"type-pz":   domain.LessonTypePractice,
+		"type-lab":  domain.LessonTypeLab,
+		"type-sem":  domain.LessonTypeSeminar,
+		"type-kons": domain.LessonTypeSeminar,
+	}
+	colToDayOfWeek = []int{1, 2, 3, 4, 5, 6}
+
+	reDates   = regexp.MustCompile(`(?i)с\s+(\d{2}\.\d{2}\.\d{4})\s+по\s+(\d{2}\.\d{2}\.\d{4})`)
+	reTime    = regexp.MustCompile(`^\s*(\d{2}:\d{2})\s*[-–—]\s*(\d{2}:\d{2})\s*$`)
+	reTeacher = regexp.MustCompile(`\s+([А-ЯЁ][а-яёА-ЯЁ-]+(?:\s+[А-ЯЁ]\.[А-ЯЁ]\.)+(?:,\s*[А-ЯЁ][а-яёА-ЯЁ-]+(?:\s+[А-ЯЁ]\.[А-ЯЁ]\.)+)*)$`)
 	reSpaces  = regexp.MustCompile(`\s{2,}`)
 	reTags    = regexp.MustCompile(`<[^>]+>`)
+
+	typeAbbrevs = []string{" пр.з. ", " лаб. ", " лк. ", " сем. ", " конс. "}
+
+	errEmptyAJAXResponse = errors.New("isuct: empty AJAX response")
 )
 
-// typeAbbrevs — разделители типа занятия внутри текста ячейки.
-// Порядок важен: более длинные проверяются первыми.
-var typeAbbrevs = []string{" пр.з. ", " лаб. ", " лк. ", " сем. ", " конс. "}
-
-// ─────────────────────────────────────────────────────────────
-// Adapter
-// ─────────────────────────────────────────────────────────────
-
-// Adapter реализует scrapper.SourceAdapter для ИГХТУ.
 type Adapter struct {
-	client     *http.Client
-	semesterID string
+	client          *http.Client
+	baseURL         string
+	scheduleURL     string
+	autocompleteURL string
+	ajaxURL         string
+
+	mu          sync.RWMutex
+	semesterID  string
+	groupNames  map[string]string
+	formBuildID string
 }
 
 var _ scrapper.SourceAdapter = (*Adapter)(nil)
 
-// New создаёт адаптер. semesterID — UUID семестра из таблицы semesters,
-// к которому будут привязаны занятия.
 func New(semesterID string) *Adapter {
-	return &Adapter{
-		semesterID: semesterID,
-		client: &http.Client{
-			Timeout: httpTimeout,
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				if len(via) >= 5 {
-					return fmt.Errorf("isuct: too many redirects")
-				}
-				return nil
-			},
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{
+		Timeout: httpTimeout,
+		Jar:     jar,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("isuct: too many redirects")
+			}
+			return nil
 		},
 	}
+	return newAdapter(defaultBaseURL, semesterID, client)
 }
 
-func (a *Adapter) SetSemesterID(id string) { a.semesterID = id }
-func (a *Adapter) Name() string            { return "ИГХТУ" }
-func (a *Adapter) UniversityID() string    { return UniversityID }
-
-// ─────────────────────────────────────────────────────────────
-// FetchGroups
-// ─────────────────────────────────────────────────────────────
-
-// autocompleteItem — одна запись из JSON-ответа Drupal autocomplete.
-// Drupal возвращает объект {"<label>": "<value>"} либо массив
-// [{value, label}] — сайт ИГХТУ использует формат объекта.
-type autocompleteItem struct {
-	Value string `json:"value"`
-	Label string `json:"label"`
+func newAdapter(baseURL, semesterID string, client *http.Client) *Adapter {
+	baseURL = strings.TrimRight(baseURL, "/")
+	return &Adapter{
+		client:          client,
+		baseURL:         baseURL,
+		scheduleURL:     baseURL + "/student/schedule",
+		autocompleteURL: baseURL + "/index.php?q=student/schedule/currentstudentsgroups",
+		ajaxURL:         baseURL + "/system/ajax",
+		semesterID:      semesterID,
+		groupNames:      make(map[string]string),
+	}
 }
 
-// FetchGroups запрашивает полный список групп через autocomplete-endpoint.
-// Передаём пустой term — Drupal возвращает все записи (или первые N).
-// Если сервер ограничивает выдачу, используйте FetchGroupsByPrefix.
+func (a *Adapter) SetSemesterID(id string) {
+	a.mu.Lock()
+	a.semesterID = id
+	a.mu.Unlock()
+}
+
+func (a *Adapter) Name() string         { return "ИГХТУ" }
+func (a *Adapter) UniversityID() string { return UniversityID }
+
 func (a *Adapter) FetchGroups(ctx context.Context) ([]domain.Group, error) {
-	return a.FetchGroupsByPrefix(ctx, "")
-}
-
-// FetchGroupsByPrefix возвращает группы, имя которых начинается на prefix.
-// Полезно для постепенной загрузки большого справочника.
-func (a *Adapter) FetchGroupsByPrefix(ctx context.Context, prefix string) ([]domain.Group, error) {
-	params := url.Values{}
-	params.Set("q", "student/schedule/currentstudentsgroups")
-	params.Set("term", prefix)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		autocomplURL+"?"+params.Encode(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("isuct FetchGroups: build request: %w", err)
+	frontier := make([]string, 10)
+	for i := range frontier {
+		frontier[i] = fmt.Sprint(i)
 	}
-	setCommonHeaders(req)
-	req.Header.Set("X-Requested-With", "XMLHttpRequest")
-
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("isuct FetchGroups: http: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("isuct FetchGroups: HTTP %d", resp.StatusCode)
+	seenPrefixes := make(map[string]bool, 128)
+	for _, prefix := range frontier {
+		seenPrefixes[prefix] = true
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("isuct FetchGroups: read body: %w", err)
+	discovered := make(map[string]autocompleteItem, 256)
+	for len(frontier) > 0 {
+		results := a.fetchPrefixBatch(ctx, frontier)
+		next := make([]string, 0)
+		for _, result := range results {
+			if result.err != nil {
+				return nil, fmt.Errorf("isuct FetchGroups prefix=%q: %w", result.prefix, result.err)
+			}
+			for _, item := range result.items {
+				if item.Value != "" && item.Label != "" {
+					discovered[item.Value] = item
+				}
+			}
+			if len(result.items) < autocompleteLimit {
+				continue
+			}
+			for _, suffix := range "0123456789/" {
+				child := result.prefix + string(suffix)
+				if !seenPrefixes[child] {
+					seenPrefixes[child] = true
+					next = append(next, child)
+				}
+			}
+		}
+		frontier = next
 	}
 
-	// Drupal 7 autocomplete: {"Название": "id|Название", ...}
-	// или массив [{value, label}] — пробуем оба варианта.
-	groups, err := parseAutocompleteResponse(body)
-	if err != nil {
-		return nil, fmt.Errorf("isuct FetchGroups: parse JSON: %w", err)
+	if len(discovered) == 0 {
+		return nil, errors.New("isuct FetchGroups: autocomplete returned no groups")
 	}
 
 	now := time.Now()
-	result := make([]domain.Group, 0, len(groups))
-	for _, item := range groups {
-		if item.Value == "" || item.Label == "" {
-			continue
-		}
-		result = append(result, domain.Group{
-			ID:           groupID(item.Value),
+	groups := make([]domain.Group, 0, len(discovered))
+	groupNames := make(map[string]string, len(discovered))
+	for extID, item := range discovered {
+		groupNames[extID] = item.Label
+		groups = append(groups, domain.Group{
+			ID:           groupID(extID),
 			UniversityID: UniversityID,
 			Name:         item.Label,
 			IsActive:     true,
@@ -164,103 +162,205 @@ func (a *Adapter) FetchGroupsByPrefix(ctx context.Context, prefix string) ([]dom
 			UpdatedAt:    now,
 		})
 	}
-	return result, nil
+	sort.Slice(groups, func(i, j int) bool { return groups[i].Name < groups[j].Name })
+
+	a.mu.Lock()
+	a.groupNames = groupNames
+	a.mu.Unlock()
+	return groups, nil
 }
 
-// parseAutocompleteResponse обрабатывает оба формата Drupal autocomplete.
+type prefixResult struct {
+	prefix string
+	items  []autocompleteItem
+	err    error
+}
+
+func (a *Adapter) fetchPrefixBatch(ctx context.Context, prefixes []string) []prefixResult {
+	results := make([]prefixResult, len(prefixes))
+	sem := make(chan struct{}, autocompleteConcurrency)
+	var wg sync.WaitGroup
+	for i, prefix := range prefixes {
+		i, prefix := i, prefix
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				results[i] = prefixResult{prefix: prefix, err: ctx.Err()}
+				return
+			}
+			items, err := a.fetchGroupsByPrefix(ctx, prefix)
+			results[i] = prefixResult{prefix: prefix, items: items, err: err}
+		}()
+	}
+	wg.Wait()
+	return results
+}
+
+func (a *Adapter) fetchGroupsByPrefix(ctx context.Context, prefix string) ([]autocompleteItem, error) {
+	form := url.Values{"search": []string{prefix}}
+	body, err := a.do(ctx, http.MethodPost, a.autocompleteURL, form, func(req *http.Request) {
+		req.Header.Set("X-Requested-With", "XMLHttpRequest")
+		req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
+	})
+	if err != nil {
+		return nil, err
+	}
+	items, err := parseAutocompleteResponse(body)
+	if err != nil {
+		return nil, fmt.Errorf("parse autocomplete JSON: %w", err)
+	}
+	return items, nil
+}
+
+type autocompleteItem struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
 func parseAutocompleteResponse(body []byte) ([]autocompleteItem, error) {
-	// Попытка 1: массив [{value, label}]
-	var arr []autocompleteItem
-	if err := json.Unmarshal(body, &arr); err == nil && len(arr) > 0 {
-		return arr, nil
+	body = bytes.TrimPrefix(bytes.TrimSpace(body), []byte{0xEF, 0xBB, 0xBF})
+	if len(body) == 0 {
+		return nil, errors.New("empty response")
 	}
 
-	// Попытка 2: объект {"label": "value|label", ...} (Drupal 7)
+	var arr []autocompleteItem
+	if err := json.Unmarshal(body, &arr); err == nil && arr != nil {
+		result := make([]autocompleteItem, 0, len(arr))
+		for _, item := range arr {
+			if normalized, ok := normalizeAutocompleteItem(item.Label, item.Value); ok {
+				result = append(result, normalized)
+			}
+		}
+		return result, nil
+	}
+
 	var obj map[string]string
 	if err := json.Unmarshal(body, &obj); err != nil {
 		return nil, err
 	}
 	result := make([]autocompleteItem, 0, len(obj))
-	for label, value := range obj {
-		// Drupal иногда кодирует value как "extID|DisplayText"
-		extID := value
-		if idx := strings.Index(value, "|"); idx >= 0 {
-			extID = value[:idx]
+	for key, value := range obj {
+		if item, ok := normalizeAutocompleteItem(value, key); ok {
+			result = append(result, item)
 		}
-		result = append(result, autocompleteItem{Value: extID, Label: label})
 	}
 	return result, nil
 }
 
-// ─────────────────────────────────────────────────────────────
-// FetchSchedule
-// ─────────────────────────────────────────────────────────────
+func normalizeAutocompleteItem(label, value string) (autocompleteItem, bool) {
+	label = strings.TrimSpace(label)
+	value = strings.TrimSpace(value)
+	if idx := strings.LastIndex(value, "|"); idx >= 0 {
+		left := strings.TrimSpace(value[:idx])
+		right := strings.TrimSpace(value[idx+1:])
+		if label == "" || strings.Contains(label, "|") {
+			label = left
+		}
+		if right != "" {
+			return autocompleteItem{Value: right, Label: label}, label != ""
+		}
+	}
+	if idx := strings.Index(label, "|"); idx >= 0 {
+		left := strings.TrimSpace(label[:idx])
+		right := strings.TrimSpace(label[idx+1:])
+		return autocompleteItem{Value: left, Label: right}, left != "" && right != ""
+	}
+	if label != "" && value != "" {
+		return autocompleteItem{Value: value, Label: label}, true
+	}
+	return autocompleteItem{}, false
+}
 
-// FetchSchedule загружает и парсит расписание группы.
-// groupID здесь имеет вид "isuct:group:<extID>" (значение поля idgrid на сайте).
 func (a *Adapter) FetchSchedule(ctx context.Context, gid string) ([]domain.Lesson, error) {
 	extID := extractExtID(gid)
 	if extID == "" {
-		return nil, fmt.Errorf("isuct FetchSchedule: невалидный groupID=%q", gid)
+		return nil, fmt.Errorf("isuct FetchSchedule: invalid groupID=%q", gid)
 	}
 
-	// Шаг 1: получаем начальную страницу для form_build_id и form_id.
-	formBuildID, formID, err := a.fetchFormTokens(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("isuct FetchSchedule: get form tokens: %w", err)
+	a.mu.RLock()
+	groupName := a.groupNames[extID]
+	semesterID := a.semesterID
+	a.mu.RUnlock()
+	if groupName == "" {
+		groupName = extID
 	}
 
-	// Шаг 2: POST формы с idgrid=extID.
-	htmlBody, err := a.postScheduleForm(ctx, extID, formBuildID, formID)
-	if err != nil {
-		return nil, fmt.Errorf("isuct FetchSchedule group=%s: POST: %w", extID, err)
+	var lastErr error
+	for attempt := 1; attempt <= maxScheduleAttempts; attempt++ {
+		formBuildID, err := a.getFormBuildID(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("isuct FetchSchedule: get form token: %w", err)
+		}
+		fragment, err := a.postScheduleAJAX(ctx, extID, groupName, formBuildID)
+		if err == nil {
+			lessons, parseErr := parseScheduleTable(fragment, gid, semesterID)
+			if parseErr == nil {
+				return lessons, nil
+			}
+			err = fmt.Errorf("parse schedule table: %w", parseErr)
+		}
+		lastErr = err
+		if errors.Is(err, errEmptyAJAXResponse) {
+			a.invalidateFormBuildID(formBuildID)
+		}
+		if attempt < maxScheduleAttempts {
+			select {
+			case <-time.After(time.Duration(attempt) * 400 * time.Millisecond):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
 	}
-
-	// Шаг 3: парсинг HTML-таблицы расписания.
-	lessons, err := parseScheduleTable(htmlBody, gid, a.semesterID)
-	if err != nil {
-		return nil, fmt.Errorf("isuct FetchSchedule group=%s: parse: %w", extID, err)
-	}
-	return lessons, nil
+	return nil, fmt.Errorf("isuct FetchSchedule group=%s: %w", groupName, lastErr)
 }
 
-// fetchFormTokens загружает страницу расписания и извлекает скрытые поля
-// form_build_id и form_id, без которых Drupal отвергает POST.
-func (a *Adapter) fetchFormTokens(ctx context.Context) (formBuildID, formID string, err error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, scheduleURL, nil)
+func (a *Adapter) getFormBuildID(ctx context.Context) (string, error) {
+	a.mu.RLock()
+	token := a.formBuildID
+	a.mu.RUnlock()
+	if token != "" {
+		return token, nil
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.formBuildID != "" {
+		return a.formBuildID, nil
+	}
+	body, err := a.do(ctx, http.MethodGet, a.scheduleURL, nil, nil)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
-	setCommonHeaders(req)
-
-	resp, err := a.client.Do(req)
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	form := doc.Find("#studschedule-form")
+	token, _ = form.Find(`input[name="form_build_id"]`).Attr("value")
+	formID, _ := form.Find(`input[name="form_id"]`).Attr("value")
+	if token == "" || formID != "studschedule_form" {
+		return "", errors.New("schedule form token not found")
 	}
-
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
-	if err != nil {
-		return "", "", err
-	}
-
-	formBuildID, _ = doc.Find(`input[name="form_build_id"]`).Attr("value")
-	formID, _ = doc.Find(`input[name="form_id"]`).Attr("value")
-	if formBuildID == "" || formID == "" {
-		return "", "", fmt.Errorf("form tokens not found on page")
-	}
-	return formBuildID, formID, nil
+	a.formBuildID = token
+	return token, nil
 }
 
-// postScheduleForm отправляет форму и возвращает HTML-ответ.
-func (a *Adapter) postScheduleForm(ctx context.Context, extID, formBuildID, formID string) (string, error) {
+func (a *Adapter) invalidateFormBuildID(token string) {
+	a.mu.Lock()
+	if a.formBuildID == token {
+		a.formBuildID = ""
+	}
+	a.mu.Unlock()
+}
+
+func (a *Adapter) postScheduleAJAX(ctx context.Context, extID, groupName, formBuildID string) (string, error) {
 	form := url.Values{}
 	form.Set("type", "currentstudentsgroups")
-	form.Set("idgr", "")    // текстовое поле — оставляем пустым, главное idgrid
+	form.Set("idgr", groupName)
 	form.Set("idaud", "")
 	form.Set("idprep", "")
 	form.Set("idprepid", "")
@@ -268,271 +368,255 @@ func (a *Adapter) postScheduleForm(ctx context.Context, extID, formBuildID, form
 	form.Set("idgrid", extID)
 	form.Set("op", "Показать расписание")
 	form.Set("form_build_id", formBuildID)
-	form.Set("form_id", formID)
+	form.Set("form_id", "studschedule_form")
+	form.Set("_triggering_element_name", "op")
+	form.Set("_triggering_element_value", "Показать расписание")
+	form.Set("ajax_page_state[theme]", "isuct")
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, scheduleURL,
-		strings.NewReader(form.Encode()))
+	body, err := a.do(ctx, http.MethodPost, a.ajaxURL, form, func(req *http.Request) {
+		req.Header.Set("X-Requested-With", "XMLHttpRequest")
+		req.Header.Set("Referer", a.scheduleURL)
+		req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
+	})
 	if err != nil {
 		return "", err
 	}
-	setCommonHeaders(req)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Referer", scheduleURL)
-
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	return string(body), nil
+	return parseAJAXScheduleFragment(body)
 }
 
-// ─────────────────────────────────────────────────────────────
-// parseScheduleTable
-// ─────────────────────────────────────────────────────────────
+type ajaxCommand struct {
+	Command string `json:"command"`
+	Data    string `json:"data"`
+}
 
-// parseScheduleTable разбирает HTML-страницу/фрагмент и возвращает занятия.
-//
-// Структура таблицы:
-//   - Строка 0: шапка (нед | Время | Занятия colspan=6)
-//   - Строка 1: заголовки дней (Понедельник … Суббота)
-//   - Блок недели: первая строка содержит <td rowspan=N> с номером недели,
-//     затем <td class="time"> и 6 ячеек дней. Следующие N-1 строк — только
-//     ячейка времени + 6 ячеек (без ячейки номера недели).
-//   - Блок 1 → нечётная неделя (WeekTypeOdd)
-//   - Блок 2 → чётная неделя (WeekTypeEven)
+func parseAJAXScheduleFragment(body []byte) (string, error) {
+	body = bytes.TrimPrefix(bytes.TrimSpace(body), []byte{0xEF, 0xBB, 0xBF})
+	var commands []ajaxCommand
+	if err := json.Unmarshal(body, &commands); err != nil {
+		return "", fmt.Errorf("decode AJAX JSON: %w", err)
+	}
+	if len(commands) == 0 {
+		return "", errEmptyAJAXResponse
+	}
+	for _, command := range commands {
+		if command.Command != "insert" {
+			continue
+		}
+		if strings.Contains(command.Data, `class="schedule"`) {
+			return command.Data, nil
+		}
+		if strings.Contains(command.Data, "form-ajax-node-content") {
+			return "", nil
+		}
+	}
+	return "", errors.New("schedule fragment not found in AJAX response")
+}
+
 func parseScheduleTable(htmlBody, gid, semesterID string) ([]domain.Lesson, error) {
+	if strings.TrimSpace(htmlBody) == "" {
+		return nil, nil
+	}
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(htmlBody))
 	if err != nil {
 		return nil, err
 	}
-
-	table := doc.Find("table.schedule")
+	table := doc.Find("table.schedule").First()
 	if table.Length() == 0 {
-		return nil, fmt.Errorf("таблица расписания не найдена в HTML")
+		return nil, errors.New("schedule table not found in HTML")
+	}
+	rows := table.Find("tr")
+	if rows.Length() <= 2 {
+		return nil, nil
 	}
 
-	rows := table.Find("tbody tr")
-	headerRows := 2 // первые две строки — шапка
-
-	// Определяем структуру блоков недель.
-	// Первый блок с rowspan → нечётная, второй → чётная.
-	weekSeq := []domain.WeekType{domain.WeekTypeOdd, domain.WeekTypeEven}
-	type block struct {
-		weekType domain.WeekType
-		rowCount int
-	}
-	var blocks []block
-	weekIdx := 0
-
-	rows.Slice(headerRows, rows.Length()).Each(func(_ int, row *goquery.Selection) {
-		cells := row.Find("td")
-		first := cells.First()
-		if rs, ok := first.Attr("rowspan"); ok {
-			n := 0
-			fmt.Sscanf(rs, "%d", &n)
-			if n > 0 && weekIdx < len(weekSeq) {
-				blocks = append(blocks, block{weekType: weekSeq[weekIdx], rowCount: n})
-				weekIdx++
-			}
-		}
-	})
-
-	now := time.Now()
 	var lessons []domain.Lesson
+	currentWeekType := domain.WeekTypeOdd
+	now := time.Now()
+	rows.Each(func(rowIndex int, row *goquery.Selection) {
+		if rowIndex < 2 {
+			return
+		}
+		cells := row.ChildrenFiltered("td")
+		if cells.Length() == 0 {
+			return
+		}
 
-	rowIdx := headerRows
-	for _, blk := range blocks {
-		for r := 0; r < blk.rowCount; r++ {
-			row := rows.Eq(rowIdx)
-			rowIdx++
-
-			var timeStart, timeEnd string
-			var dayCells []*goquery.Selection
-
-			row.Find("td").Each(func(_ int, cell *goquery.Selection) {
-				switch {
-				case cell.HasClass("week"):
-					// ячейка номера недели — пропускаем
-				case cell.HasClass("time"):
-					tm := reTime.FindStringSubmatch(strings.TrimSpace(cell.Text()))
-					if tm != nil {
-						timeStart, timeEnd = tm[1], tm[2]
-					}
-				default:
-					dayCells = append(dayCells, cell)
-				}
-			})
-
-			if timeStart == "" || timeEnd == "" {
+		cellOffset := 0
+		first := cells.Eq(0)
+		if _, ok := first.Attr("rowspan"); ok && !first.HasClass("time") {
+			switch strings.TrimSpace(first.Text()) {
+			case "1":
+				currentWeekType = domain.WeekTypeOdd
+			case "2":
+				currentWeekType = domain.WeekTypeEven
+			}
+			cellOffset = 1
+		}
+		if cells.Length() <= cellOffset || !cells.Eq(cellOffset).HasClass("time") {
+			return
+		}
+		tm := reTime.FindStringSubmatch(strings.TrimSpace(cells.Eq(cellOffset).Text()))
+		if tm == nil {
+			return
+		}
+		timeStart, timeEnd := tm[1], tm[2]
+		for col := 0; col < len(colToDayOfWeek); col++ {
+			cellIndex := cellOffset + 1 + col
+			if cellIndex >= cells.Length() {
+				break
+			}
+			cell := cells.Eq(cellIndex)
+			cssClass := lessonCSSClass(cell)
+			if cssClass == "" {
 				continue
 			}
-
-			for colIdx, cell := range dayCells {
-				if colIdx >= 6 {
-					break
-				}
-				dayOfWeek := colToDayOfWeek[colIdx]
-
-				cssClass := lessonCSSClass(cell)
-				if cssClass == "" {
-					continue // пустая ячейка
-				}
-
-				rawText := cellText(cell)
-				// dateFrom/dateTo из сайта — диапазон действия пары в семестре.
-				// В domain.Lesson они не хранятся отдельно: принадлежность семестру
-				// определяется через SemesterID, чётность — через WeekType (odd/even).
-				// Поля сохранены в parseCell для возможного будущего использования
-				// (например, фильтрация пар с особым диапазоном дат).
-				subj, teacher, room, _, _, ok := parseCell(rawText, cssClass)
-				if !ok {
-					continue
-				}
-
-				lessonType := cssToLessonType[cssClass]
-				if lessonType == "" {
-					lessonType = domain.LessonTypeLecture
-				}
-
-				l := domain.Lesson{
-					ID:           lessonStableID(gid, dayOfWeek, timeStart, subj, teacher, string(blk.weekType)),
-					UniversityID: UniversityID,
-					SemesterID:   semesterID,
-					DayOfWeek:    dayOfWeek,
-					SpecialDate:  nil,
-					TimeStart:    timeStart,
-					TimeEnd:      timeEnd,
-					WeekType:     blk.weekType,
-					Subject:      subj,
-					Type:         lessonType,
-					Teacher:      teacher,
-					Room:         room,
-					GroupID:      gid,
-					Subgroup:     0,
-					UpdatedAt:    now,
-				}
-				lessons = append(lessons, l)
+			subject, teacher, room, validFrom, validTo, ok := parseCell(cellText(cell), cssClass)
+			if !ok || subject == "" {
+				continue
 			}
+			lessonType := cssToLessonType[cssClass]
+			from, to := validFrom, validTo
+			lessons = append(lessons, domain.Lesson{
+				ID:           lessonStableID(gid, colToDayOfWeek[col], timeStart, subject, teacher, room, string(currentWeekType), validFrom, validTo),
+				UniversityID: UniversityID,
+				SemesterID:   semesterID,
+				DayOfWeek:    colToDayOfWeek[col],
+				TimeStart:    timeStart,
+				TimeEnd:      timeEnd,
+				WeekType:     currentWeekType,
+				Subject:      subject,
+				Type:         lessonType,
+				Teacher:      teacher,
+				Room:         room,
+				GroupID:      gid,
+				Subgroup:     0,
+				ValidFrom:    &from,
+				ValidTo:      &to,
+				UpdatedAt:    now,
+			})
 		}
-	}
-
+	})
 	return lessons, nil
 }
 
-// ─────────────────────────────────────────────────────────────
-// Helpers: parseCell, cellText, lessonCSSClass
-// ─────────────────────────────────────────────────────────────
-
-// parseCell разбирает текст непустой ячейки занятия.
-// Формат: "Предмет Преподаватель тип. Аудитория \nс DD.MM.YYYY по DD.MM.YYYY"
-func parseCell(rawText, cssClass string) (subject, teacher, room string, dateFrom, dateTo time.Time, ok bool) {
+func parseCell(rawText, _ string) (subject, teacher, room string, validFrom, validTo time.Time, ok bool) {
 	text := reSpaces.ReplaceAllString(strings.TrimSpace(rawText), " ")
-
 	dm := reDates.FindStringSubmatch(text)
 	if dm == nil {
 		return
 	}
 	var err error
-	if dateFrom, err = time.Parse("02.01.2006", dm[1]); err != nil {
+	if validFrom, err = time.Parse("02.01.2006", dm[1]); err != nil {
 		return
 	}
-	if dateTo, err = time.Parse("02.01.2006", dm[2]); err != nil {
+	if validTo, err = time.Parse("02.01.2006", dm[2]); err != nil {
 		return
 	}
+	dateIndex := reDates.FindStringIndex(text)
+	mainPart := strings.TrimSpace(text[:dateIndex[0]])
 
-	mainPart := strings.TrimSpace(text[:reDates.FindStringIndex(text)[0]])
-
-	// Ищем последний разделитель типа занятия
-	splitIdx := -1
-	splitLen := 0
-	for _, abbrev := range typeAbbrevs {
-		idx := strings.LastIndex(mainPart, abbrev)
-		if idx > splitIdx {
-			splitIdx = idx
-			splitLen = len(abbrev)
+	splitIndex, splitLength := -1, 0
+	for _, abbreviation := range typeAbbrevs {
+		if index := strings.LastIndex(mainPart, abbreviation); index > splitIndex {
+			splitIndex, splitLength = index, len(abbreviation)
 		}
 	}
-	if splitIdx < 0 {
-		// Нет разделителя типа — предмет целиком, остальное пусто
-		subject = strings.TrimSpace(mainPart)
-		ok = true
-		return
+	if splitIndex < 0 {
+		return strings.TrimSpace(mainPart), "", "", validFrom, validTo, true
 	}
 
-	beforeType := mainPart[:splitIdx]
-	room = strings.TrimSpace(mainPart[splitIdx+splitLen:])
-
-	// Разделяем предмет и преподавателя
-	tm := reTeacher.FindStringSubmatchIndex(beforeType)
-	if tm != nil {
-		subject = strings.TrimSpace(beforeType[:tm[0]])
-		teacher = strings.TrimSpace(beforeType[tm[2]:tm[3]])
+	beforeType := mainPart[:splitIndex]
+	room = strings.TrimSpace(mainPart[splitIndex+splitLength:])
+	if match := reTeacher.FindStringSubmatchIndex(beforeType); match != nil {
+		subject = strings.TrimSpace(beforeType[:match[0]])
+		teacher = strings.TrimSpace(beforeType[match[2]:match[3]])
 	} else {
 		subject = strings.TrimSpace(beforeType)
 	}
-
-	ok = true
-	return
+	return subject, teacher, room, validFrom, validTo, true
 }
 
-// cellText возвращает текст ячейки, восстанавливая <br> как перевод строки.
 func cellText(cell *goquery.Selection) string {
 	html, _ := cell.Html()
-	text := strings.ReplaceAll(html, "<br/>", "\n")
-	text = strings.ReplaceAll(text, "<br>", "\n")
-	text = reTags.ReplaceAllString(text, "")
-	return strings.TrimSpace(text)
+	html = strings.ReplaceAll(html, "<br/>", "\n")
+	html = strings.ReplaceAll(html, "<br />", "\n")
+	html = strings.ReplaceAll(html, "<br>", "\n")
+	return strings.TrimSpace(reTags.ReplaceAllString(html, ""))
 }
 
-// lessonCSSClass возвращает CSS-класс типа занятия или "" для пустой ячейки.
 func lessonCSSClass(cell *goquery.Selection) string {
-	for cls := range cssToLessonType {
-		if cell.HasClass(cls) {
-			return cls
+	for class := range cssToLessonType {
+		if cell.HasClass(class) {
+			return class
 		}
 	}
 	return ""
 }
 
-// ─────────────────────────────────────────────────────────────
-// ID helpers
-// ─────────────────────────────────────────────────────────────
+func groupID(extID string) string { return fmt.Sprintf("%s:group:%s", UniversityID, extID) }
 
-// groupID строит составной ID группы из внешнего idgrid сайта.
-func groupID(extID string) string {
-	return fmt.Sprintf("%s:group:%s", UniversityID, extID)
-}
-
-// extractExtID достаёт числовой idgrid из "isuct:group:<extID>".
 func extractExtID(gid string) string {
 	parts := strings.SplitN(gid, ":", 3)
-	if len(parts) == 3 {
+	if len(parts) == 3 && parts[0] == UniversityID && parts[1] == "group" {
 		return parts[2]
 	}
 	return ""
 }
 
-// lessonStableID генерирует детерминированный ID занятия.
-// Повторный парсинг той же группы даёт те же ID → безопасный upsert.
-func lessonStableID(gid string, dayOfWeek int, timeStart, subject, teacher, weekType string) string {
-	key := fmt.Sprintf("%s|%d|%s|%s|%s|%s", gid, dayOfWeek, timeStart, subject, teacher, weekType)
-	h := sha256.Sum256([]byte(key))
-	return fmt.Sprintf("%x", h[:8])
+func lessonStableID(gid string, day int, start, subject, teacher, room, weekType string, validFrom, validTo time.Time) string {
+	key := fmt.Sprintf("%s|%d|%s|%s|%s|%s|%s|%s|%s", gid, day, start, subject, teacher, room, weekType, validFrom.Format("2006-01-02"), validTo.Format("2006-01-02"))
+	hash := sha256.Sum256([]byte(key))
+	return fmt.Sprintf("%x", hash[:12])
+}
+
+func (a *Adapter) do(ctx context.Context, method, requestURL string, form url.Values, configure func(*http.Request)) ([]byte, error) {
+	var lastErr error
+	for attempt := 1; attempt <= maxHTTPAttempts; attempt++ {
+		var body io.Reader
+		if form != nil {
+			body = strings.NewReader(form.Encode())
+		}
+		req, err := http.NewRequestWithContext(ctx, method, requestURL, body)
+		if err != nil {
+			return nil, err
+		}
+		setCommonHeaders(req)
+		if form != nil {
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+		}
+		if configure != nil {
+			configure(req)
+		}
+		resp, err := a.client.Do(req)
+		if err == nil {
+			responseBody, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if readErr != nil {
+				err = readErr
+			} else if resp.StatusCode == http.StatusOK {
+				return responseBody, nil
+			} else {
+				err = fmt.Errorf("HTTP %d", resp.StatusCode)
+				if resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
+					return nil, err
+				}
+			}
+		}
+		lastErr = err
+		if attempt == maxHTTPAttempts {
+			break
+		}
+		delay := time.Duration(attempt) * 300 * time.Millisecond
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return nil, lastErr
 }
 
 func setCommonHeaders(req *http.Request) {
-	req.Header.Set("User-Agent",
-		"Mozilla/5.0 (compatible; ScheduleBot/1.0; +https://github.com/J0es1ick/Scheduler)")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,*/*")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; ScheduleBot/1.0; +https://github.com/J0es1ick/Scheduler)")
 	req.Header.Set("Accept-Language", "ru-RU,ru;q=0.9")
 }

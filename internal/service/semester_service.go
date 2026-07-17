@@ -28,3 +28,7 @@ func (s *SemesterService) CreateSemester(ctx context.Context, universityID, name
 	_, err := s.semesterRepo.CreateSemester(ctx, id, universityID, name, startDate, endDate)
 	return err
 }
+
+func (s *SemesterService) UpsertCurrentSnapshot(ctx context.Context, id, universityID string, startDate, endDate time.Time) error {
+	return s.semesterRepo.UpsertSemester(ctx, id, universityID, "Актуальное расписание (авто)", startDate, endDate)
+}

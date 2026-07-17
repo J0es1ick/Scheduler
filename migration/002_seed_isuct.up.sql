@@ -17,24 +17,11 @@ ON CONFLICT (id) DO UPDATE SET
     is_active    = EXCLUDED.is_active,
     updated_at   = NOW();
 
--- Текущий семестр (весна 2026).
--- Скорректируй start_date/end_date если они изменятся.
--- Нечётная неделя = 1-я от start_date, чётная = 2-я и т.д.
-INSERT INTO semesters (id, university_id, name, start_date, end_date)
-VALUES (
-    'isuct-2026-spring',
-    'isuct',
-    'Весенний семестр 2025–2026',
-    '2026-02-02',   -- первый учебный день (понедельник, I неделя)
-    '2026-05-31'
-)
-ON CONFLICT (id) DO UPDATE SET
-    name       = EXCLUDED.name,
-    start_date = EXCLUDED.start_date,
-    end_date   = EXCLUDED.end_date;
+-- Семестр заранее не задаётся: парсер создаёт и обновляет техническую запись
+-- isuct-current по диапазонам дат, полученным непосредственно с сайта.
 
 -- Источник данных для парсера.
--- update_interval = 86400 сек = 1 раз в сутки (достаточно, расписание меняется редко).
+-- update_interval = 3600 сек = 1 раз в час.
 -- last_run_at = NULL → воркер запустит парсинг при первом же тике.
 INSERT INTO data_sources (id, university_id, adapter_type, config, update_interval)
 VALUES (
@@ -42,6 +29,6 @@ VALUES (
     'isuct',
     'isuct',
     '',
-    86400
+    3600
 )
 ON CONFLICT (id) DO NOTHING;

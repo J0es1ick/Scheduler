@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
@@ -12,24 +14,17 @@ import (
 	"github.com/google/uuid"
 )
 
-// ParserService управляет жизненным циклом адаптеров:
-// регистрирует их, запускает парсинг и сохраняет результаты в БД.
-//
-// Схема работы:
-//  1. RegisterAdapter вызывается один раз при старте (в main.go).
-//  2. RunDataSource запускается планировщиком периодически.
-//  3. RunDataSource → резолвим текущий семестр → FetchGroups → upsert групп в БД.
-//  4. RunDataSource → FetchSchedule для каждой группы → SaveLessonsBatch.
+const scheduleFetchConcurrency = 3
+
 type ParserService struct {
 	dataSourceRepo *repository.DataSourceRepository
 	parseLogRepo   *repository.ParseLogRepository
 	groupRepo      *repository.GroupRepository
 	scheduleSvc    *ScheduleService
 	semesterSvc    *SemesterService
-	adapters       map[string]scrapper.SourceAdapter // adapterType → адаптер
+	adapters       map[string]scrapper.SourceAdapter
 }
 
-// NewParserService создаёт ParserService.
 func NewParserService(
 	dataSourceRepo *repository.DataSourceRepository,
 	parseLogRepo *repository.ParseLogRepository,
@@ -47,15 +42,11 @@ func NewParserService(
 	}
 }
 
-// RegisterAdapter регистрирует адаптер по типу источника.
-// adapterType должен совпадать с полем DataSource.AdapterType в БД.
 func (s *ParserService) RegisterAdapter(adapterType string, adapter scrapper.SourceAdapter) {
 	s.adapters[adapterType] = adapter
 }
 
-// RunDataSource запускает полный цикл парсинга для одного источника данных.
 func (s *ParserService) RunDataSource(ctx context.Context, dataSourceID string) (int, error) {
-	// 1. Получаем источник данных.
 	ds, err := s.dataSourceRepo.GetDataSourceByID(ctx, dataSourceID)
 	if err != nil {
 		return 0, fmt.Errorf("parser: get data source: %w", err)
@@ -63,139 +54,179 @@ func (s *ParserService) RunDataSource(ctx context.Context, dataSourceID string) 
 	if ds == nil {
 		return 0, fmt.Errorf("parser: data source %s not found", dataSourceID)
 	}
-
-	// 2. Находим адаптер.
 	adapter, ok := s.adapters[ds.AdapterType]
 	if !ok {
 		return 0, fmt.Errorf("parser: no adapter registered for type=%q", ds.AdapterType)
 	}
 
-	// 3. Динамически резолвим текущий семестр.
-	// Делаем это при каждом запуске, а не один раз при старте приложения —
-	// так адаптер всегда получает актуальный semesterID даже после смены семестра.
-	semester, err := s.semesterSvc.GetCurrentSemester(ctx, adapter.UniversityID(), time.Now())
-	if err != nil {
-		return 0, fmt.Errorf("parser: get current semester for %s: %w", adapter.UniversityID(), err)
-	}
-	if semester == nil {
-		return 0, fmt.Errorf("parser: нет активного семестра для %s — добавьте запись в таблицу semesters", adapter.UniversityID())
-	}
-	adapter.SetSemesterID(semester.ID)
-	slog.Info("parser: semester resolved", "adapter", adapter.Name(), "semester", semester.Name)
+	semesterID := adapter.UniversityID() + "-current"
+	adapter.SetSemesterID(semesterID)
 
-	// 4. Создаём лог.
 	logID := uuid.New().String()
 	if _, err = s.parseLogRepo.CreateParseLog(ctx, logID, ds.ID, "running", 0, ""); err != nil {
 		return 0, fmt.Errorf("parser: create parse log: %w", err)
 	}
-
-	start := time.Now()
-	totalLessons := 0
-
-	// 5. Загружаем группы.
-	groups, err := adapter.FetchGroups(ctx)
-	if err != nil {
-		_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "failed", 0, err.Error())
-		_ = s.markDataSourceError(ctx, ds, err.Error())
-		return 0, fmt.Errorf("parser: FetchGroups [%s]: %w", adapter.Name(), err)
+	startedAt := time.Now()
+	fail := func(records int, runErr error) (int, error) {
+		message := runErr.Error()
+		_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "failed", records, message)
+		_ = s.markDataSourceError(ctx, ds, message)
+		return records, runErr
 	}
 
-	// Upsert групп в БД.
-	for _, g := range groups {
-		if upsertErr := s.upsertGroup(ctx, g); upsertErr != nil {
-			slog.Warn("parser: upsert group failed",
-				"group", g.Name, "err", upsertErr)
+	groups, err := adapter.FetchGroups(ctx)
+	if err != nil {
+		return fail(0, fmt.Errorf("parser: FetchGroups [%s]: %w", adapter.Name(), err))
+	}
+	if len(groups) == 0 {
+		return fail(0, fmt.Errorf("parser: FetchGroups [%s] returned no groups", adapter.Name()))
+	}
+
+	activeIDs := make([]string, 0, len(groups))
+	for _, group := range groups {
+		if err = s.upsertGroup(ctx, group); err != nil {
+			return fail(0, fmt.Errorf("parser: sync group %s: %w", group.Name, err))
 		}
+		activeIDs = append(activeIDs, group.ID)
+	}
+	if err = s.groupRepo.DeactivateGroupsExcept(ctx, adapter.UniversityID(), activeIDs); err != nil {
+		return fail(0, fmt.Errorf("parser: deactivate stale groups: %w", err))
 	}
 	slog.Info("parser: groups synced", "adapter", adapter.Name(), "count", len(groups))
 
-	// 6. Загружаем расписание для каждой группы.
-	for _, g := range groups {
-		select {
-		case <-ctx.Done():
-			_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "failed", totalLessons, "context cancelled")
-			return totalLessons, ctx.Err()
-		default:
-		}
-
-		lessons, fetchErr := adapter.FetchSchedule(ctx, g.ID)
-		if fetchErr != nil {
-			slog.Warn("parser: FetchSchedule failed",
-				"adapter", adapter.Name(), "group", g.Name, "err", fetchErr)
+	results := s.fetchSchedules(ctx, adapter, groups)
+	var fetchErrors []error
+	minDate, maxDate := time.Time{}, time.Time{}
+	successfulGroups := 0
+	for _, result := range results {
+		if result.err != nil {
+			fetchErrors = append(fetchErrors, fmt.Errorf("group %s: %w", result.group.Name, result.err))
 			continue
 		}
-
-		if saveErr := s.scheduleSvc.SaveLessonsBatch(ctx, lessons); saveErr != nil {
-			slog.Warn("parser: SaveLessonsBatch failed",
-				"adapter", adapter.Name(), "group", g.Name, "err", saveErr)
-			continue
+		successfulGroups++
+		for _, lesson := range result.lessons {
+			if lesson.ValidFrom != nil && (minDate.IsZero() || lesson.ValidFrom.Before(minDate)) {
+				minDate = *lesson.ValidFrom
+			}
+			if lesson.ValidTo != nil && (maxDate.IsZero() || lesson.ValidTo.After(maxDate)) {
+				maxDate = *lesson.ValidTo
+			}
 		}
-		totalLessons += len(lessons)
+	}
+	if successfulGroups == 0 {
+		return fail(0, fmt.Errorf("parser: all %d schedule requests failed: %w", len(groups), errors.Join(fetchErrors...)))
+	}
+	if minDate.IsZero() {
+		minDate = time.Now()
+	}
+	if maxDate.IsZero() {
+		maxDate = minDate
+	}
+	if err = s.semesterSvc.UpsertCurrentSnapshot(ctx, semesterID, adapter.UniversityID(), minDate, maxDate); err != nil {
+		return fail(0, fmt.Errorf("parser: publish current semester metadata: %w", err))
 	}
 
-	// 7. Обновляем лог и источник данных.
-	elapsed := time.Since(start)
-	slog.Info("parser: data source run complete",
-		"adapter", adapter.Name(), "lessons", totalLessons, "elapsed", elapsed)
+	totalLessons := 0
+	var saveErrors []error
+	for _, result := range results {
+		if result.err != nil {
+			continue // keep the previous schedule for a group that could not be fetched
+		}
+		for i := range result.lessons {
+			result.lessons[i].SemesterID = semesterID
+		}
+		if err = s.scheduleSvc.ReplaceGroupLessons(ctx, result.group.ID, result.lessons); err != nil {
+			saveErrors = append(saveErrors, fmt.Errorf("group %s: %w", result.group.Name, err))
+			continue
+		}
+		totalLessons += len(result.lessons)
+	}
 
+	combinedErrors := append(fetchErrors, saveErrors...)
+	if len(combinedErrors) > 0 {
+		runErr := fmt.Errorf("parser: incomplete snapshot (%d fetch errors, %d save errors): %w", len(fetchErrors), len(saveErrors), errors.Join(combinedErrors...))
+		return fail(totalLessons, runErr)
+	}
+
+	slog.Info("parser: data source run complete",
+		"adapter", adapter.Name(),
+		"groups", len(groups),
+		"lessons", totalLessons,
+		"elapsed", time.Since(startedAt),
+	)
 	_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "success", totalLessons, "")
 	_ = s.markDataSourceSuccess(ctx, ds)
-
 	return totalLessons, nil
 }
 
-// RunAllActiveSources запускает парсинг для всех источников, которым пришло время обновиться.
+type groupScheduleResult struct {
+	group   domain.Group
+	lessons []domain.Lesson
+	err     error
+}
+
+func (s *ParserService) fetchSchedules(ctx context.Context, adapter scrapper.SourceAdapter, groups []domain.Group) []groupScheduleResult {
+	results := make([]groupScheduleResult, len(groups))
+	sem := make(chan struct{}, scheduleFetchConcurrency)
+	var wg sync.WaitGroup
+	for i, group := range groups {
+		i, group := i, group
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				results[i] = groupScheduleResult{group: group, err: ctx.Err()}
+				return
+			}
+			lessons, err := adapter.FetchSchedule(ctx, group.ID)
+			results[i] = groupScheduleResult{group: group, lessons: lessons, err: err}
+		}()
+	}
+	wg.Wait()
+	return results
+}
+
 func (s *ParserService) RunAllActiveSources(ctx context.Context) error {
 	sources, err := s.dataSourceRepo.ListActiveDataSources(ctx)
 	if err != nil {
 		return fmt.Errorf("parser: list active sources: %w", err)
 	}
-
-	if len(sources) == 0 {
-		slog.Debug("parser: no active sources to run")
-		return nil
-	}
-
-	var lastErr error
-	for _, ds := range sources {
-		if _, err := s.RunDataSource(ctx, ds.ID); err != nil {
-			slog.Error("parser: RunDataSource error",
-				"dataSourceID", ds.ID,
-				"adapterType", ds.AdapterType,
-				"err", err)
-			lastErr = err
+	var runErrors []error
+	for _, dataSource := range sources {
+		if _, err = s.RunDataSource(ctx, dataSource.ID); err != nil {
+			slog.Error("parser: source run failed", "dataSourceID", dataSource.ID, "err", err)
+			runErrors = append(runErrors, err)
 		}
 	}
-	return lastErr
+	return errors.Join(runErrors...)
 }
 
-// ---------------------------------------------------------------------------
-// internal helpers
-// ---------------------------------------------------------------------------
-
-func (s *ParserService) upsertGroup(ctx context.Context, g domain.Group) error {
-	existing, err := s.groupRepo.GetGroupByID(ctx, g.ID)
+func (s *ParserService) upsertGroup(ctx context.Context, group domain.Group) error {
+	existing, err := s.groupRepo.GetGroupByID(ctx, group.ID)
 	if err != nil {
 		return err
 	}
 	if existing == nil {
-		_, err = s.groupRepo.CreateGroup(ctx, g.ID, g.UniversityID, g.Name, g.IsActive)
+		_, err = s.groupRepo.CreateGroup(ctx, group.ID, group.UniversityID, group.Name, true)
 		return err
 	}
-	if existing.Name != g.Name {
-		return s.groupRepo.UpdateGroup(ctx, g.ID, g.Name, g.IsActive)
+	if existing.Name != group.Name || !existing.IsActive {
+		return s.groupRepo.UpdateGroup(ctx, group.ID, group.Name, true)
 	}
 	return nil
 }
 
-func (s *ParserService) markDataSourceError(ctx context.Context, ds *domain.DataSource, errMsg string) error {
-	ds.LastRunAt = time.Now()
-	ds.LastError = errMsg
-	return s.dataSourceRepo.UpdateDataSource(ctx, ds)
+func (s *ParserService) markDataSourceError(ctx context.Context, dataSource *domain.DataSource, message string) error {
+	dataSource.LastRunAt = time.Now()
+	dataSource.LastError = message
+	return s.dataSourceRepo.UpdateDataSource(ctx, dataSource)
 }
 
-func (s *ParserService) markDataSourceSuccess(ctx context.Context, ds *domain.DataSource) error {
-	ds.LastRunAt = time.Now()
-	ds.LastError = ""
-	return s.dataSourceRepo.UpdateDataSource(ctx, ds)
+func (s *ParserService) markDataSourceSuccess(ctx context.Context, dataSource *domain.DataSource) error {
+	dataSource.LastRunAt = time.Now()
+	dataSource.LastError = ""
+	return s.dataSourceRepo.UpdateDataSource(ctx, dataSource)
 }

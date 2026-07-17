@@ -20,7 +20,10 @@ func (h *Handler) HandleChange(c tgbotapi.Context) error {
 	}
 	remove := &tgbotapi.ReplyMarkup{RemoveKeyboard: true}
 	_ = c.Send("Смена группы.", remove)
-	return c.Send("Введите номер группы (пример: 3/147):")
+	if state == nil {
+		return c.Send("Сначала выберите университет: /start")
+	}
+	return c.Send(groupInputPrompt(state.UniversityID))
 }
 
 func (h *Handler) HandleSettings(c tgbotapi.Context) error {
@@ -66,5 +69,5 @@ func (h *Handler) HandleChangeGroup(c tgbotapi.Context) error {
 
 	remove := &tgbotapi.ReplyMarkup{RemoveKeyboard: true}
 	_ = c.Send("Смена группы.", remove)
-	return c.Send("Введите номер новой группы (пример: 3/147):")
+	return c.Send(groupInputPrompt(state.UniversityID))
 }

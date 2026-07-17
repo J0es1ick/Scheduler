@@ -3,14 +3,12 @@ package handlers
 import (
 	"fmt"
 	"log/slog"
-	"regexp"
+	"strings"
 
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	tgbotapi "gopkg.in/telebot.v3"
 )
-
-var groupRegexp = regexp.MustCompile(`^\d+/\d+$`)
 
 func (h *Handler) HandleSearchTypeSelect(c tgbotapi.Context) error {
 	userID := c.Sender().ID
@@ -35,7 +33,7 @@ func (h *Handler) HandleSearchTypeSelect(c tgbotapi.Context) error {
 	var prompt string
 	switch searchType {
 	case dto.SearchTypeGroup:
-		prompt = "Введите номер группы (пример: 3/147):"
+		prompt = groupInputPrompt(state.UniversityID)
 	case dto.SearchTypeTeacher:
 		prompt = "Введите преподавателя (пример: Сизова О.В.):"
 	case dto.SearchTypeRoom:
@@ -57,21 +55,24 @@ func (h *Handler) HandleTextInput(c tgbotapi.Context) error {
 		return c.Send("Неизвестная команда.\n\nСписок команд: /help")
 	}
 
-	input := c.Text()
+	input := strings.TrimSpace(c.Text())
 
 	switch state.Step {
 	case "awaiting_query":
-		if !groupRegexp.MatchString(input) {
-			return c.Send("Неверный формат. Пример: 3/147")
+		if input == "" {
+			return c.Send(groupInputPrompt(state.UniversityID))
 		}
 
 		ctx, cancel := reqCtx()
 		defer cancel()
 
-		group, err := h.GroupService.FindOrCreateGroup(ctx, state.UniversityID, input, true)
+		group, err := h.GroupService.GetGroupByName(ctx, state.UniversityID, input)
 		if err != nil {
-			slog.Error("find or create group failed", "group", input, "err", err)
+			slog.Error("find group failed", "group", input, "err", err)
 			return c.Send("Ошибка при поиске группы. Попробуйте позже.")
+		}
+		if group == nil {
+			return c.Send("Такой группы нет в актуальном расписании выбранного университета. Проверьте номер или дождитесь завершения первого обновления данных.")
 		}
 
 		state.GroupID = group.ID
@@ -100,4 +101,11 @@ func (h *Handler) HandleTextInput(c tgbotapi.Context) error {
 	default:
 		return c.Send("Неизвестная команда.\n\nСписок команд: /help")
 	}
+}
+
+func groupInputPrompt(universityID string) string {
+	if universityID == "ispu" {
+		return "Введите группу ИГЭУ в формате «курс-номер». Например: 1-40, 1-10м или 2-10."
+	}
+	return "Введите группу ИГХТУ в формате с сайта. Например: 3/147."
 }
