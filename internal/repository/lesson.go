@@ -23,8 +23,8 @@ func (r *LessonRepository) UpsertLesson(ctx context.Context, lesson domain.Lesso
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO lessons
 			(id, university_id, semester_id, day_of_week, special_date, time_start, time_end,
-			 week_type, subject, type, teacher, room, group_id, subgroup, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+			 week_type, subject, type, teacher, room, group_id, subgroup, valid_from, valid_to, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 		ON CONFLICT (id) DO UPDATE SET
 			semester_id   = EXCLUDED.semester_id,
 			day_of_week   = EXCLUDED.day_of_week,
@@ -37,13 +37,15 @@ func (r *LessonRepository) UpsertLesson(ctx context.Context, lesson domain.Lesso
 			teacher       = EXCLUDED.teacher,
 			room          = EXCLUDED.room,
 			subgroup      = EXCLUDED.subgroup,
+			valid_from    = EXCLUDED.valid_from,
+			valid_to      = EXCLUDED.valid_to,
 			updated_at    = EXCLUDED.updated_at`,
 		lesson.ID, lesson.UniversityID, lesson.SemesterID,
-		lesson.DayOfWeek, lesson.SpecialDate,
+		lessonDayOfWeekDB(lesson), lesson.SpecialDate,
 		lesson.TimeStart, lesson.TimeEnd,
 		lesson.WeekType, lesson.Subject, lesson.Type,
 		lesson.Teacher, lesson.Room,
-		lesson.GroupID, lesson.Subgroup, lesson.UpdatedAt,
+		lesson.GroupID, lesson.Subgroup, lesson.ValidFrom, lesson.ValidTo, lesson.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert lesson %s: %w", lesson.ID, err)
@@ -145,11 +147,13 @@ func (r *LessonRepository) UpdateLesson(ctx context.Context, lesson domain.Lesso
 		UPDATE lessons SET
 			university_id=$1, semester_id=$2, day_of_week=$3, special_date=$4,
 			time_start=$5, time_end=$6, week_type=$7, subject=$8, type=$9,
-			teacher=$10, room=$11, group_id=$12, subgroup=$13, updated_at=$14
-		WHERE id=$15`,
-		lesson.UniversityID, lesson.SemesterID, lesson.DayOfWeek, lesson.SpecialDate,
+			teacher=$10, room=$11, group_id=$12, subgroup=$13,
+			valid_from=$14, valid_to=$15, updated_at=$16
+		WHERE id=$17`,
+		lesson.UniversityID, lesson.SemesterID, lessonDayOfWeekDB(lesson), lesson.SpecialDate,
 		lesson.TimeStart, lesson.TimeEnd, lesson.WeekType, lesson.Subject, lesson.Type,
-		lesson.Teacher, lesson.Room, lesson.GroupID, lesson.Subgroup, time.Now(),
+		lesson.Teacher, lesson.Room, lesson.GroupID, lesson.Subgroup,
+		lesson.ValidFrom, lesson.ValidTo, time.Now(),
 		lesson.ID,
 	)
 	if err != nil {
@@ -176,9 +180,51 @@ func (r *LessonRepository) DeleteLessonsByGroupAndSemester(ctx context.Context, 
 	return nil
 }
 
-const lessonCols = `id, university_id, semester_id, day_of_week, special_date,
-	time_start, time_end, week_type, subject, type, teacher, room, group_id, subgroup, updated_at`
+func (r *LessonRepository) ReplaceLessonsForGroup(ctx context.Context, groupID string, lessons []domain.Lesson) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("replace lessons group=%s: begin: %w", groupID, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err = tx.ExecContext(ctx, `DELETE FROM lessons WHERE group_id = $1`, groupID); err != nil {
+		return fmt.Errorf("replace lessons group=%s: delete old: %w", groupID, err)
+	}
+
+	const query = `
+		INSERT INTO lessons
+			(id, university_id, semester_id, day_of_week, special_date, time_start, time_end,
+			 week_type, subject, type, teacher, room, group_id, subgroup, valid_from, valid_to, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`
+	for _, lesson := range lessons {
+		if _, err = tx.ExecContext(ctx, query,
+			lesson.ID, lesson.UniversityID, lesson.SemesterID,
+			lessonDayOfWeekDB(lesson), lesson.SpecialDate,
+			lesson.TimeStart, lesson.TimeEnd,
+			lesson.WeekType, lesson.Subject, lesson.Type,
+			lesson.Teacher, lesson.Room, lesson.GroupID, lesson.Subgroup,
+			lesson.ValidFrom, lesson.ValidTo, lesson.UpdatedAt,
+		); err != nil {
+			return fmt.Errorf("replace lessons group=%s: insert %s: %w", groupID, lesson.ID, err)
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("replace lessons group=%s: commit: %w", groupID, err)
+	}
+	return nil
+}
+
+const lessonCols = `id, university_id, semester_id, COALESCE(day_of_week, 0) AS day_of_week, special_date,
+	time_start, time_end, week_type, subject, type, teacher, room, group_id, subgroup,
+	valid_from, valid_to, updated_at`
 
 const lessonSelect = `SELECT ` + lessonCols + ` FROM lessons`
+
+func lessonDayOfWeekDB(lesson domain.Lesson) any {
+	if lesson.WeekType == domain.WeekTypeDate || lesson.SpecialDate != nil {
+		return nil
+	}
+	return lesson.DayOfWeek
+}
 
 var _ = strings.Join

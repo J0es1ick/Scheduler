@@ -11,6 +11,7 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/config"
 	"github.com/J0es1ick/Scheduler/internal/database"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	"github.com/J0es1ick/Scheduler/internal/scrapper/ispu"
 	"github.com/J0es1ick/Scheduler/internal/scrapper/isuct"
 	"github.com/J0es1ick/Scheduler/internal/service"
 	botpkg "github.com/J0es1ick/Scheduler/internal/telegram-bot"
@@ -41,6 +42,10 @@ func main() {
 	db, err := database.NewDatabase(cfg)
 	if err != nil {
 		slog.Error("database connect failed", "err", err)
+		os.Exit(1)
+	}
+	if err := database.ApplyMigrations(context.Background(), db.DB); err != nil {
+		slog.Error("database migrations failed", "err", err)
 		os.Exit(1)
 	}
 	defer func() {
@@ -82,6 +87,9 @@ func main() {
 	isuctAdapter := isuct.New("")
 	parserService.RegisterAdapter(isuct.UniversityID, isuctAdapter)
 	slog.Info("adapter registered", "type", isuct.UniversityID)
+	ispuAdapter := ispu.New("")
+	parserService.RegisterAdapter(ispu.UniversityID, ispuAdapter)
+	slog.Info("adapter registered", "type", ispu.UniversityID)
 
 	// --- Telegram ---
 	stateManager := state.NewManager()

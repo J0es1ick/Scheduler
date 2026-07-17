@@ -72,7 +72,7 @@ func (w *ParserWorker) run(ctx context.Context) {
 func (w *ParserWorker) tick(ctx context.Context) {
 	// Используем отдельный timeout для одного прохода, чтобы зависший HTTP-запрос
 	// не удерживал воркер вечно. Таймаут должен быть больше httpTimeout адаптера.
-	runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	runCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 
 	if err := w.parserSvc.RunAllActiveSources(runCtx); err != nil {

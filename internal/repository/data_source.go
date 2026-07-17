@@ -78,7 +78,8 @@ func (r *DataSourceRepository) ListActiveDataSources(ctx context.Context) ([]*do
 		        COALESCE(last_error, '') AS last_error,
 		        created_at, updated_at
 		 FROM data_sources
-		 WHERE last_run_at IS NULL
+		 WHERE COALESCE(last_error, '') <> ''
+		    OR last_run_at IS NULL
 		    OR last_run_at + make_interval(secs => update_interval) < NOW()`)
 	if err != nil {
 		return nil, fmt.Errorf("list active data sources: %w", err)

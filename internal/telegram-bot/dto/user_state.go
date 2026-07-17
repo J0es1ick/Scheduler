@@ -7,7 +7,7 @@ type UserState struct {
 	University   string // человекочитаемое имя для отображения
 	SearchType   SearchType
 	Query        string // основной запрос (группа/ФИО) для регулярного расписания
-	GroupID      string // ID группы в БД (заполняется после FindOrCreateGroup)
+	GroupID      string // ID группы из актуального справочника парсера
 	SearchQuery  string // временный запрос для команды /search
 	Step         string // "awaiting_role" | "awaiting_query" | "awaiting_search_query" | "done"
 }

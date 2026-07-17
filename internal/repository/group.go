@@ -45,7 +45,8 @@ func (r *GroupRepository) GetGroupByID(ctx context.Context, id string) (*domain.
 
 func (r *GroupRepository) GetGroupsByUniversityID(ctx context.Context, universityID string) ([]domain.Group, error) {
 	var groups []domain.Group
-	query := `SELECT id, university_id, name, is_active, created_at, updated_at FROM groups WHERE university_id = $1`
+	query := `SELECT id, university_id, name, is_active, created_at, updated_at
+		FROM groups WHERE university_id = $1 AND is_active = TRUE ORDER BY name`
 	err := r.db.SelectContext(ctx, &groups, query, universityID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get groups by university id: %w", err)
@@ -55,7 +56,8 @@ func (r *GroupRepository) GetGroupsByUniversityID(ctx context.Context, universit
 
 func (r *GroupRepository) GetGroupByName(ctx context.Context, universityID string, name string) (*domain.Group, error) {
 	var group domain.Group
-	query := `SELECT id, university_id, name, is_active, created_at, updated_at FROM groups WHERE university_id = $1 AND name = $2`
+	query := `SELECT id, university_id, name, is_active, created_at, updated_at
+		FROM groups WHERE university_id = $1 AND name = $2 AND is_active = TRUE`
 	err := r.db.GetContext(ctx, &group, query, universityID, name)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -91,6 +93,29 @@ func (r *GroupRepository) DeleteGroup(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete group: %w", err)
+	}
+	return nil
+}
+
+func (r *GroupRepository) DeactivateGroupsExcept(ctx context.Context, universityID string, activeIDs []string) error {
+	if len(activeIDs) == 0 {
+		_, err := r.db.ExecContext(ctx,
+			`UPDATE groups SET is_active = FALSE, updated_at = NOW() WHERE university_id = $1`,
+			universityID,
+		)
+		return err
+	}
+	query, args, err := sqlx.In(
+		`UPDATE groups SET is_active = FALSE, updated_at = NOW()
+		 WHERE university_id = ? AND id NOT IN (?) AND is_active = TRUE`,
+		universityID, activeIDs,
+	)
+	if err != nil {
+		return fmt.Errorf("build deactivate groups query: %w", err)
+	}
+	query = r.db.Rebind(query)
+	if _, err = r.db.ExecContext(ctx, query, args...); err != nil {
+		return fmt.Errorf("deactivate stale groups for %s: %w", universityID, err)
 	}
 	return nil
 }

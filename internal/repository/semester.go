@@ -29,6 +29,23 @@ func (r *SemesterRepository) CreateSemester(ctx context.Context, id, universityI
 	return id, nil
 }
 
+func (r *SemesterRepository) UpsertSemester(ctx context.Context, id, universityID, name string, startDate, endDate time.Time) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO semesters (id, university_id, name, start_date, end_date)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (id) DO UPDATE SET
+			university_id = EXCLUDED.university_id,
+			name = EXCLUDED.name,
+			start_date = EXCLUDED.start_date,
+			end_date = EXCLUDED.end_date`,
+		id, universityID, name, startDate, endDate,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert semester %s: %w", id, err)
+	}
+	return nil
+}
+
 func (r *SemesterRepository) GetSemesterByID(ctx context.Context, id string) (*domain.Semester, error) {
 	var sem domain.Semester
 	err := r.db.GetContext(ctx, &sem,

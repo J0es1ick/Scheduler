@@ -73,10 +73,12 @@ func WeekDaySelector() *tgbotapi.ReplyMarkup {
 	btnThu := menu.Data("Четверг", "select_weekday", "4")
 	btnFri := menu.Data("Пятница", "select_weekday", "5")
 	btnSat := menu.Data("Суббота", "select_weekday", "6")
+	btnSun := menu.Data("Воскресенье", "select_weekday", "7")
 
 	menu.Inline(
 		menu.Row(btnMon, btnTue, btnWed),
 		menu.Row(btnThu, btnFri, btnSat),
+		menu.Row(btnSun),
 	)
 
 	return menu

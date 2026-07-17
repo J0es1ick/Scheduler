@@ -1,2 +1,4 @@
 .env
 /migrations
+.gocache/
+.runtime/

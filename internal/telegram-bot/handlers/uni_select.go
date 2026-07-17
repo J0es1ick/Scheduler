@@ -37,5 +37,5 @@ func (h *Handler) HandleUniversitySelect(c tgbotapi.Context) error {
 	}
 	h.StateManager.Set(userID, state)
 
-	return c.Edit("Введите номер группы (пример: 3/147):")
+	return c.Edit(groupInputPrompt(selected.ID))
 }

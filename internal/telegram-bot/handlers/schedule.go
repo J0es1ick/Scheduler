@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/service"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
@@ -32,14 +33,37 @@ func formatDaySchedule(day dto.DaySchedule) string {
 	var sb strings.Builder
 	sb.WriteString(header)
 	for _, l := range day.Lessons {
+		subgroup := ""
+		if l.Subgroup > 0 {
+			subgroup = fmt.Sprintf(", подгруппа %d", l.Subgroup)
+		}
 		sb.WriteString(fmt.Sprintf(
-			"  %s–%s | %s (%s)\n  %s | %s\n\n",
+			"  %s–%s | %s (%s%s)\n  %s | %s\n\n",
 			l.TimeStart, l.TimeEnd,
-			l.Subject, l.Type,
+			l.Subject, lessonTypeLabel(l.Type), subgroup,
 			l.Teacher, l.Room,
 		))
 	}
 	return sb.String()
+}
+
+func lessonTypeLabel(lessonType domain.LessonType) string {
+	switch lessonType {
+	case domain.LessonTypeLecture:
+		return "лекция"
+	case domain.LessonTypePractice:
+		return "практика"
+	case domain.LessonTypeLab:
+		return "лабораторная"
+	case domain.LessonTypeExam:
+		return "экзамен"
+	case domain.LessonTypeCredit:
+		return "зачёт"
+	case domain.LessonTypeConsultation:
+		return "консультация"
+	default:
+		return "семинар"
+	}
 }
 
 // sendDays форматирует расписание и отправляет его, разбивая на части
@@ -93,7 +117,7 @@ func (h *Handler) checkState(c tgbotapi.Context) *dto.UserState {
 		h.StateManager.Set(c.Sender().ID, state)
 		remove := &tgbotapi.ReplyMarkup{RemoveKeyboard: true}
 		_ = c.Send("Настройка не завершена.", remove)
-		_ = c.Send("Введите номер группы (пример: 3/147):")
+		_ = c.Send(groupInputPrompt(state.UniversityID))
 		return nil
 	}
 	return state

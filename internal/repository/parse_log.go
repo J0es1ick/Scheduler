@@ -20,8 +20,12 @@ func NewParseLogRepository(db *sqlx.DB) *ParseLogRepository {
 
 func (r *ParseLogRepository) CreateParseLog(ctx context.Context, id string, dataSourceID string, status string, recordsFetched int, errorMessage string) (string, error) {
 	now := time.Now()
+	var finishedAt *time.Time
+	if status != "running" {
+		finishedAt = &now
+	}
 	_, err := r.db.ExecContext(ctx, `INSERT INTO parse_logs (id, data_source_id, started_at, finished_at, status, records_fetched, error_message)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`, id, dataSourceID, now, now, status, recordsFetched, errorMessage)
+		VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''))`, id, dataSourceID, now, finishedAt, status, recordsFetched, errorMessage)
 	if err != nil {
 		return "", fmt.Errorf("failed to create parse log: %w", err)
 	}
@@ -30,7 +34,7 @@ func (r *ParseLogRepository) CreateParseLog(ctx context.Context, id string, data
 
 func (r *ParseLogRepository) UpdateParseLog(ctx context.Context, id string, status string, recordsFetched int, errorMessage string) error {
 	now := time.Now()
-	_, err := r.db.ExecContext(ctx, `UPDATE parse_logs SET finished_at = $1, status = $2, records_fetched = $3, error_message = $4 WHERE id = $5`,
+	_, err := r.db.ExecContext(ctx, `UPDATE parse_logs SET finished_at = $1, status = $2, records_fetched = $3, error_message = NULLIF($4, '') WHERE id = $5`,
 		now, status, recordsFetched, errorMessage, id)
 	if err != nil {
 		return fmt.Errorf("failed to update parse log: %w", err)
