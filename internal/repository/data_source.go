@@ -14,6 +14,40 @@ type DataSourceRepository struct {
 	db *sqlx.DB
 }
 
+func (r *DataSourceRepository) TryAcquireRunLock(ctx context.Context, dataSourceID string) (release func() error, acquired bool, err error) {
+	conn, err := r.db.Connx(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("acquire data source lock connection: %w", err)
+	}
+	if err = conn.GetContext(ctx, &acquired,
+		`SELECT pg_try_advisory_lock(hashtext('scheduler-parser'), hashtext($1))`, dataSourceID,
+	); err != nil {
+		_ = conn.Close()
+		return nil, false, fmt.Errorf("acquire data source lock %s: %w", dataSourceID, err)
+	}
+	if !acquired {
+		_ = conn.Close()
+		return nil, false, nil
+	}
+	release = func() error {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		var unlocked bool
+		unlockErr := conn.GetContext(releaseCtx, &unlocked,
+			`SELECT pg_advisory_unlock(hashtext('scheduler-parser'), hashtext($1))`, dataSourceID,
+		)
+		closeErr := conn.Close()
+		if unlockErr != nil {
+			return fmt.Errorf("release data source lock %s: %w", dataSourceID, unlockErr)
+		}
+		if !unlocked {
+			return fmt.Errorf("release data source lock %s: lock was not held", dataSourceID)
+		}
+		return closeErr
+	}
+	return release, true, nil
+}
+
 func NewDataSourceRepository(db *sqlx.DB) *DataSourceRepository {
 	return &DataSourceRepository{db: db}
 }

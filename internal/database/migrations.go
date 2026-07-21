@@ -12,6 +12,21 @@ import (
 )
 
 func ApplyMigrations(ctx context.Context, db *sqlx.DB) error {
+	lockConn, err := db.Connx(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire migration connection: %w", err)
+	}
+	defer lockConn.Close()
+	if _, err = lockConn.ExecContext(ctx,
+		`SELECT pg_advisory_lock(hashtext('scheduler_schema_migrations'))`,
+	); err != nil {
+		return fmt.Errorf("acquire migration lock: %w", err)
+	}
+	defer func() {
+		_, _ = lockConn.ExecContext(context.Background(),
+			`SELECT pg_advisory_unlock(hashtext('scheduler_schema_migrations'))`)
+	}()
+
 	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			name TEXT PRIMARY KEY,
