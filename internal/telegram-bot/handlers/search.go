@@ -13,7 +13,13 @@ import (
 )
 
 func (h *Handler) HandleSearch(c tgbotapi.Context) error {
-	state := h.StateManager.Get(c.Sender().ID)
+	ctx, cancel := reqCtx()
+	defer cancel()
+	state, err := h.readyState(ctx, c.Sender().ID)
+	if err != nil {
+		slog.Error("restore profile before search failed", "user_id", c.Sender().ID, "err", err)
+		return c.Send("Не удалось загрузить профиль. Попробуйте ещё раз позже.")
+	}
 	if state == nil || state.Step != "done" {
 		return c.Send("Сначала настройте профиль: /start")
 	}

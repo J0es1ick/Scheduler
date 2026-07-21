@@ -80,7 +80,12 @@ func (h *Handler) HandleTextInput(c tgbotapi.Context) error {
 
 		// Подписка — некритичная операция, ошибку только логируем.
 		if err := h.SubscriptionService.Subscribe(ctx, fmt.Sprint(userID), state.GroupID, "group"); err != nil {
-			slog.Warn("subscribe failed", "user", userID, "group", state.GroupID, "err", err)
+			slog.Error("subscribe failed", "user", userID, "group", state.GroupID, "err", err)
+			return c.Send("Не удалось сохранить подписку. Попробуйте ещё раз позже.")
+		}
+		if err := h.UserService.SetDefaultGroup(ctx, fmt.Sprint(userID), state.GroupID); err != nil {
+			slog.Error("set default group failed", "user", userID, "group", state.GroupID, "err", err)
+			return c.Send("Подписка сохранена, но не удалось выбрать основную группу. Откройте /settings.")
 		}
 
 		state.Step = "done"

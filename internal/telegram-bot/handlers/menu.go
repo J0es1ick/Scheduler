@@ -5,69 +5,45 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
-	tgbotapi "gopkg.in/telebot.v3"
+	tele "gopkg.in/telebot.v3"
 )
 
-func (h *Handler) HandleChange(c tgbotapi.Context) error {
-	userID := c.Sender().ID
-	state := h.StateManager.Get(userID)
-	if state != nil {
-		state.Step = "awaiting_query"
-		state.SearchType = dto.SearchTypeGroup
-		state.Query = ""
-		state.GroupID = ""
-		h.StateManager.Set(userID, state)
-	}
-	remove := &tgbotapi.ReplyMarkup{RemoveKeyboard: true}
-	_ = c.Send("Смена группы.", remove)
-	if state == nil {
-		return c.Send("Сначала выберите университет: /start")
-	}
-	return c.Send(groupInputPrompt(state.UniversityID))
+func (h *Handler) HandleChange(c tele.Context) error {
+	return h.HandleChangeGroup(c)
 }
 
-func (h *Handler) HandleSettings(c tgbotapi.Context) error {
-	return c.Send("Настройки в разработке.\n\nЗдесь будет:\n- Уведомления об изменениях\n- Время утреннего напоминания")
-}
-
-func (h *Handler) HandleChangeUniversity(c tgbotapi.Context) error {
-	userID := c.Sender().ID
-	state := h.StateManager.Get(userID)
-	if state != nil {
-		state.Step = "awaiting_query"
-		state.SearchType = dto.SearchTypeGroup
-		state.Query = ""
-		state.GroupID = ""
-		h.StateManager.Set(userID, state)
-	}
-
+func (h *Handler) HandleChangeUniversity(c tele.Context) error {
 	ctx, cancel := reqCtx()
 	defer cancel()
 
-	unis, err := h.UniversityService.GetAll(ctx)
+	universities, err := h.UniversityService.GetAll(ctx)
 	if err != nil {
 		slog.Error("load universities failed", "err", err)
-		return c.Send("Ошибка загрузки университетов. Попробуйте позже.")
+		return c.Send("Не удалось загрузить список вузов. Попробуйте ещё раз позже.")
 	}
-
-	remove := &tgbotapi.ReplyMarkup{RemoveKeyboard: true}
-	_ = c.Send("Смена параметров.", remove)
-	return c.Send("Выберите новый университет:", keyboards.UniversitySelector(unis))
+	remove := &tele.ReplyMarkup{RemoveKeyboard: true}
+	_ = c.Send("Выберите новый вуз. Текущие подписки сохранятся.", remove)
+	return c.Send("Доступные вузы:", keyboards.UniversitySelector(universities))
 }
 
-func (h *Handler) HandleChangeGroup(c tgbotapi.Context) error {
-	userID := c.Sender().ID
-	state := h.StateManager.Get(userID)
+func (h *Handler) HandleChangeGroup(c tele.Context) error {
+	ctx, cancel := reqCtx()
+	defer cancel()
+	state, err := h.readyState(ctx, c.Sender().ID)
+	if err != nil {
+		slog.Error("restore profile before group change failed", "user_id", c.Sender().ID, "err", err)
+		return c.Send("Не удалось загрузить профиль. Попробуйте ещё раз позже.")
+	}
 	if state == nil {
-		return c.Send("Сначала настройте профиль: /start")
+		return c.Send("Сначала выберите вуз: /change_university")
 	}
 	state.Step = "awaiting_query"
 	state.SearchType = dto.SearchTypeGroup
 	state.Query = ""
 	state.GroupID = ""
-	h.StateManager.Set(userID, state)
+	h.StateManager.Set(c.Sender().ID, state)
 
-	remove := &tgbotapi.ReplyMarkup{RemoveKeyboard: true}
-	_ = c.Send("Смена группы.", remove)
+	remove := &tele.ReplyMarkup{RemoveKeyboard: true}
+	_ = c.Send("Введите новую основную группу. Прежняя останется в подписках.", remove)
 	return c.Send(groupInputPrompt(state.UniversityID))
 }

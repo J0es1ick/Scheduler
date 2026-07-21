@@ -28,3 +28,9 @@ func (m *Manager) Set(userID int64, state *dto.UserState) {
 	defer m.mu.Unlock()
 	m.userStates[userID] = state
 }
+
+func (m *Manager) Delete(userID int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.userStates, userID)
+}
