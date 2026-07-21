@@ -105,7 +105,14 @@ func (h *Handler) getScheduleForState(ctx context.Context, state *dto.UserState,
 // checkState проверяет наличие и готовность состояния пользователя.
 // Если состояние отсутствует или не завершено — отправляет подсказку и возвращает nil.
 func (h *Handler) checkState(c tgbotapi.Context) *dto.UserState {
-	state := h.StateManager.Get(c.Sender().ID)
+	ctx, cancel := reqCtx()
+	defer cancel()
+	state, err := h.readyState(ctx, c.Sender().ID)
+	if err != nil {
+		slog.Error("restore profile failed", "user_id", c.Sender().ID, "err", err)
+		_ = c.Send("Не удалось загрузить сохранённую группу. Попробуйте ещё раз позже.")
+		return nil
+	}
 	if state == nil {
 		_ = c.Send("Для начала работы используйте /start")
 		return nil

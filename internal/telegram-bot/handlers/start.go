@@ -5,48 +5,57 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/J0es1ick/Scheduler/internal/miniapp"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
-	tgbotapi "gopkg.in/telebot.v3"
+	tele "gopkg.in/telebot.v3"
 )
 
-func (h *Handler) HandleStart(c tgbotapi.Context) error {
+func (h *Handler) HandleStart(c tele.Context) error {
 	ctx, cancel := reqCtx()
 	defer cancel()
 
 	telegramID := fmt.Sprint(c.Sender().ID)
-	username := c.Sender().Username
-
-	user, err := h.UserService.RegisterOrGetUser(ctx, telegramID, username)
+	user, err := h.UserService.RegisterOrGetUser(ctx, telegramID, c.Sender().Username)
 	if err != nil {
 		slog.Error("user register failed", "telegramID", telegramID, "err", err)
-		return c.Send("Ошибка при создании пользователя. Попробуйте позже.")
+		return c.Send("Не удалось открыть профиль. Попробуйте ещё раз позже.")
 	}
-	slog.Info("user started bot", "id", user.ID, "username", user.Username)
+	if err = miniapp.ConfigureMenu(c.Bot(), c.Sender(), h.AdminPublicURL, user.IsAdmin); err != nil {
+		slog.Debug("menu button configuration skipped", "user_id", user.ID, "err", err)
+	}
 
 	name := c.Sender().FirstName
 	if name == "" {
 		name = "друг"
 	}
+	greeting := fmt.Sprintf("%s, %s!", timeGreeting(), name)
 
-	text := fmt.Sprintf(
-		"%s, %s.\n\nДанный бот предоставляет актуальное расписание занятий.\nПолный список команд: /help",
-		timeGreeting(),
-		name,
-	)
-	if err := c.Send(text); err != nil {
-		return err
+	state, _, err := h.restoreProfile(ctx, c.Sender().ID)
+	if err != nil {
+		slog.Error("restore user profile failed", "user_id", user.ID, "err", err)
+		return c.Send("Не удалось загрузить сохранённую группу. Попробуйте ещё раз позже.")
+	}
+	if state != nil {
+		return c.Send(fmt.Sprintf(
+			"%s\n\nОсновная группа: %s · %s\nУправление подписками: /settings",
+			greeting,
+			state.University,
+			state.Query,
+		), keyboards.MainMenu())
 	}
 
-	unis, err := h.UniversityService.GetAll(ctx)
+	universities, err := h.UniversityService.GetAll(ctx)
 	if err != nil {
 		slog.Error("load universities failed", "err", err)
-		return c.Send("Ошибка загрузки университетов. Попробуйте позже.")
+		return c.Send("Не удалось загрузить список вузов. Попробуйте ещё раз позже.")
 	}
-	if len(unis) == 0 {
-		return c.Send("Университеты пока не добавлены в систему.")
+	if len(universities) == 0 {
+		return c.Send("В системе пока нет вузов с актуальным расписанием.")
 	}
-
-	return c.Send("Выберите ваш университет:", keyboards.UniversitySelector(unis))
+	if err = c.Send(greeting + "\n\nВыберите вуз, чтобы настроить основную группу:"); err != nil {
+		return err
+	}
+	return c.Send("Доступные вузы:", keyboards.UniversitySelector(universities))
 }
 
 func timeGreeting() string {

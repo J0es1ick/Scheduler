@@ -52,7 +52,7 @@ func MainMenu() *tgbotapi.ReplyMarkup {
 	btnWeekDay := menu.Text("По дню недели")
 	btnSearch := menu.Text("Поиск")
 	btnSettings := menu.Text("Настройки")
-	btnChange := menu.Text("Сменить группу")
+	btnChange := menu.Text("Добавить группу")
 
 	menu.Reply(
 		menu.Row(btnToday, btnTomorrow),
@@ -81,5 +81,27 @@ func WeekDaySelector() *tgbotapi.ReplyMarkup {
 		menu.Row(btnSun),
 	)
 
+	return menu
+}
+
+func SubscriptionSettings(items []domain.GroupSubscription, notificationsEnabled bool) *tgbotapi.ReplyMarkup {
+	menu := &tgbotapi.ReplyMarkup{}
+	rows := make([]tgbotapi.Row, 0, len(items)+1)
+	for _, item := range items {
+		label := item.UniversityName + " · " + item.GroupName
+		if item.IsDefault {
+			label = "● " + label
+		}
+		selectButton := menu.Data(label, "set_default_subscription", item.GroupID)
+		deleteButton := menu.Data("Удалить", "delete_subscription", item.GroupID)
+		rows = append(rows, menu.Row(selectButton, deleteButton))
+	}
+
+	toggleLabel := "Выключить уведомления"
+	if !notificationsEnabled {
+		toggleLabel = "Включить уведомления"
+	}
+	rows = append(rows, menu.Row(menu.Data(toggleLabel, "toggle_notifications")))
+	menu.Inline(rows...)
 	return menu
 }
