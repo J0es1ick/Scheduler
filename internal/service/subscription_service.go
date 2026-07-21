@@ -32,3 +32,11 @@ func (s *SubscriptionService) GetUserSubscriptions(ctx context.Context, userID s
 func (s *SubscriptionService) GetSubscribers(ctx context.Context, objectID, objectType string) ([]string, error) {
 	return s.subRepo.GetUserIDsByObject(ctx, objectID, objectType)
 }
+
+func (s *SubscriptionService) GetGroupSubscriptions(ctx context.Context, userID string) ([]domain.GroupSubscription, error) {
+	return s.subRepo.GetGroupSubscriptions(ctx, userID)
+}
+
+func (s *SubscriptionService) HasGroupSubscription(ctx context.Context, userID, groupID string) (bool, error) {
+	return s.subRepo.HasGroupSubscription(ctx, userID, groupID)
+}

@@ -33,7 +33,10 @@ func (r *UserRepository) CreateUser(ctx context.Context, id, username string, is
 func (r *UserRepository) GetUserByID(ctx context.Context, id string) (*domain.User, error) {
 	var user domain.User
 	err := r.db.GetContext(ctx, &user,
-		`SELECT id, username, is_admin, created_at, updated_at FROM users WHERE id = $1`, id)
+		`SELECT id, COALESCE(username, '') AS username, is_admin,
+			COALESCE(default_group_id, '') AS default_group_id, notifications_enabled,
+			created_at, updated_at
+		 FROM users WHERE id = $1`, id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -46,7 +49,10 @@ func (r *UserRepository) GetUserByID(ctx context.Context, id string) (*domain.Us
 func (r *UserRepository) GetUserByUsername(ctx context.Context, username string) (*domain.User, error) {
 	var user domain.User
 	err := r.db.GetContext(ctx, &user,
-		`SELECT id, username, is_admin, created_at, updated_at FROM users WHERE username = $1`, username)
+		`SELECT id, COALESCE(username, '') AS username, is_admin,
+			COALESCE(default_group_id, '') AS default_group_id, notifications_enabled,
+			created_at, updated_at
+		 FROM users WHERE username = $1`, username)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -59,7 +65,9 @@ func (r *UserRepository) GetUserByUsername(ctx context.Context, username string)
 func (r *UserRepository) GetAllUsers(ctx context.Context) ([]domain.User, error) {
 	var users []domain.User
 	err := r.db.SelectContext(ctx, &users,
-		`SELECT id, username, is_admin, created_at, updated_at FROM users`)
+		`SELECT id, COALESCE(username, '') AS username, is_admin,
+			COALESCE(default_group_id, '') AS default_group_id, notifications_enabled,
+			created_at, updated_at FROM users`)
 	if err != nil {
 		return nil, fmt.Errorf("get all users: %w", err)
 	}
@@ -72,6 +80,54 @@ func (r *UserRepository) UpdateUser(ctx context.Context, id, username string, is
 		username, isAdmin, time.Now(), id)
 	if err != nil {
 		return fmt.Errorf("update user %s: %w", id, err)
+	}
+	return nil
+}
+
+func (r *UserRepository) SetDefaultGroup(ctx context.Context, userID, groupID string) error {
+	var value any
+	if groupID != "" {
+		value = groupID
+	}
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE users SET default_group_id = $1, updated_at = NOW() WHERE id = $2`,
+		value, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("set default group for user %s: %w", userID, err)
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (r *UserRepository) SetNotificationsEnabled(ctx context.Context, userID string, enabled bool) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("set notifications for user %s: begin: %w", userID, err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx,
+		`UPDATE users SET notifications_enabled = $1, updated_at = NOW() WHERE id = $2`,
+		enabled, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("set notifications for user %s: %w", userID, err)
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		return sql.ErrNoRows
+	}
+	if !enabled {
+		if _, err = tx.ExecContext(ctx, `
+			UPDATE notification_deliveries
+			SET status='cancelled', updated_at=NOW()
+			WHERE user_id=$1 AND status='pending'`, userID); err != nil {
+			return fmt.Errorf("cancel pending notifications for user %s: %w", userID, err)
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("set notifications for user %s: commit: %w", userID, err)
 	}
 	return nil
 }

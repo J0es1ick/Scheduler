@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,13 +17,16 @@ import (
 
 const scheduleFetchConcurrency = 3
 
+var ErrDataSourceBusy = errors.New("parser: data source is already running")
+
 type ParserService struct {
-	dataSourceRepo *repository.DataSourceRepository
-	parseLogRepo   *repository.ParseLogRepository
-	groupRepo      *repository.GroupRepository
-	scheduleSvc    *ScheduleService
-	semesterSvc    *SemesterService
-	adapters       map[string]scrapper.SourceAdapter
+	dataSourceRepo   *repository.DataSourceRepository
+	parseLogRepo     *repository.ParseLogRepository
+	groupRepo        *repository.GroupRepository
+	scheduleSvc      *ScheduleService
+	semesterSvc      *SemesterService
+	notificationRepo *repository.NotificationRepository
+	adapters         map[string]scrapper.SourceAdapter
 }
 
 func NewParserService(
@@ -31,14 +35,16 @@ func NewParserService(
 	groupRepo *repository.GroupRepository,
 	scheduleSvc *ScheduleService,
 	semesterSvc *SemesterService,
+	notificationRepo *repository.NotificationRepository,
 ) *ParserService {
 	return &ParserService{
-		dataSourceRepo: dataSourceRepo,
-		parseLogRepo:   parseLogRepo,
-		groupRepo:      groupRepo,
-		scheduleSvc:    scheduleSvc,
-		semesterSvc:    semesterSvc,
-		adapters:       make(map[string]scrapper.SourceAdapter),
+		dataSourceRepo:   dataSourceRepo,
+		parseLogRepo:     parseLogRepo,
+		groupRepo:        groupRepo,
+		scheduleSvc:      scheduleSvc,
+		semesterSvc:      semesterSvc,
+		notificationRepo: notificationRepo,
+		adapters:         make(map[string]scrapper.SourceAdapter),
 	}
 }
 
@@ -47,6 +53,19 @@ func (s *ParserService) RegisterAdapter(adapterType string, adapter scrapper.Sou
 }
 
 func (s *ParserService) RunDataSource(ctx context.Context, dataSourceID string) (int, error) {
+	release, acquired, err := s.dataSourceRepo.TryAcquireRunLock(ctx, dataSourceID)
+	if err != nil {
+		return 0, err
+	}
+	if !acquired {
+		return 0, fmt.Errorf("%w: %s", ErrDataSourceBusy, dataSourceID)
+	}
+	defer func() {
+		if releaseErr := release(); releaseErr != nil {
+			slog.Error("parser: release data source lock failed", "dataSourceID", dataSourceID, "err", releaseErr)
+		}
+	}()
+
 	ds, err := s.dataSourceRepo.GetDataSourceByID(ctx, dataSourceID)
 	if err != nil {
 		return 0, fmt.Errorf("parser: get data source: %w", err)
@@ -135,11 +154,36 @@ func (s *ParserService) RunDataSource(ctx context.Context, dataSourceID string) 
 		for i := range result.lessons {
 			result.lessons[i].SemesterID = semesterID
 		}
+		before, snapshotErr := s.scheduleSvc.GetAllLessonsForGroup(ctx, result.group.ID)
+		if snapshotErr != nil {
+			saveErrors = append(saveErrors, fmt.Errorf("group %s: read previous schedule: %w", result.group.Name, snapshotErr))
+			continue
+		}
 		if err = s.scheduleSvc.ReplaceGroupLessons(ctx, result.group.ID, result.lessons); err != nil {
 			saveErrors = append(saveErrors, fmt.Errorf("group %s: %w", result.group.Name, err))
 			continue
 		}
 		totalLessons += len(result.lessons)
+		after, snapshotErr := s.scheduleSvc.GetAllLessonsForGroup(ctx, result.group.ID)
+		if snapshotErr != nil {
+			saveErrors = append(saveErrors, fmt.Errorf("group %s: read published schedule: %w", result.group.Name, snapshotErr))
+			continue
+		}
+		diff := CompareLessonSnapshots(before, after)
+		if diff.Changed() && s.notificationRepo != nil {
+			if enqueueErr := s.notificationRepo.EnqueueScheduleChange(
+				ctx,
+				uuid.NewString(),
+				result.group.ID,
+				"parser",
+				scheduleChangeSummary(diff),
+			); enqueueErr != nil {
+				slog.Error("parser: enqueue schedule notification failed",
+					"group", result.group.ID,
+					"err", enqueueErr,
+				)
+			}
+		}
 	}
 
 	combinedErrors := append(fetchErrors, saveErrors...)
@@ -157,6 +201,23 @@ func (s *ParserService) RunDataSource(ctx context.Context, dataSourceID string) 
 	_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "success", totalLessons, "")
 	_ = s.markDataSourceSuccess(ctx, ds)
 	return totalLessons, nil
+}
+
+func scheduleChangeSummary(diff ScheduleDiff) string {
+	modified := min(diff.Added, diff.Removed)
+	added := diff.Added - modified
+	removed := diff.Removed - modified
+	parts := make([]string, 0, 3)
+	if modified > 0 {
+		parts = append(parts, fmt.Sprintf("изменено: %d", modified))
+	}
+	if added > 0 {
+		parts = append(parts, fmt.Sprintf("добавлено: %d", added))
+	}
+	if removed > 0 {
+		parts = append(parts, fmt.Sprintf("удалено: %d", removed))
+	}
+	return "Расписание обновлено — " + strings.Join(parts, ", ") + "."
 }
 
 type groupScheduleResult struct {

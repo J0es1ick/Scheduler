@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -205,6 +206,88 @@ func (s *ScheduleService) buildSemesterCacheForLessons(ctx context.Context, less
 
 func (s *ScheduleService) ReplaceGroupLessons(ctx context.Context, groupID string, lessons []domain.Lesson) error {
 	return s.lessonRepo.ReplaceLessonsForGroup(ctx, groupID, lessons)
+}
+
+func (s *ScheduleService) GetAllLessonsForGroup(ctx context.Context, groupID string) ([]domain.Lesson, error) {
+	return s.lessonRepo.GetLessonsByGroupID(ctx, groupID)
+}
+
+type ScheduleDiff struct {
+	Added   int
+	Removed int
+}
+
+func (d ScheduleDiff) Changed() bool {
+	return d.Added > 0 || d.Removed > 0
+}
+
+// CompareLessonSnapshots compares schedule content, deliberately ignoring
+// database IDs and updated_at. Source sites may regenerate identifiers even
+// when the schedule itself has not changed.
+func CompareLessonSnapshots(before, after []domain.Lesson) ScheduleDiff {
+	beforeSet := lessonFingerprintCounts(before)
+	afterSet := lessonFingerprintCounts(after)
+	var diff ScheduleDiff
+	for fingerprint, count := range afterSet {
+		if delta := count - beforeSet[fingerprint]; delta > 0 {
+			diff.Added += delta
+		}
+	}
+	for fingerprint, count := range beforeSet {
+		if delta := count - afterSet[fingerprint]; delta > 0 {
+			diff.Removed += delta
+		}
+	}
+	return diff
+}
+
+func lessonFingerprintCounts(lessons []domain.Lesson) map[string]int {
+	result := make(map[string]int, len(lessons))
+	for _, lesson := range lessons {
+		payload := struct {
+			UniversityID string
+			SemesterID   string
+			DayOfWeek    int
+			SpecialDate  string
+			TimeStart    string
+			TimeEnd      string
+			WeekType     domain.WeekType
+			Subject      string
+			Type         domain.LessonType
+			Teacher      string
+			Room         string
+			GroupID      string
+			Subgroup     int
+			ValidFrom    string
+			ValidTo      string
+		}{
+			UniversityID: lesson.UniversityID,
+			SemesterID:   lesson.SemesterID,
+			DayOfWeek:    lesson.DayOfWeek,
+			SpecialDate:  fingerprintDate(lesson.SpecialDate),
+			TimeStart:    lesson.TimeStart,
+			TimeEnd:      lesson.TimeEnd,
+			WeekType:     lesson.WeekType,
+			Subject:      lesson.Subject,
+			Type:         lesson.Type,
+			Teacher:      lesson.Teacher,
+			Room:         lesson.Room,
+			GroupID:      lesson.GroupID,
+			Subgroup:     lesson.Subgroup,
+			ValidFrom:    fingerprintDate(lesson.ValidFrom),
+			ValidTo:      fingerprintDate(lesson.ValidTo),
+		}
+		encoded, _ := json.Marshal(payload)
+		result[string(encoded)]++
+	}
+	return result
+}
+
+func fingerprintDate(value *time.Time) string {
+	if value == nil {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
 }
 
 func (s *ScheduleService) SaveLessonsBatch(ctx context.Context, lessons []domain.Lesson) error {

@@ -88,7 +88,7 @@ func (r *LessonRepository) GetLessonsByGroupAndSemesters(ctx context.Context, gr
 		return nil, nil
 	}
 	query, args, err := sqlx.In(
-		`SELECT `+lessonCols+` FROM lessons WHERE group_id = ? AND semester_id IN (?) ORDER BY day_of_week, time_start`,
+		`SELECT `+lessonCols+` FROM effective_lessons WHERE group_id = ? AND semester_id IN (?) ORDER BY day_of_week, time_start`,
 		groupID, semesterIDs,
 	)
 	if err != nil {
@@ -218,7 +218,7 @@ const lessonCols = `id, university_id, semester_id, COALESCE(day_of_week, 0) AS 
 	time_start, time_end, week_type, subject, type, teacher, room, group_id, subgroup,
 	valid_from, valid_to, updated_at`
 
-const lessonSelect = `SELECT ` + lessonCols + ` FROM lessons`
+const lessonSelect = `SELECT ` + lessonCols + ` FROM effective_lessons`
 
 func lessonDayOfWeekDB(lesson domain.Lesson) any {
 	if lesson.WeekType == domain.WeekTypeDate || lesson.SpecialDate != nil {

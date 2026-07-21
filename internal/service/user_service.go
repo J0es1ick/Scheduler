@@ -24,6 +24,12 @@ func (s *UserService) RegisterOrGetUser(ctx context.Context, telegramID, usernam
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
 	if user != nil {
+		if user.Username != username {
+			if updateErr := s.userRepo.UpdateUser(ctx, user.ID, username, user.IsAdmin); updateErr != nil {
+				return nil, fmt.Errorf("failed to update user: %w", updateErr)
+			}
+			return s.userRepo.GetUserByID(ctx, telegramID)
+		}
 		return user, nil
 	}
 
@@ -56,4 +62,12 @@ func (s *UserService) SetAdmin(ctx context.Context, userID string, isAdmin bool)
 		return fmt.Errorf("user not found")
 	}
 	return s.userRepo.UpdateUser(ctx, userID, user.Username, isAdmin)
+}
+
+func (s *UserService) SetDefaultGroup(ctx context.Context, userID, groupID string) error {
+	return s.userRepo.SetDefaultGroup(ctx, userID, groupID)
+}
+
+func (s *UserService) SetNotificationsEnabled(ctx context.Context, userID string, enabled bool) error {
+	return s.userRepo.SetNotificationsEnabled(ctx, userID, enabled)
 }

@@ -36,6 +36,45 @@ func TestLessonMatchesDateUsesSourceValidityAsParityAnchor(t *testing.T) {
 	}
 }
 
+func TestCompareLessonSnapshotsIgnoresIDsOrderAndUpdatedAt(t *testing.T) {
+	first := domain.Lesson{
+		ID: "source:old", GroupID: "g1", UniversityID: "u1", SemesterID: "s1",
+		DayOfWeek: 1, TimeStart: "08:00", TimeEnd: "09:35", WeekType: domain.WeekTypeEvery,
+		Subject: "Математика", Type: domain.LessonTypeLecture, UpdatedAt: time.Now(),
+	}
+	second := first
+	second.ID = "source:new"
+	second.UpdatedAt = first.UpdatedAt.Add(time.Hour)
+
+	diff := CompareLessonSnapshots([]domain.Lesson{first}, []domain.Lesson{second})
+	if diff.Changed() {
+		t.Fatalf("equal schedule content reported as changed: %+v", diff)
+	}
+}
+
+func TestCompareLessonSnapshotsCountsAddedAndRemoved(t *testing.T) {
+	base := domain.Lesson{
+		GroupID: "g1", UniversityID: "u1", SemesterID: "s1",
+		DayOfWeek: 1, TimeStart: "08:00", TimeEnd: "09:35", WeekType: domain.WeekTypeEvery,
+		Subject: "Математика", Type: domain.LessonTypeLecture,
+	}
+	changed := base
+	changed.Room = "А-101"
+
+	diff := CompareLessonSnapshots([]domain.Lesson{base}, []domain.Lesson{changed})
+	if diff.Added != 1 || diff.Removed != 1 {
+		t.Fatalf("changed lesson diff = %+v, want one added and one removed", diff)
+	}
+}
+
+func TestScheduleChangeSummaryTreatsReplacementAsModification(t *testing.T) {
+	got := scheduleChangeSummary(ScheduleDiff{Added: 2, Removed: 1})
+	want := "Расписание обновлено — изменено: 1, добавлено: 1."
+	if got != want {
+		t.Fatalf("summary = %q, want %q", got, want)
+	}
+}
+
 func mustDate(t *testing.T, value string) time.Time {
 	t.Helper()
 	date, err := time.Parse("2006-01-02", value)
