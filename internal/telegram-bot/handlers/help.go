@@ -12,6 +12,7 @@ func (h *Handler) HandleHelp(c tgbotapi.Context) error {
 		"/change_group — добавить группу и сделать её основной\n" +
 		"/change_university — сменить университет\n" +
 		"/settings — подписки и уведомления\n" +
+		"/hotline — сообщить о расписании или предложить новое учебное заведение\n" +
 		"/search — поиск занятий по критериям\n" +
 		"/help — список команд"
 	return c.Send(text)

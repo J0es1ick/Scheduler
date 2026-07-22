@@ -9,6 +9,7 @@ type UserState struct {
 	Query        string // основной запрос (группа/ФИО) для регулярного расписания
 	GroupID      string // ID группы из актуального справочника парсера
 	SearchQuery  string // временный запрос для команды /search
+	HotlineType  string // тип создаваемого обращения в горячую линию
 	Step         string // "awaiting_role" | "awaiting_query" | "awaiting_search_query" | "done"
 }
 

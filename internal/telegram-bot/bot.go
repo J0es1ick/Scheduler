@@ -21,6 +21,7 @@ func Register(bot *tele.Bot, handler *handlers.Handler) {
 		{Text: "change_university", Description: "Выбрать другой вуз"},
 		{Text: "settings", Description: "Подписки и уведомления"},
 		{Text: "subscriptions", Description: "Подписки на группы"},
+		{Text: "hotline", Description: "Горячая линия расписаний"},
 		{Text: "admin", Description: "Открыть админ-панель"},
 	}
 	go configureCommands(bot, commands)
@@ -36,6 +37,7 @@ func Register(bot *tele.Bot, handler *handlers.Handler) {
 	bot.Handle("/change_university", handler.HandleChangeUniversity)
 	bot.Handle("/settings", handler.HandleSettings)
 	bot.Handle("/subscriptions", handler.HandleSettings)
+	bot.Handle("/hotline", handler.HandleHotline)
 	bot.Handle("/admin", handler.HandleAdmin)
 
 	bot.Handle(&tele.Btn{Unique: "select_university"}, handler.HandleUniversitySelect)
@@ -45,6 +47,8 @@ func Register(bot *tele.Bot, handler *handlers.Handler) {
 	bot.Handle(&tele.Btn{Unique: "set_default_subscription"}, handler.HandleSetDefaultSubscription)
 	bot.Handle(&tele.Btn{Unique: "delete_subscription"}, handler.HandleDeleteSubscription)
 	bot.Handle(&tele.Btn{Unique: "toggle_notifications"}, handler.HandleToggleNotifications)
+	bot.Handle(&tele.Btn{Unique: "select_hotline_type"}, handler.HandleHotlineType)
+	bot.Handle(&tele.Btn{Unique: "cancel_hotline"}, handler.HandleCancelHotline)
 
 	bot.Handle("На сегодня", handler.HandleToday)
 	bot.Handle("На завтра", handler.HandleTomorrow)
@@ -54,6 +58,7 @@ func Register(bot *tele.Bot, handler *handlers.Handler) {
 	bot.Handle("Сменить группу", handler.HandleChange)
 	bot.Handle("Добавить группу", handler.HandleChange)
 	bot.Handle("Настройки", handler.HandleSettings)
+	bot.Handle("Горячая линия", handler.HandleHotline)
 
 	bot.Handle(tele.OnText, handler.HandleTextInput)
 }

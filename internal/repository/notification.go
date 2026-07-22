@@ -78,6 +78,111 @@ func (r *NotificationRepository) ClaimPending(ctx context.Context, limit int) ([
 	return items, nil
 }
 
+func (r *NotificationRepository) ClaimBotOutbox(ctx context.Context, limit int) ([]domain.BotOutboxDelivery, error) {
+	if limit <= 0 {
+		return []domain.BotOutboxDelivery{}, nil
+	}
+	if _, err := r.db.ExecContext(ctx, `
+		UPDATE bot_outbox o
+		SET status='cancelled', updated_at=NOW()
+		FROM users u
+		WHERE o.user_id=u.id AND o.kind='support_request'
+			AND o.status='pending' AND NOT u.is_admin`); err != nil {
+		return nil, fmt.Errorf("cancel support messages for former admins: %w", err)
+	}
+	var items []domain.BotOutboxDelivery
+	err := r.db.SelectContext(ctx, &items, `
+		WITH candidates AS (
+			SELECT id
+			FROM bot_outbox
+			WHERE status='pending' AND next_attempt_at <= NOW()
+			ORDER BY created_at, id
+			FOR UPDATE SKIP LOCKED
+			LIMIT $1
+		), claimed AS (
+			UPDATE bot_outbox o
+			SET attempts=o.attempts+1,
+				next_attempt_at=NOW()+INTERVAL '2 minutes',
+				updated_at=NOW()
+			FROM candidates c
+			WHERE o.id=c.id
+			RETURNING o.id, o.user_id, o.request_id, o.kind, o.body, o.attempts
+		)
+		SELECT id, user_id, COALESCE(request_id, '') AS request_id, kind, body, attempts
+		FROM claimed
+		ORDER BY id`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("claim bot outbox: %w", err)
+	}
+	if items == nil {
+		items = []domain.BotOutboxDelivery{}
+	}
+	return items, nil
+}
+
+func (r *NotificationRepository) MarkBotOutboxDelivered(ctx context.Context, id string) error {
+	if _, err := r.db.ExecContext(ctx, `
+		UPDATE bot_outbox
+		SET status='delivered', delivered_at=NOW(), last_error='', updated_at=NOW()
+		WHERE id=$1`, id); err != nil {
+		return fmt.Errorf("mark bot outbox %s delivered: %w", id, err)
+	}
+	return nil
+}
+
+func (r *NotificationRepository) IsBotOutboxActive(ctx context.Context, id string) (bool, error) {
+	var active bool
+	err := r.db.GetContext(ctx, &active, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM bot_outbox o
+			JOIN users u ON u.id=o.user_id
+			WHERE o.id=$1 AND o.status='pending'
+				AND (o.kind <> 'support_request' OR u.is_admin)
+		)`, id)
+	if err != nil {
+		return false, fmt.Errorf("check bot outbox %s eligibility: %w", id, err)
+	}
+	return active, nil
+}
+
+func (r *NotificationRepository) MarkBotOutboxCancelled(ctx context.Context, id string) error {
+	if _, err := r.db.ExecContext(ctx, `
+		UPDATE bot_outbox SET status='cancelled', updated_at=NOW()
+		WHERE id=$1 AND status='pending'`, id); err != nil {
+		return fmt.Errorf("cancel bot outbox %s: %w", id, err)
+	}
+	return nil
+}
+
+func (r *NotificationRepository) MarkBotOutboxFailed(
+	ctx context.Context,
+	id string,
+	attempts int,
+	retryAfter time.Duration,
+	deliveryErr error,
+) error {
+	status := "pending"
+	if attempts >= maxNotificationAttempts {
+		status = "failed"
+	}
+	errorText := ""
+	if deliveryErr != nil {
+		errorText = deliveryErr.Error()
+		if len(errorText) > 1000 {
+			errorText = errorText[:1000]
+		}
+	}
+	if _, err := r.db.ExecContext(ctx, `
+		UPDATE bot_outbox
+		SET status=$2, next_attempt_at=NOW()+($3 * INTERVAL '1 second'),
+			last_error=$4, updated_at=NOW()
+		WHERE id=$1`, id, status, retryAfter.Seconds(), errorText); err != nil {
+		return fmt.Errorf("mark bot outbox %s failed: %w", id, err)
+	}
+	return nil
+}
+
 func (r *NotificationRepository) MarkDelivered(ctx context.Context, id string) error {
 	if _, err := r.db.ExecContext(ctx, `
 		UPDATE notification_deliveries
@@ -147,7 +252,7 @@ func (r *NotificationRepository) MarkFailed(
 }
 
 func (r *NotificationRepository) PruneCompleted(ctx context.Context, retention time.Duration) (int64, error) {
-	result, err := r.db.ExecContext(ctx, `
+	eventResult, err := r.db.ExecContext(ctx, `
 		DELETE FROM schedule_change_events e
 		WHERE e.created_at < NOW() - ($1 * INTERVAL '1 second')
 			AND NOT EXISTS (
@@ -157,9 +262,20 @@ func (r *NotificationRepository) PruneCompleted(ctx context.Context, retention t
 	if err != nil {
 		return 0, fmt.Errorf("prune completed notifications: %w", err)
 	}
-	count, err := result.RowsAffected()
+	eventCount, err := eventResult.RowsAffected()
 	if err != nil {
 		return 0, fmt.Errorf("count pruned notifications: %w", err)
 	}
-	return count, nil
+	outboxResult, err := r.db.ExecContext(ctx, `
+		DELETE FROM bot_outbox
+		WHERE created_at < NOW() - ($1 * INTERVAL '1 second')
+			AND status <> 'pending'`, retention.Seconds())
+	if err != nil {
+		return 0, fmt.Errorf("prune bot outbox: %w", err)
+	}
+	outboxCount, err := outboxResult.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count pruned bot outbox: %w", err)
+	}
+	return eventCount + outboxCount, nil
 }

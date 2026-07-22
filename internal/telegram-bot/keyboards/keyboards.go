@@ -53,12 +53,14 @@ func MainMenu() *tgbotapi.ReplyMarkup {
 	btnSearch := menu.Text("Поиск")
 	btnSettings := menu.Text("Настройки")
 	btnChange := menu.Text("Добавить группу")
+	btnHotline := menu.Text("Горячая линия")
 
 	menu.Reply(
 		menu.Row(btnToday, btnTomorrow),
 		menu.Row(btnWeek, btnWeekDay),
 		menu.Row(btnSearch),
 		menu.Row(btnChange, btnSettings),
+		menu.Row(btnHotline),
 	)
 
 	return menu
@@ -103,5 +105,15 @@ func SubscriptionSettings(items []domain.GroupSubscription, notificationsEnabled
 	}
 	rows = append(rows, menu.Row(menu.Data(toggleLabel, "toggle_notifications")))
 	menu.Inline(rows...)
+	return menu
+}
+
+func HotlineTypeSelector() *tgbotapi.ReplyMarkup {
+	menu := &tgbotapi.ReplyMarkup{}
+	menu.Inline(
+		menu.Row(menu.Data("Обновить подключённое расписание", "select_hotline_type", domain.SupportRequestUpdateExisting)),
+		menu.Row(menu.Data("Добавить учебное заведение", "select_hotline_type", domain.SupportRequestNewInstitution)),
+		menu.Row(menu.Data("Отмена", "cancel_hotline")),
+	)
 	return menu
 }
