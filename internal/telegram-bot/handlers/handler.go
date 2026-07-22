@@ -25,13 +25,14 @@ func reqCtx() (context.Context, context.CancelFunc) {
 }
 
 type Handler struct {
-	ScheduleService     *service.ScheduleService
-	StateManager        *state.Manager
-	UniversityService   *service.UniversityService
-	UserService         *service.UserService
-	GroupService        *service.GroupService
-	SubscriptionService *service.SubscriptionService
-	AdminPublicURL      string
+	ScheduleService       *service.ScheduleService
+	StateManager          *state.Manager
+	UniversityService     *service.UniversityService
+	UserService           *service.UserService
+	GroupService          *service.GroupService
+	SubscriptionService   *service.SubscriptionService
+	SupportRequestService *service.SupportRequestService
+	AdminPublicURL        string
 }
 
 func NewHandler(
@@ -41,15 +42,17 @@ func NewHandler(
 	universityService *service.UniversityService,
 	stateManager *state.Manager,
 	subscriptionService *service.SubscriptionService,
+	supportRequestService *service.SupportRequestService,
 	adminPublicURL string,
 ) *Handler {
 	return &Handler{
-		ScheduleService:     scheduleService,
-		StateManager:        stateManager,
-		UniversityService:   universityService,
-		UserService:         userService,
-		GroupService:        groupService,
-		SubscriptionService: subscriptionService,
-		AdminPublicURL:      adminPublicURL,
+		ScheduleService:       scheduleService,
+		StateManager:          stateManager,
+		UniversityService:     universityService,
+		UserService:           userService,
+		GroupService:          groupService,
+		SubscriptionService:   subscriptionService,
+		SupportRequestService: supportRequestService,
+		AdminPublicURL:        adminPublicURL,
 	}
 }

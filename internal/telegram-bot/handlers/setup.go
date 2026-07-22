@@ -58,6 +58,9 @@ func (h *Handler) HandleTextInput(c tgbotapi.Context) error {
 	input := strings.TrimSpace(c.Text())
 
 	switch state.Step {
+	case "awaiting_hotline_submission":
+		return h.HandleHotlineSubmission(c, input)
+
 	case "awaiting_query":
 		if input == "" {
 			return c.Send(groupInputPrompt(state.UniversityID))

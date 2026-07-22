@@ -78,6 +78,61 @@ func (w *NotificationWorker) tick(ctx context.Context) {
 		}
 		w.deliver(ctx, item)
 	}
+	outbox, err := w.repository.ClaimBotOutbox(ctx, notificationBatchSize)
+	if err != nil {
+		slog.Error("notification worker: claim bot outbox failed", "err", err)
+		return
+	}
+	for _, item := range outbox {
+		if ctx.Err() != nil {
+			return
+		}
+		w.deliverBotOutbox(ctx, item)
+	}
+}
+
+func (w *NotificationWorker) deliverBotOutbox(ctx context.Context, item domain.BotOutboxDelivery) {
+	active, err := w.repository.IsBotOutboxActive(ctx, item.ID)
+	if err != nil {
+		w.recordBotOutboxFailure(ctx, item, err)
+		return
+	}
+	if !active {
+		if err = w.repository.MarkBotOutboxCancelled(ctx, item.ID); err != nil {
+			slog.Error("notification worker: cancel ineligible bot outbox failed", "delivery_id", item.ID, "err", err)
+		}
+		return
+	}
+	telegramID, err := strconv.ParseInt(item.UserID, 10, 64)
+	if err == nil {
+		_, err = w.bot.Send(&tele.User{ID: telegramID}, item.Body)
+	}
+	if err == nil {
+		if markErr := w.repository.MarkBotOutboxDelivered(ctx, item.ID); markErr != nil {
+			slog.Error("notification worker: mark bot outbox delivered failed", "delivery_id", item.ID, "err", markErr)
+		}
+		return
+	}
+	w.recordBotOutboxFailure(ctx, item, err)
+}
+
+func (w *NotificationWorker) recordBotOutboxFailure(
+	ctx context.Context,
+	item domain.BotOutboxDelivery,
+	deliveryErr error,
+) {
+	retryAfter := notificationRetryDelay(item.Attempts)
+	if markErr := w.repository.MarkBotOutboxFailed(ctx, item.ID, item.Attempts, retryAfter, deliveryErr); markErr != nil {
+		slog.Error("notification worker: record bot outbox failure failed", "delivery_id", item.ID, "err", markErr)
+		return
+	}
+	slog.Warn("bot outbox delivery failed",
+		"delivery_id", item.ID,
+		"kind", item.Kind,
+		"attempt", item.Attempts,
+		"retry_after", retryAfter,
+		"err", deliveryErr,
+	)
 }
 
 func (w *NotificationWorker) deliver(ctx context.Context, item domain.NotificationDelivery) {
