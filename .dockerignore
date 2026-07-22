@@ -1,0 +1,9 @@
+.git
+.agents
+.codex
+.env
+.gocache
+.runtime
+web/admin/node_modules
+bot.zip
+bot_new.zip

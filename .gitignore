@@ -1,4 +1,8 @@
 .env
 /migrations
 .gocache/
+.cache/
 .runtime/
+web/admin/node_modules/
+web/admin/*.tsbuildinfo
+internal/adminui/dist/
