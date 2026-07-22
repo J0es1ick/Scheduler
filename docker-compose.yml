@@ -11,6 +11,51 @@ services:
       - "${DATABASE_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  bot:
+    build: .
+    image: scheduler-app:local
+    container_name: scheduler-bot
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+    command: ["/app/scheduler-bot"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    stop_grace_period: 20s
+
+  admin:
+    build: .
+    image: scheduler-app:local
+    container_name: scheduler-admin
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      ADMIN_PORT: 8080
+    command: ["/app/scheduler-admin"]
+    ports:
+      - "${ADMIN_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/api/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    stop_grace_period: 20s
 
 volumes:
   pgdata:
