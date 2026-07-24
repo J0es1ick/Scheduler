@@ -8,6 +8,7 @@ import type {
   LessonView,
   LessonMutationPayload,
   Page,
+  ParserSnapshot,
   ParseLogView,
   SourceView,
   SupportRequestView,
@@ -25,6 +26,10 @@ export class APIError extends Error {
 }
 
 let csrfToken = "";
+
+export function getCSRFToken(): string {
+  return csrfToken;
+}
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const method = (options.method ?? "GET").toUpperCase();
@@ -101,6 +106,36 @@ export const api = {
     }),
   syncSource: (id: string) =>
     request(`/api/sources/${encodeURIComponent(id)}/sync`, { method: "POST" }),
+  rollbackSource: (id: string) =>
+    request<ParserSnapshot>(`/api/sources/${encodeURIComponent(id)}/rollback`, {
+      method: "POST",
+    }),
+  parserSnapshots: async (source = "", status = "") => {
+    const query = new URLSearchParams({ limit: "100" });
+    if (source) query.set("source", source);
+    if (status) query.set("status", status);
+    return (
+      await request<{ items: ParserSnapshot[] }>(
+        `/api/parser-snapshots?${query}`,
+      )
+    ).items;
+  },
+  publishParserSnapshot: (id: string, reviewNote = "") =>
+    request<ParserSnapshot>(
+      `/api/parser-snapshots/${encodeURIComponent(id)}/publish`,
+      {
+        method: "POST",
+        body: JSON.stringify({ review_note: reviewNote }),
+      },
+    ),
+  rejectParserSnapshot: (id: string, reviewNote: string) =>
+    request<{ status: string }>(
+      `/api/parser-snapshots/${encodeURIComponent(id)}/reject`,
+      {
+        method: "POST",
+        body: JSON.stringify({ review_note: reviewNote }),
+      },
+    ),
   logs: async (source = "", status = "") => {
     const query = new URLSearchParams({ limit: "150" });
     if (source) query.set("source", source);

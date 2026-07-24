@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { ExternalLink, RefreshCw } from "lucide-react";
+import {
+  Check,
+  ExternalLink,
+  RefreshCw,
+  RotateCcw,
+  ShieldAlert,
+  X,
+} from "lucide-react";
 import { api } from "../api";
 import {
   ErrorBlock,
@@ -20,7 +27,13 @@ export function SourcesPage({
 }: {
   notify: (text: string, tone?: ToastMessage["tone"]) => void;
 }) {
-  const { data, loading, error, reload } = useRemote(() => api.sources(), []);
+  const { data, loading, error, reload } = useRemote(
+    async () => ({
+      sources: await api.sources(),
+      snapshots: await api.parserSnapshots("", "quarantined"),
+    }),
+    [],
+  );
   const [busy, setBusy] = useState("");
   const [intervalDrafts, setIntervalDrafts] = useState<Record<string, string>>(
     {},
@@ -55,6 +68,73 @@ export function SourcesPage({
         caught instanceof Error
           ? caught.message
           : "Не удалось изменить интервал",
+        "error",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function publishSnapshot(id: string) {
+    if (
+      !window.confirm(
+        "Опубликовать этот снимок несмотря на обнаруженные отклонения?",
+      )
+    ) {
+      return;
+    }
+    setBusy(id);
+    try {
+      await api.publishParserSnapshot(
+        id,
+        "Отклонения проверены администратором",
+      );
+      notify("Снимок опубликован");
+      await reload();
+    } catch (caught) {
+      notify(
+        caught instanceof Error ? caught.message : "Не удалось опубликовать снимок",
+        "error",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function rejectSnapshot(id: string) {
+    const reason = window.prompt("Почему снимок отклонён?");
+    if (!reason?.trim()) return;
+    setBusy(id);
+    try {
+      await api.rejectParserSnapshot(id, reason.trim());
+      notify("Снимок отклонён, рабочие данные не изменены");
+      await reload();
+    } catch (caught) {
+      notify(
+        caught instanceof Error ? caught.message : "Не удалось отклонить снимок",
+        "error",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function rollback(id: string) {
+    if (
+      !window.confirm(
+        "Восстановить предыдущий опубликованный снимок? Подписчики получат уведомления о фактических изменениях.",
+      )
+    ) {
+      return;
+    }
+    setBusy(id);
+    try {
+      await api.rollbackSource(id);
+      notify("Предыдущий снимок восстановлен");
+      await reload();
+    } catch (caught) {
+      notify(
+        caught instanceof Error ? caught.message : "Не удалось выполнить откат",
         "error",
       );
     } finally {
@@ -102,7 +182,10 @@ export function SourcesPage({
       </div>
 
       <section className="source-list card-surface">
-        {(data ?? []).map((source) => {
+        {(data?.sources ?? []).map((source) => {
+          const quarantined = data?.snapshots.filter(
+            (snapshot) => snapshot.data_source_id === source.id,
+          ) ?? [];
           const isBusy = busy === source.id || source.running;
           const duration =
             source.latest_finished_at && source.latest_started_at
@@ -188,6 +271,13 @@ export function SourcesPage({
                   <RefreshCw size={16} className={isBusy ? "spin" : ""} />{" "}
                   {source.running ? "Обновляется" : "Запустить"}
                 </button>
+                <button
+                  className="button button-ghost"
+                  disabled={isBusy || !source.current_snapshot_id}
+                  onClick={() => void rollback(source.id)}
+                >
+                  <RotateCcw size={15} /> Откатить
+                </button>
                 <a href={source.schedule_url} target="_blank" rel="noreferrer">
                   Сайт расписания <ExternalLink size={13} />
                 </a>
@@ -199,6 +289,51 @@ export function SourcesPage({
                   <span>{source.last_error}</span>
                 </div>
               )}
+
+              {quarantined.map((snapshot) => (
+                <div className="snapshot-quarantine" key={snapshot.id}>
+                  <div className="snapshot-quarantine-heading">
+                    <ShieldAlert size={20} />
+                    <div>
+                      <strong>Новый снимок ожидает проверки</strong>
+                      <span>
+                        {formatDateTime(snapshot.created_at)} ·{" "}
+                        {number.format(snapshot.group_count)} групп ·{" "}
+                        {number.format(snapshot.lesson_count)} занятий
+                      </span>
+                    </div>
+                  </div>
+                  <ul>
+                    {snapshot.anomaly_reasons.map((reason) => (
+                      <li key={`${snapshot.id}-${reason.code}-${reason.message}`}>
+                        {reason.message}
+                      </li>
+                    ))}
+                  </ul>
+                  {!snapshot.publishable && (
+                    <p>
+                      Снимок содержит структурные ошибки и не может быть
+                      опубликован вручную.
+                    </p>
+                  )}
+                  <div className="snapshot-quarantine-actions">
+                    <button
+                      className="button button-danger-soft"
+                      disabled={busy === snapshot.id}
+                      onClick={() => void rejectSnapshot(snapshot.id)}
+                    >
+                      <X size={15} /> Отклонить
+                    </button>
+                    <button
+                      className="button button-primary"
+                      disabled={busy === snapshot.id || !snapshot.publishable}
+                      onClick={() => void publishSnapshot(snapshot.id)}
+                    >
+                      <Check size={15} /> Подтвердить публикацию
+                    </button>
+                  </div>
+                </div>
+              ))}
             </article>
           );
         })}
