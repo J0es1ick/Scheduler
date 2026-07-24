@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -16,15 +17,19 @@ import (
 )
 
 const scheduleFetchConcurrency = 3
+const scheduleFetchAttempts = 3
 
-var ErrDataSourceBusy = errors.New("parser: data source is already running")
+var (
+	ErrDataSourceBusy     = errors.New("parser: data source is already running")
+	ErrSnapshotQuarantine = errors.New("parser: candidate snapshot quarantined")
+)
 
 type ParserService struct {
 	dataSourceRepo   *repository.DataSourceRepository
 	parseLogRepo     *repository.ParseLogRepository
 	groupRepo        *repository.GroupRepository
 	scheduleSvc      *ScheduleService
-	semesterSvc      *SemesterService
+	snapshotRepo     *repository.ParserSnapshotRepository
 	notificationRepo *repository.NotificationRepository
 	adapters         map[string]scrapper.SourceAdapter
 }
@@ -34,7 +39,7 @@ func NewParserService(
 	parseLogRepo *repository.ParseLogRepository,
 	groupRepo *repository.GroupRepository,
 	scheduleSvc *ScheduleService,
-	semesterSvc *SemesterService,
+	snapshotRepo *repository.ParserSnapshotRepository,
 	notificationRepo *repository.NotificationRepository,
 ) *ParserService {
 	return &ParserService{
@@ -42,7 +47,7 @@ func NewParserService(
 		parseLogRepo:     parseLogRepo,
 		groupRepo:        groupRepo,
 		scheduleSvc:      scheduleSvc,
-		semesterSvc:      semesterSvc,
+		snapshotRepo:     snapshotRepo,
 		notificationRepo: notificationRepo,
 		adapters:         make(map[string]scrapper.SourceAdapter),
 	}
@@ -50,6 +55,17 @@ func NewParserService(
 
 func (s *ParserService) RegisterAdapter(adapterType string, adapter scrapper.SourceAdapter) {
 	s.adapters[adapterType] = adapter
+}
+
+func (s *ParserService) CleanupInterruptedRuns(ctx context.Context, olderThan time.Duration) error {
+	count, err := s.parseLogRepo.FailInterrupted(ctx, olderThan)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		slog.Warn("parser: interrupted runs marked failed", "count", count)
+	}
+	return nil
 }
 
 func (s *ParserService) RunDataSource(ctx context.Context, dataSourceID string) (int, error) {
@@ -80,16 +96,24 @@ func (s *ParserService) RunDataSource(ctx context.Context, dataSourceID string) 
 
 	semesterID := adapter.UniversityID() + "-current"
 	adapter.SetSemesterID(semesterID)
-
-	logID := uuid.New().String()
+	logID := uuid.NewString()
 	if _, err = s.parseLogRepo.CreateParseLog(ctx, logID, ds.ID, "running", 0, ""); err != nil {
 		return 0, fmt.Errorf("parser: create parse log: %w", err)
 	}
 	startedAt := time.Now()
 	fail := func(records int, runErr error) (int, error) {
-		message := runErr.Error()
+		message := truncate(runErr.Error(), 4000)
 		_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "failed", records, message)
-		_ = s.markDataSourceError(ctx, ds, message)
+		failures, recordErr := s.dataSourceRepo.RecordFailure(ctx, ds.ID, message)
+		if recordErr != nil {
+			slog.Error("parser: record source failure failed", "source", ds.ID, "err", recordErr)
+		}
+		if failures == 1 || failures%3 == 0 {
+			s.enqueueAdminAlert(ctx, "parser-failure:"+logID, fmt.Sprintf(
+				"⚠️ Ошибка обновления расписания\n\nИсточник: %s\nПопытка подряд: %d\nОшибка: %s",
+				adapter.Name(), failures, truncate(message, 1200),
+			))
+		}
 		return records, runErr
 	}
 
@@ -101,106 +125,405 @@ func (s *ParserService) RunDataSource(ctx context.Context, dataSourceID string) 
 		return fail(0, fmt.Errorf("parser: FetchGroups [%s] returned no groups", adapter.Name()))
 	}
 
-	activeIDs := make([]string, 0, len(groups))
-	for _, group := range groups {
-		if err = s.upsertGroup(ctx, group); err != nil {
-			return fail(0, fmt.Errorf("parser: sync group %s: %w", group.Name, err))
-		}
-		activeIDs = append(activeIDs, group.ID)
-	}
-	if err = s.groupRepo.DeactivateGroupsExcept(ctx, adapter.UniversityID(), activeIDs); err != nil {
-		return fail(0, fmt.Errorf("parser: deactivate stale groups: %w", err))
-	}
-	slog.Info("parser: groups synced", "adapter", adapter.Name(), "count", len(groups))
-
 	results := s.fetchSchedules(ctx, adapter, groups)
 	var fetchErrors []error
-	minDate, maxDate := time.Time{}, time.Time{}
-	successfulGroups := 0
 	for _, result := range results {
 		if result.err != nil {
 			fetchErrors = append(fetchErrors, fmt.Errorf("group %s: %w", result.group.Name, result.err))
-			continue
-		}
-		successfulGroups++
-		for _, lesson := range result.lessons {
-			if lesson.ValidFrom != nil && (minDate.IsZero() || lesson.ValidFrom.Before(minDate)) {
-				minDate = *lesson.ValidFrom
-			}
-			if lesson.ValidTo != nil && (maxDate.IsZero() || lesson.ValidTo.After(maxDate)) {
-				maxDate = *lesson.ValidTo
-			}
 		}
 	}
-	if successfulGroups == 0 {
-		return fail(0, fmt.Errorf("parser: all %d schedule requests failed: %w", len(groups), errors.Join(fetchErrors...)))
-	}
-	if minDate.IsZero() {
-		minDate = time.Now()
-	}
-	if maxDate.IsZero() {
-		maxDate = minDate
-	}
-	if err = s.semesterSvc.UpsertCurrentSnapshot(ctx, semesterID, adapter.UniversityID(), minDate, maxDate); err != nil {
-		return fail(0, fmt.Errorf("parser: publish current semester metadata: %w", err))
+	if len(fetchErrors) > 0 {
+		return fail(0, fmt.Errorf(
+			"parser: candidate was not published because %d/%d schedule requests failed: %w",
+			len(fetchErrors), len(groups), errors.Join(fetchErrors...),
+		))
 	}
 
-	totalLessons := 0
-	var saveErrors []error
-	for _, result := range results {
-		if result.err != nil {
-			continue // keep the previous schedule for a group that could not be fetched
-		}
-		for i := range result.lessons {
-			result.lessons[i].SemesterID = semesterID
-		}
-		before, snapshotErr := s.scheduleSvc.GetAllLessonsForGroup(ctx, result.group.ID)
-		if snapshotErr != nil {
-			saveErrors = append(saveErrors, fmt.Errorf("group %s: read previous schedule: %w", result.group.Name, snapshotErr))
-			continue
-		}
-		if err = s.scheduleSvc.ReplaceGroupLessons(ctx, result.group.ID, result.lessons); err != nil {
-			saveErrors = append(saveErrors, fmt.Errorf("group %s: %w", result.group.Name, err))
-			continue
-		}
-		totalLessons += len(result.lessons)
-		after, snapshotErr := s.scheduleSvc.GetAllLessonsForGroup(ctx, result.group.ID)
-		if snapshotErr != nil {
-			saveErrors = append(saveErrors, fmt.Errorf("group %s: read published schedule: %w", result.group.Name, snapshotErr))
-			continue
-		}
-		diff := CompareLessonSnapshots(before, after)
-		if diff.Changed() && s.notificationRepo != nil {
-			if enqueueErr := s.notificationRepo.EnqueueScheduleChange(
-				ctx,
-				uuid.NewString(),
-				result.group.ID,
-				"parser",
-				scheduleChangeSummary(diff),
-			); enqueueErr != nil {
-				slog.Error("parser: enqueue schedule notification failed",
-					"group", result.group.ID,
-					"err", enqueueErr,
-				)
-			}
-		}
+	payload, lessonCount := buildScheduleSnapshot(adapter.UniversityID(), semesterID, results)
+	baseline, err := s.snapshotRepo.Baseline(ctx, adapter.UniversityID(), ds.ID)
+	if err != nil {
+		return fail(lessonCount, fmt.Errorf("parser: load baseline: %w", err))
+	}
+	anomalies, publishable := evaluateSnapshot(payload, lessonCount, baseline)
+	status := domain.SnapshotStatusStaged
+	if len(anomalies) > 0 {
+		status = domain.SnapshotStatusQuarantined
+	}
+	snapshot := &domain.ParserSnapshot{
+		ID:             uuid.NewString(),
+		DataSourceID:   ds.ID,
+		ParseLogID:     logID,
+		Status:         status,
+		Publishable:    publishable,
+		GroupCount:     len(payload.Groups),
+		LessonCount:    lessonCount,
+		AnomalyReasons: anomalies,
+		Payload:        payload,
+	}
+	if err = s.snapshotRepo.Create(ctx, snapshot); err != nil {
+		return fail(lessonCount, fmt.Errorf("parser: stage snapshot: %w", err))
+	}
+	if status == domain.SnapshotStatusQuarantined {
+		summary := anomalySummary(anomalies)
+		_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "quarantined", lessonCount, summary)
+		_ = s.dataSourceRepo.RecordQuarantine(ctx, ds.ID,
+			fmt.Sprintf("Снимок %s помещён в карантин: %s", snapshot.ID, summary))
+		s.enqueueAdminAlert(ctx, "parser-quarantine:"+snapshot.ID, fmt.Sprintf(
+			"🛡 Снимок расписания помещён в карантин\n\nИсточник: %s\nГрупп: %d\nЗанятий: %d\nПричины: %s\n\nПроверьте снимок в админ-панели.",
+			adapter.Name(), snapshot.GroupCount, snapshot.LessonCount, truncate(summary, 1800),
+		))
+		return lessonCount, fmt.Errorf("%w: snapshot=%s: %s", ErrSnapshotQuarantine, snapshot.ID, summary)
 	}
 
-	combinedErrors := append(fetchErrors, saveErrors...)
-	if len(combinedErrors) > 0 {
-		runErr := fmt.Errorf("parser: incomplete snapshot (%d fetch errors, %d save errors): %w", len(fetchErrors), len(saveErrors), errors.Join(combinedErrors...))
-		return fail(totalLessons, runErr)
+	if _, err = s.publishSnapshot(ctx, snapshot.ID, "", "Автоматическая публикация"); err != nil {
+		return fail(lessonCount, fmt.Errorf("parser: publish snapshot %s: %w", snapshot.ID, err))
 	}
-
+	_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "success", lessonCount, "")
+	_ = s.snapshotRepo.Prune(ctx, ds.ID, snapshot.ID)
 	slog.Info("parser: data source run complete",
 		"adapter", adapter.Name(),
-		"groups", len(groups),
-		"lessons", totalLessons,
+		"groups", len(payload.Groups),
+		"lessons", lessonCount,
+		"snapshot", snapshot.ID,
 		"elapsed", time.Since(startedAt),
 	)
-	_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "success", totalLessons, "")
-	_ = s.markDataSourceSuccess(ctx, ds)
-	return totalLessons, nil
+	return lessonCount, nil
+}
+
+func (s *ParserService) PublishSnapshot(
+	ctx context.Context,
+	snapshotID, actorID, reviewNote string,
+) (*domain.ParserSnapshot, error) {
+	candidate, err := s.snapshotRepo.Get(ctx, snapshotID)
+	if err != nil || candidate == nil {
+		return candidate, err
+	}
+	release, acquired, err := s.dataSourceRepo.TryAcquireRunLock(ctx, candidate.DataSourceID)
+	if err != nil {
+		return nil, err
+	}
+	if !acquired {
+		return nil, fmt.Errorf("%w: %s", ErrDataSourceBusy, candidate.DataSourceID)
+	}
+	defer func() { _ = release() }()
+	return s.publishSnapshot(ctx, snapshotID, actorID, reviewNote)
+}
+
+func (s *ParserService) RejectSnapshot(
+	ctx context.Context,
+	snapshotID, actorID, reviewNote string,
+) error {
+	return s.snapshotRepo.Reject(ctx, snapshotID, actorID, reviewNote)
+}
+
+func (s *ParserService) RollbackSource(
+	ctx context.Context,
+	sourceID, actorID, reviewNote string,
+) (*domain.ParserSnapshot, error) {
+	release, acquired, err := s.dataSourceRepo.TryAcquireRunLock(ctx, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	if !acquired {
+		return nil, fmt.Errorf("%w: %s", ErrDataSourceBusy, sourceID)
+	}
+	defer func() { _ = release() }()
+	previous, err := s.snapshotRepo.PreviousPublished(ctx, sourceID)
+	if err != nil || previous == nil {
+		return previous, err
+	}
+	return s.publishSnapshot(ctx, previous.ID, actorID, reviewNote)
+}
+
+func (s *ParserService) publishSnapshot(
+	ctx context.Context,
+	snapshotID, actorID, reviewNote string,
+) (*domain.ParserSnapshot, error) {
+	candidate, err := s.snapshotRepo.Get(ctx, snapshotID)
+	if err != nil || candidate == nil {
+		return candidate, err
+	}
+	groupIDs := make(map[string]struct{}, len(candidate.Payload.Groups))
+	for _, group := range candidate.Payload.Groups {
+		groupIDs[group.ID] = struct{}{}
+	}
+	currentGroups, err := s.groupRepo.GetGroupsByUniversityID(ctx, candidate.Payload.UniversityID)
+	if err != nil {
+		return nil, err
+	}
+	for _, group := range currentGroups {
+		groupIDs[group.ID] = struct{}{}
+	}
+	before, err := s.captureEffectiveSchedules(ctx, candidate.Payload.UniversityID, groupIDs)
+	if err != nil {
+		return nil, err
+	}
+	published, err := s.snapshotRepo.Publish(ctx, snapshotID, actorID, reviewNote)
+	if err != nil {
+		return nil, err
+	}
+	after, err := s.captureEffectiveSchedules(ctx, candidate.Payload.UniversityID, groupIDs)
+	if err != nil {
+		slog.Error("parser: published snapshot but failed to read resulting schedules",
+			"snapshot", snapshotID, "err", err)
+		return published, nil
+	}
+	for groupID := range groupIDs {
+		diff := CompareLessonSnapshots(before[groupID], after[groupID])
+		if !diff.Changed() || s.notificationRepo == nil {
+			continue
+		}
+		if enqueueErr := s.notificationRepo.EnqueueScheduleChange(
+			ctx, uuid.NewString(), groupID, "parser", scheduleChangeSummary(diff),
+		); enqueueErr != nil {
+			slog.Error("parser: enqueue schedule notification failed",
+				"group", groupID, "snapshot", snapshotID, "err", enqueueErr)
+		}
+	}
+	return published, nil
+}
+
+func (s *ParserService) captureEffectiveSchedules(
+	ctx context.Context,
+	universityID string,
+	groupIDs map[string]struct{},
+) (map[string][]domain.Lesson, error) {
+	result := make(map[string][]domain.Lesson, len(groupIDs))
+	for groupID := range groupIDs {
+		result[groupID] = []domain.Lesson{}
+	}
+	lessons, err := s.scheduleSvc.GetAllLessonsForUniversity(ctx, universityID)
+	if err != nil {
+		return nil, fmt.Errorf("read effective schedule for university %s: %w", universityID, err)
+	}
+	for _, lesson := range lessons {
+		result[lesson.GroupID] = append(result[lesson.GroupID], lesson)
+	}
+	return result, nil
+}
+
+func (s *ParserService) enqueueAdminAlert(ctx context.Context, id, body string) {
+	if s.notificationRepo == nil {
+		return
+	}
+	if err := s.notificationRepo.EnqueueAdminAlert(ctx, id, body); err != nil {
+		slog.Error("parser: enqueue admin alert failed", "id", id, "err", err)
+	}
+}
+
+func buildScheduleSnapshot(
+	universityID, semesterID string,
+	results []groupScheduleResult,
+) (domain.ScheduleSnapshot, int) {
+	payload := domain.ScheduleSnapshot{
+		UniversityID: universityID,
+		SemesterID:   semesterID,
+		Groups:       make([]domain.SnapshotGroup, 0, len(results)),
+	}
+	total := 0
+	for _, result := range results {
+		group := domain.SnapshotGroup{
+			ID:           result.group.ID,
+			UniversityID: universityID,
+			Name:         strings.TrimSpace(result.group.Name),
+			Lessons:      result.lessons,
+		}
+		for i := range group.Lessons {
+			lesson := &group.Lessons[i]
+			lesson.UniversityID = universityID
+			lesson.SemesterID = semesterID
+			lesson.GroupID = group.ID
+			if lesson.ValidFrom != nil && (payload.StartDate.IsZero() || lesson.ValidFrom.Before(payload.StartDate)) {
+				payload.StartDate = *lesson.ValidFrom
+			}
+			if lesson.ValidTo != nil && (payload.EndDate.IsZero() || lesson.ValidTo.After(payload.EndDate)) {
+				payload.EndDate = *lesson.ValidTo
+			}
+		}
+		total += len(group.Lessons)
+		payload.Groups = append(payload.Groups, group)
+	}
+	now := time.Now()
+	if payload.StartDate.IsZero() {
+		payload.StartDate = now
+	}
+	if payload.EndDate.IsZero() {
+		payload.EndDate = payload.StartDate
+	}
+	return payload, total
+}
+
+func evaluateSnapshot(
+	payload domain.ScheduleSnapshot,
+	lessonCount int,
+	baseline *domain.SnapshotBaseline,
+) ([]domain.SnapshotAnomaly, bool) {
+	anomalies := make([]domain.SnapshotAnomaly, 0)
+	publishable := true
+	groupIDs := make(map[string]struct{}, len(payload.Groups))
+	groupNames := make(map[string]struct{}, len(payload.Groups))
+	lessonIDs := make(map[string]struct{}, lessonCount)
+	emptyPreviouslyPopulated := 0
+
+	for _, group := range payload.Groups {
+		switch {
+		case strings.TrimSpace(group.ID) == "":
+			anomalies = append(anomalies, structuralAnomaly("group_id_empty", "У группы отсутствует идентификатор"))
+			publishable = false
+		case group.UniversityID != payload.UniversityID:
+			anomalies = append(anomalies, structuralAnomaly("group_university_mismatch", "Группа относится к другому учебному заведению"))
+			publishable = false
+		}
+		if _, exists := groupIDs[group.ID]; exists {
+			anomalies = append(anomalies, structuralAnomaly("group_id_duplicate", "В снимке повторяется идентификатор группы "+group.ID))
+			publishable = false
+		}
+		groupIDs[group.ID] = struct{}{}
+		normalizedName := strings.ToLower(strings.TrimSpace(group.Name))
+		if normalizedName == "" {
+			anomalies = append(anomalies, structuralAnomaly("group_name_empty", "У группы отсутствует название"))
+			publishable = false
+		} else if _, exists := groupNames[normalizedName]; exists {
+			anomalies = append(anomalies, structuralAnomaly("group_name_duplicate", "В снимке повторяется название группы "+group.Name))
+			publishable = false
+		}
+		groupNames[normalizedName] = struct{}{}
+		if baseline.LessonsByGroup[group.ID] > 0 && len(group.Lessons) == 0 {
+			emptyPreviouslyPopulated++
+		}
+		for _, lesson := range group.Lessons {
+			if reason := validateSnapshotLesson(lesson, group.ID, payload); reason != "" {
+				anomalies = append(anomalies, structuralAnomaly("lesson_invalid", reason))
+				publishable = false
+			}
+			if _, exists := lessonIDs[lesson.ID]; exists {
+				anomalies = append(anomalies, structuralAnomaly("lesson_id_duplicate", "Повторяется идентификатор занятия "+lesson.ID))
+				publishable = false
+			}
+			lessonIDs[lesson.ID] = struct{}{}
+		}
+	}
+
+	if lessonCount == 0 {
+		anomalies = append(anomalies, domain.SnapshotAnomaly{
+			Code: "all_lessons_empty", Message: "Источник вернул пустое расписание для всех групп",
+		})
+	}
+	if !baseline.HasExistingState {
+		return uniqueAnomalies(anomalies), publishable
+	}
+	groupRatio := safeRatio(len(payload.Groups), baseline.GroupCount)
+	lessonRatio := safeRatio(lessonCount, baseline.LessonCount)
+	if baseline.GroupCount >= 10 && groupRatio < 0.70 {
+		anomalies = append(anomalies, ratioAnomaly(
+			"group_count_drop", "Количество групп уменьшилось более чем на 30%",
+			baseline.GroupCount, len(payload.Groups), groupRatio,
+		))
+	}
+	if baseline.GroupCount >= 20 && groupRatio > 1.80 {
+		anomalies = append(anomalies, ratioAnomaly(
+			"group_count_spike", "Количество групп выросло более чем на 80%",
+			baseline.GroupCount, len(payload.Groups), groupRatio,
+		))
+	}
+	if baseline.LessonCount >= 20 && lessonRatio < 0.60 {
+		anomalies = append(anomalies, ratioAnomaly(
+			"lesson_count_drop", "Количество занятий уменьшилось более чем на 40%",
+			baseline.LessonCount, lessonCount, lessonRatio,
+		))
+	}
+	if baseline.LessonCount >= 20 && lessonRatio > 2.0 {
+		anomalies = append(anomalies, ratioAnomaly(
+			"lesson_count_spike", "Количество занятий выросло более чем в два раза",
+			baseline.LessonCount, lessonCount, lessonRatio,
+		))
+	}
+	emptyLimit := int(math.Max(3, math.Ceil(float64(baseline.GroupCount)*0.10)))
+	if emptyPreviouslyPopulated >= emptyLimit {
+		anomalies = append(anomalies, domain.SnapshotAnomaly{
+			Code:      "many_groups_became_empty",
+			Message:   fmt.Sprintf("У %d ранее заполненных групп исчезло всё расписание", emptyPreviouslyPopulated),
+			Current:   baseline.GroupCount,
+			Candidate: emptyPreviouslyPopulated,
+		})
+	}
+	return uniqueAnomalies(anomalies), publishable
+}
+
+func validateSnapshotLesson(
+	lesson domain.Lesson,
+	groupID string,
+	payload domain.ScheduleSnapshot,
+) string {
+	switch {
+	case strings.TrimSpace(lesson.ID) == "":
+		return "У занятия отсутствует идентификатор"
+	case lesson.GroupID != groupID:
+		return "Занятие " + lesson.ID + " привязано к другой группе"
+	case lesson.UniversityID != payload.UniversityID:
+		return "Занятие " + lesson.ID + " относится к другому учебному заведению"
+	case strings.TrimSpace(lesson.Subject) == "":
+		return "У занятия " + lesson.ID + " отсутствует дисциплина"
+	case strings.TrimSpace(lesson.TimeStart) == "" || strings.TrimSpace(lesson.TimeEnd) == "":
+		return "У занятия " + lesson.ID + " не указано время"
+	case lesson.ValidFrom != nil && lesson.ValidTo != nil && lesson.ValidFrom.After(*lesson.ValidTo):
+		return "У занятия " + lesson.ID + " некорректный период действия"
+	}
+	switch lesson.WeekType {
+	case domain.WeekTypeDate:
+		if lesson.SpecialDate == nil {
+			return "У разового занятия " + lesson.ID + " отсутствует дата"
+		}
+	case domain.WeekTypeEvery, domain.WeekTypeOdd, domain.WeekTypeEven:
+		if lesson.DayOfWeek < 1 || lesson.DayOfWeek > 7 {
+			return "У занятия " + lesson.ID + " некорректный день недели"
+		}
+	default:
+		return "У занятия " + lesson.ID + " неизвестный тип недели"
+	}
+	return ""
+}
+
+func structuralAnomaly(code, message string) domain.SnapshotAnomaly {
+	return domain.SnapshotAnomaly{Code: code, Message: message}
+}
+
+func ratioAnomaly(code, message string, current, candidate int, ratio float64) domain.SnapshotAnomaly {
+	return domain.SnapshotAnomaly{
+		Code: code, Message: message, Current: current, Candidate: candidate, Ratio: ratio,
+	}
+}
+
+func safeRatio(candidate, current int) float64 {
+	if current == 0 {
+		if candidate == 0 {
+			return 1
+		}
+		return math.Inf(1)
+	}
+	return float64(candidate) / float64(current)
+}
+
+func uniqueAnomalies(items []domain.SnapshotAnomaly) []domain.SnapshotAnomaly {
+	seen := make(map[string]bool, len(items))
+	result := make([]domain.SnapshotAnomaly, 0, len(items))
+	for _, item := range items {
+		key := item.Code + "\x00" + item.Message
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, item)
+	}
+	return result
+}
+
+func anomalySummary(items []domain.SnapshotAnomaly) string {
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		parts = append(parts, item.Message)
+	}
+	return strings.Join(parts, "; ")
 }
 
 func scheduleChangeSummary(diff ScheduleDiff) string {
@@ -226,7 +549,11 @@ type groupScheduleResult struct {
 	err     error
 }
 
-func (s *ParserService) fetchSchedules(ctx context.Context, adapter scrapper.SourceAdapter, groups []domain.Group) []groupScheduleResult {
+func (s *ParserService) fetchSchedules(
+	ctx context.Context,
+	adapter scrapper.SourceAdapter,
+	groups []domain.Group,
+) []groupScheduleResult {
 	results := make([]groupScheduleResult, len(groups))
 	sem := make(chan struct{}, scheduleFetchConcurrency)
 	var wg sync.WaitGroup
@@ -242,12 +569,38 @@ func (s *ParserService) fetchSchedules(ctx context.Context, adapter scrapper.Sou
 				results[i] = groupScheduleResult{group: group, err: ctx.Err()}
 				return
 			}
-			lessons, err := adapter.FetchSchedule(ctx, group.ID)
+			lessons, err := fetchScheduleWithRetry(ctx, adapter, group.ID)
 			results[i] = groupScheduleResult{group: group, lessons: lessons, err: err}
 		}()
 	}
 	wg.Wait()
 	return results
+}
+
+func fetchScheduleWithRetry(
+	ctx context.Context,
+	adapter scrapper.SourceAdapter,
+	groupID string,
+) ([]domain.Lesson, error) {
+	var lastErr error
+	for attempt := 1; attempt <= scheduleFetchAttempts; attempt++ {
+		lessons, err := adapter.FetchSchedule(ctx, groupID)
+		if err == nil {
+			return lessons, nil
+		}
+		lastErr = err
+		if attempt == scheduleFetchAttempts || ctx.Err() != nil {
+			break
+		}
+		timer := time.NewTimer(time.Duration(attempt) * 500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil, lastErr
 }
 
 func (s *ParserService) RunAllActiveSources(ctx context.Context) error {
@@ -265,29 +618,9 @@ func (s *ParserService) RunAllActiveSources(ctx context.Context) error {
 	return errors.Join(runErrors...)
 }
 
-func (s *ParserService) upsertGroup(ctx context.Context, group domain.Group) error {
-	existing, err := s.groupRepo.GetGroupByID(ctx, group.ID)
-	if err != nil {
-		return err
+func truncate(value string, maximum int) string {
+	if len(value) <= maximum {
+		return value
 	}
-	if existing == nil {
-		_, err = s.groupRepo.CreateGroup(ctx, group.ID, group.UniversityID, group.Name, true)
-		return err
-	}
-	if existing.Name != group.Name || !existing.IsActive {
-		return s.groupRepo.UpdateGroup(ctx, group.ID, group.Name, true)
-	}
-	return nil
-}
-
-func (s *ParserService) markDataSourceError(ctx context.Context, dataSource *domain.DataSource, message string) error {
-	dataSource.LastRunAt = time.Now()
-	dataSource.LastError = message
-	return s.dataSourceRepo.UpdateDataSource(ctx, dataSource)
-}
-
-func (s *ParserService) markDataSourceSuccess(ctx context.Context, dataSource *domain.DataSource) error {
-	dataSource.LastRunAt = time.Now()
-	dataSource.LastError = ""
-	return s.dataSourceRepo.UpdateDataSource(ctx, dataSource)
+	return value[:maximum] + "…"
 }
