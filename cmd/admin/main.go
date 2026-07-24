@@ -53,7 +53,7 @@ func main() {
 		repository.NewParseLogRepository(db.DB),
 		groupRepo,
 		scheduleService,
-		service.NewSemesterService(semesterRepo),
+		repository.NewParserSnapshotRepository(db.DB),
 		repository.NewNotificationRepository(db.DB),
 	)
 	parserService.RegisterAdapter(isuct.UniversityID, isuct.New(""))

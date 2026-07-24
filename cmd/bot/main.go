@@ -77,20 +77,22 @@ func main() {
 	universityRepo := repository.NewUniversityRepository(db.DB)
 	subscriptionRepo := repository.NewSubscriptionRepository(db.DB)
 	supportRequestRepo := repository.NewSupportRequestRepository(db.DB)
+	metricsRepo := repository.NewMetricsRepository(db.DB)
 	dataSourceRepo := repository.NewDataSourceRepository(db.DB)
 	parseLogRepo := repository.NewParseLogRepository(db.DB)
 	notificationRepo := repository.NewNotificationRepository(db.DB)
+	snapshotRepo := repository.NewParserSnapshotRepository(db.DB)
 
 	// --- Сервисы ---
 	scheduleService := service.NewScheduleService(lessonRepo, semesterRepo, groupRepo)
 	userService := service.NewUserService(userRepo)
 	subscriptionService := service.NewSubscriptionService(subscriptionRepo)
 	supportRequestService := service.NewSupportRequestService(supportRequestRepo)
-	semesterService := service.NewSemesterService(semesterRepo)
+	metricsService := service.NewMetricsService(metricsRepo)
 	groupService := service.NewGroupService(groupRepo)
 	universityService := service.NewUniversityService(universityRepo)
 	parserService := service.NewParserService(
-		dataSourceRepo, parseLogRepo, groupRepo, scheduleService, semesterService, notificationRepo,
+		dataSourceRepo, parseLogRepo, groupRepo, scheduleService, snapshotRepo, notificationRepo,
 	)
 
 	// --- Адаптеры ---
@@ -107,7 +109,8 @@ func main() {
 	stateManager := state.NewManager()
 	handler := handlers.NewHandler(
 		scheduleService, userService, groupService,
-		universityService, stateManager, subscriptionService, supportRequestService, cfg.Admin.PublicURL,
+		universityService, stateManager, subscriptionService, supportRequestService,
+		metricsService, cfg.Admin.PublicURL,
 	)
 	botpkg.Register(bot, handler)
 

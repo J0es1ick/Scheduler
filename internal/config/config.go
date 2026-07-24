@@ -10,9 +10,12 @@ import (
 )
 
 type Config struct {
-	BotToken string         `mapstructure:"BOT_TOKEN"`
-	Database DatabaseConfig `mapstructure:",squash"`
-	Admin    AdminConfig    `mapstructure:",squash"`
+	BotToken     string         `mapstructure:"BOT_TOKEN"`
+	ProjectURL   string         `mapstructure:"PROJECT_URL"`
+	BotPublicURL string         `mapstructure:"BOT_PUBLIC_URL"`
+	Database     DatabaseConfig `mapstructure:",squash"`
+	Admin        AdminConfig    `mapstructure:",squash"`
+	Site         SiteConfig     `mapstructure:",squash"`
 }
 
 type DatabaseConfig struct {
@@ -29,14 +32,31 @@ type AdminConfig struct {
 	PublicURL   string `mapstructure:"ADMIN_PUBLIC_URL"`
 }
 
+type SiteConfig struct {
+	Port string `mapstructure:"SITE_PORT"`
+}
+
 func InitConfig() (*Config, error) {
+	return initConfig(true)
+}
+
+func InitSiteConfig() (*Config, error) {
+	return initConfig(false)
+}
+
+func initConfig(requireBotToken bool) (*Config, error) {
 	reader := viper.New()
 	reader.SetConfigFile(".env")
 	reader.SetConfigType("env")
 	reader.AutomaticEnv()
-	reader.SetDefault("ADMIN_PORT", "8080")
+	reader.SetDefault("ADMIN_PORT", "18080")
+	reader.SetDefault("SITE_PORT", "18081")
+	reader.SetDefault("PROJECT_URL", "https://github.com/J0es1ick/Scheduler")
+	reader.SetDefault("BOT_PUBLIC_URL", "https://t.me/schedule_free_bot")
 	for _, key := range []string{
 		"BOT_TOKEN",
+		"PROJECT_URL",
+		"BOT_PUBLIC_URL",
 		"DATABASE_HOST",
 		"DATABASE_PORT",
 		"DATABASE_USER",
@@ -45,6 +65,7 @@ func InitConfig() (*Config, error) {
 		"ADMIN_PORT",
 		"ADMIN_ACCESS_TOKEN",
 		"ADMIN_PUBLIC_URL",
+		"SITE_PORT",
 	} {
 		if err := reader.BindEnv(key); err != nil {
 			return nil, fmt.Errorf("config: bind %s: %w", key, err)
@@ -62,16 +83,16 @@ func InitConfig() (*Config, error) {
 		return nil, fmt.Errorf("config: unmarshal: %w", err)
 	}
 
-	if err := cfg.validate(); err != nil {
+	if err := cfg.validate(requireBotToken); err != nil {
 		return nil, fmt.Errorf("config: validation: %w", err)
 	}
 
 	return &cfg, nil
 }
 
-func (c *Config) validate() error {
+func (c *Config) validate(requireBotToken bool) error {
 	var missing []string
-	if c.BotToken == "" {
+	if requireBotToken && c.BotToken == "" {
 		missing = append(missing, "BOT_TOKEN")
 	}
 	if c.Database.Host == "" {
