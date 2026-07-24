@@ -111,9 +111,9 @@ func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) e
 
 	slog.Info("search completed", "type", state.SearchType, "query", state.SearchQuery, "days", len(days))
 
-	header := fmt.Sprintf("Результаты поиска: *%s*", state.SearchQuery)
-	if err := c.Send(header, &tgbotapi.SendOptions{ParseMode: tgbotapi.ModeMarkdown}); err != nil {
+	header := fmt.Sprintf("Результаты поиска: %s", state.SearchQuery)
+	if err := c.Send(header); err != nil {
 		return err
 	}
-	return h.sendDays(c, days)
+	return h.sendDays(c, days, state.UniversityID)
 }

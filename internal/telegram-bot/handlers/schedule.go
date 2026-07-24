@@ -24,7 +24,7 @@ func formatDaySchedule(day dto.DaySchedule) string {
 	if wd == 0 {
 		wd = 7 // воскресенье
 	}
-	header := fmt.Sprintf("*%s, %s*\n", weekdayNames[wd], day.Date.Format("02.01.2006"))
+	header := fmt.Sprintf("%s, %s\n", weekdayNames[wd], day.Date.Format("02.01.2006"))
 
 	if len(day.Lessons) == 0 {
 		return header + "Занятий нет.\n"
@@ -68,7 +68,7 @@ func lessonTypeLabel(lessonType domain.LessonType) string {
 
 // sendDays форматирует расписание и отправляет его, разбивая на части
 // если текст превышает лимит Telegram.
-func (h *Handler) sendDays(c tgbotapi.Context, days []dto.DaySchedule) error {
+func (h *Handler) sendDays(c tgbotapi.Context, days []dto.DaySchedule, universityID string) error {
 	if len(days) == 0 {
 		return c.Send("Занятий нет.")
 	}
@@ -78,14 +78,32 @@ func (h *Handler) sendDays(c tgbotapi.Context, days []dto.DaySchedule) error {
 		full.WriteString(formatDaySchedule(day))
 		full.WriteString("\n")
 	}
+	full.WriteString(h.sourceFreshnessText(universityID))
 
-	opts := &tgbotapi.SendOptions{ParseMode: tgbotapi.ModeMarkdown}
 	for _, part := range service.SplitMessage(full.String(), tgMaxLen) {
-		if err := c.Send(part, opts); err != nil {
+		if err := c.Send(part); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (h *Handler) sourceFreshnessText(universityID string) string {
+	ctx, cancel := reqCtx()
+	defer cancel()
+	freshness, err := h.UniversityService.GetSourceFreshness(ctx, universityID)
+	if err != nil || freshness == nil {
+		return "\nИсточник: данные сервиса; время обновления недоступно."
+	}
+	result := "\nИсточник: " + freshness.ScheduleURL
+	if freshness.LastSuccess == nil {
+		return result + "\nПоследнее успешное обновление ещё не зафиксировано."
+	}
+	return result + "\nОбновлено: " + freshness.LastSuccess.In(time.Local).Format("02.01.2006 15:04 MST")
+}
+
+func (h *Handler) sendSingleDay(c tgbotapi.Context, day dto.DaySchedule, universityID string) error {
+	return c.Send(formatDaySchedule(day) + h.sourceFreshnessText(universityID))
 }
 
 // getScheduleForState загружает расписание группы за диапазон дат.
@@ -143,10 +161,7 @@ func (h *Handler) HandleToday(c tgbotapi.Context) error {
 	if len(days) == 0 {
 		return c.Send("На сегодня занятий нет.")
 	}
-	return c.Send(
-		formatDaySchedule(days[0]),
-		&tgbotapi.SendOptions{ParseMode: tgbotapi.ModeMarkdown},
-	)
+	return h.sendSingleDay(c, days[0], state.UniversityID)
 }
 
 func (h *Handler) HandleTomorrow(c tgbotapi.Context) error {
@@ -162,10 +177,7 @@ func (h *Handler) HandleTomorrow(c tgbotapi.Context) error {
 	if len(days) == 0 {
 		return c.Send("На завтра занятий нет.")
 	}
-	return c.Send(
-		formatDaySchedule(days[0]),
-		&tgbotapi.SendOptions{ParseMode: tgbotapi.ModeMarkdown},
-	)
+	return h.sendSingleDay(c, days[0], state.UniversityID)
 }
 
 func (h *Handler) HandleWeek(c tgbotapi.Context) error {
@@ -177,7 +189,7 @@ func (h *Handler) HandleWeek(c tgbotapi.Context) error {
 	defer cancel()
 
 	now := time.Now()
-	return h.sendDays(c, h.getScheduleForState(ctx, state, now, now.AddDate(0, 0, 6)))
+	return h.sendDays(c, h.getScheduleForState(ctx, state, now, now.AddDate(0, 0, 6)), state.UniversityID)
 }
 
 func (h *Handler) HandleTwoWeeks(c tgbotapi.Context) error {
@@ -189,7 +201,7 @@ func (h *Handler) HandleTwoWeeks(c tgbotapi.Context) error {
 	defer cancel()
 
 	now := time.Now()
-	return h.sendDays(c, h.getScheduleForState(ctx, state, now, now.AddDate(0, 0, 13)))
+	return h.sendDays(c, h.getScheduleForState(ctx, state, now, now.AddDate(0, 0, 13)), state.UniversityID)
 }
 
 func (h *Handler) HandleWeekDay(c tgbotapi.Context) error {
@@ -227,10 +239,7 @@ func (h *Handler) HandleWeekDaySelect(c tgbotapi.Context) error {
 			wd = 7
 		}
 		if wd == weekdayNum {
-			return c.Send(
-				formatDaySchedule(day),
-				&tgbotapi.SendOptions{ParseMode: tgbotapi.ModeMarkdown},
-			)
+			return h.sendSingleDay(c, day, state.UniversityID)
 		}
 	}
 	return c.Send("В выбранный день занятий нет.")

@@ -22,7 +22,10 @@ func Register(bot *tele.Bot, handler *handlers.Handler) {
 		{Text: "settings", Description: "Подписки и уведомления"},
 		{Text: "subscriptions", Description: "Подписки на группы"},
 		{Text: "hotline", Description: "Горячая линия расписаний"},
-		{Text: "admin", Description: "Открыть админ-панель"},
+		{Text: "privacy", Description: "Какие данные хранит бот"},
+		{Text: "my_data", Description: "Скачать мои данные"},
+		{Text: "delete_me", Description: "Удалить мой профиль"},
+		{Text: "sources", Description: "Источники расписания"},
 	}
 	go configureCommands(bot, commands)
 
@@ -39,6 +42,11 @@ func Register(bot *tele.Bot, handler *handlers.Handler) {
 	bot.Handle("/subscriptions", handler.HandleSettings)
 	bot.Handle("/hotline", handler.HandleHotline)
 	bot.Handle("/admin", handler.HandleAdmin)
+	bot.Handle("/privacy", handler.HandlePrivacy)
+	bot.Handle("/my_data", handler.HandleMyData)
+	bot.Handle("/delete_me", handler.HandleDeleteMe)
+	bot.Handle("/sources", handler.HandleSourcesInfo)
+	bot.Handle("/metrics", handler.HandleMetrics)
 
 	bot.Handle(&tele.Btn{Unique: "select_university"}, handler.HandleUniversitySelect)
 	bot.Handle(&tele.Btn{Unique: "select_search_type"}, handler.HandleSearchTypeSelect)
@@ -49,6 +57,8 @@ func Register(bot *tele.Bot, handler *handlers.Handler) {
 	bot.Handle(&tele.Btn{Unique: "toggle_notifications"}, handler.HandleToggleNotifications)
 	bot.Handle(&tele.Btn{Unique: "select_hotline_type"}, handler.HandleHotlineType)
 	bot.Handle(&tele.Btn{Unique: "cancel_hotline"}, handler.HandleCancelHotline)
+	bot.Handle(&tele.Btn{Unique: "confirm_delete_profile"}, handler.HandleConfirmDeleteProfile)
+	bot.Handle(&tele.Btn{Unique: "cancel_delete_profile"}, handler.HandleCancelDeleteProfile)
 
 	bot.Handle("На сегодня", handler.HandleToday)
 	bot.Handle("На завтра", handler.HandleTomorrow)

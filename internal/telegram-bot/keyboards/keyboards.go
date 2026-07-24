@@ -117,3 +117,12 @@ func HotlineTypeSelector() *tgbotapi.ReplyMarkup {
 	)
 	return menu
 }
+
+func DeleteProfileConfirmation() *tgbotapi.ReplyMarkup {
+	menu := &tgbotapi.ReplyMarkup{}
+	menu.Inline(menu.Row(
+		menu.Data("Удалить мои данные", "confirm_delete_profile"),
+		menu.Data("Отмена", "cancel_delete_profile"),
+	))
+	return menu
+}
