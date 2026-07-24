@@ -14,7 +14,12 @@ export interface DashboardStats {
   success_rate: number;
 }
 
-export type SourceHealth = "healthy" | "running" | "error";
+export type SourceHealth =
+  | "healthy"
+  | "running"
+  | "error"
+  | "stale"
+  | "quarantined";
 
 export interface SourceView {
   id: string;
@@ -25,8 +30,12 @@ export interface SourceView {
   adapter_type: string;
   update_interval: number;
   last_run_at: string | null;
+  last_success_at: string | null;
   next_run_at: string | null;
   last_error: string;
+  consecutive_failures: number;
+  current_snapshot_id: string;
+  quarantined_count: number;
   latest_status: string;
   latest_started_at: string | null;
   latest_finished_at: string | null;
@@ -43,7 +52,7 @@ export interface ParseLogView {
   university_name: string;
   started_at: string;
   finished_at: string | null;
-  status: "running" | "success" | "failed";
+  status: "running" | "success" | "failed" | "quarantined";
   records_fetched: number;
   error_message: string;
   duration_ms: number;
@@ -69,6 +78,49 @@ export interface Dashboard {
   recent_logs: ParseLogView[];
   trend: TrendPoint[];
   universities: UniversityBreakdown[];
+  operations: OperationalHealth;
+}
+
+export interface SnapshotAnomaly {
+  code: string;
+  message: string;
+  current?: number;
+  candidate?: number;
+  ratio?: number;
+}
+
+export interface ParserSnapshot {
+  id: string;
+  data_source_id: string;
+  parse_log_id: string;
+  status: "staged" | "quarantined" | "published" | "rejected";
+  publishable: boolean;
+  group_count: number;
+  lesson_count: number;
+  anomaly_reasons: SnapshotAnomaly[];
+  reviewed_by: string;
+  review_note: string;
+  created_at: string;
+  published_at: string | null;
+  reviewed_at: string | null;
+}
+
+export interface OperationalHealth {
+  status: "healthy" | "degraded";
+  database: boolean;
+  sources_total: number;
+  sources_healthy: number;
+  sources_running: number;
+  sources_stale: number;
+  sources_error: number;
+  sources_quarantined: number;
+  pending_notifications: number;
+  failed_notifications: number;
+  pending_outbox: number;
+  failed_outbox: number;
+  oldest_pending_seconds: number;
+  last_successful_parse_at: string | null;
+  checked_at: string;
 }
 
 export interface UniversityOption {

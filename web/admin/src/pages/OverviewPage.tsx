@@ -64,6 +64,32 @@ export function OverviewPage({
         </div>
       </div>
 
+      {data.operations.status === "degraded" && (
+        <section className="operations-warning">
+          <CircleGauge size={20} />
+          <div>
+            <strong>Сервис требует внимания</strong>
+            <span>
+              Источники: {data.operations.sources_stale} устарели,{" "}
+              {data.operations.sources_error} с ошибкой,{" "}
+              {data.operations.sources_quarantined} в карантине. Очередь:{" "}
+              {data.operations.pending_notifications +
+                data.operations.pending_outbox}{" "}
+              ожидают,{" "}
+              {data.operations.failed_notifications +
+                data.operations.failed_outbox}{" "}
+              завершились ошибкой.
+            </span>
+          </div>
+          <button
+            className="button button-ghost"
+            onClick={() => onNavigate("sources")}
+          >
+            Проверить источники
+          </button>
+        </section>
+      )}
+
       <section className="metric-strip">
         <Metric
           icon={BookOpenCheck}
@@ -198,6 +224,8 @@ export function OverviewPage({
                     health={
                       log.status === "failed"
                         ? "failed"
+                        : log.status === "quarantined"
+                          ? "quarantined"
                         : log.status === "running"
                           ? "running"
                           : "success"

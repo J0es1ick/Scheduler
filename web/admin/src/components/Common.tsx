@@ -116,6 +116,8 @@ export function StatusPill({
       healthy: "В норме",
       running: "Обновляется",
       error: "Ошибка",
+      stale: "Данные устарели",
+      quarantined: "Карантин",
       success: "Успешно",
       failed: "Ошибка",
     }[health];
@@ -125,6 +127,8 @@ export function StatusPill({
         <LoaderCircle size={13} className="spin" />
       ) : health === "healthy" || health === "success" ? (
         <Check size={13} />
+      ) : health === "stale" || health === "quarantined" ? (
+        <AlertCircle size={13} />
       ) : (
         <X size={13} />
       )}

@@ -510,6 +510,18 @@ h2 {
   color: #7b622f;
 }
 
+.status-stale {
+  border-color: #d8c59f;
+  background: #f5ebd6;
+  color: #7b622f;
+}
+
+.status-quarantined {
+  border-color: #c99e78;
+  background: #f2e2d2;
+  color: #7a4f36;
+}
+
 .status-error,
 .status-failed {
   border-color: #dfb5aa;
@@ -894,6 +906,83 @@ h2 {
   background: var(--rust-soft);
   color: var(--red);
   font-size: 9px;
+}
+
+.snapshot-quarantine {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 13px;
+  padding: 16px;
+  border: 1px solid #d5b28f;
+  border-radius: 10px;
+  background: #f7ede1;
+  color: #604331;
+}
+
+.snapshot-quarantine-heading {
+  display: flex;
+  gap: 11px;
+  align-items: center;
+}
+
+.snapshot-quarantine-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.snapshot-quarantine-heading strong {
+  font-size: 12px;
+}
+
+.snapshot-quarantine-heading span,
+.snapshot-quarantine p,
+.snapshot-quarantine li {
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.snapshot-quarantine ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.snapshot-quarantine p {
+  margin: 0;
+  color: var(--red);
+}
+
+.snapshot-quarantine-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.operations-warning {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 13px;
+  align-items: center;
+  padding: 15px 17px;
+  border: 1px solid #d5b28f;
+  border-radius: var(--radius);
+  background: #f7ede1;
+  color: #604331;
+}
+
+.operations-warning > div {
+  display: grid;
+  gap: 3px;
+}
+
+.operations-warning strong {
+  font-size: 11px;
+}
+
+.operations-warning span {
+  font-size: 9px;
+  line-height: 1.5;
 }
 
 .log-summary {
@@ -3412,4 +3501,27 @@ h2 {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+.fatal-error {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 32px;
+}
+
+.fatal-error section {
+  width: min(560px, 100%);
+  padding: 36px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.fatal-error h1 {
+  margin: 8px 0 12px;
+}
+
+.fatal-error button {
+  margin-top: 20px;
 }
