@@ -71,3 +71,21 @@ func (s *UserService) SetDefaultGroup(ctx context.Context, userID, groupID strin
 func (s *UserService) SetNotificationsEnabled(ctx context.Context, userID string, enabled bool) error {
 	return s.userRepo.SetNotificationsEnabled(ctx, userID, enabled)
 }
+
+func (s *UserService) ExportData(ctx context.Context, userID string) (*domain.UserDataExport, error) {
+	return s.userRepo.ExportUserData(ctx, userID)
+}
+
+func (s *UserService) DeleteOwnData(ctx context.Context, userID string) error {
+	user, err := s.userRepo.GetUserByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return fmt.Errorf("user not found")
+	}
+	if user.IsAdmin {
+		return fmt.Errorf("remove administrator role before deleting the profile")
+	}
+	return s.userRepo.DeleteUser(ctx, userID)
+}

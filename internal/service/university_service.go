@@ -30,3 +30,7 @@ func (s *UniversityService) GetAll(ctx context.Context) ([]domain.University, er
 func (s *UniversityService) GetByID(ctx context.Context, id string) (*domain.University, error) {
 	return s.repo.GetUniversityByID(ctx, id)
 }
+
+func (s *UniversityService) GetSourceFreshness(ctx context.Context, id string) (*domain.SourceFreshness, error) {
+	return s.repo.GetSourceFreshness(ctx, id)
+}

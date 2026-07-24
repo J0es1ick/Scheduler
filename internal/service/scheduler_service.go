@@ -212,6 +212,13 @@ func (s *ScheduleService) GetAllLessonsForGroup(ctx context.Context, groupID str
 	return s.lessonRepo.GetLessonsByGroupID(ctx, groupID)
 }
 
+func (s *ScheduleService) GetAllLessonsForUniversity(
+	ctx context.Context,
+	universityID string,
+) ([]domain.Lesson, error) {
+	return s.lessonRepo.GetLessonsByUniversityID(ctx, universityID)
+}
+
 type ScheduleDiff struct {
 	Added   int
 	Removed int
@@ -304,6 +311,9 @@ func (s *ScheduleService) SaveLessonsBatch(ctx context.Context, lessons []domain
 }
 
 func SplitMessage(text string, maxLen int) []string {
+	if maxLen <= 0 {
+		return []string{}
+	}
 	if len([]rune(text)) <= maxLen {
 		return []string{text}
 	}
@@ -311,6 +321,28 @@ func SplitMessage(text string, maxLen int) []string {
 	blocks := strings.Split(text, "\n\n")
 	var current strings.Builder
 	for _, block := range blocks {
+		blockRunes := []rune(block)
+		if len(blockRunes) > maxLen {
+			if current.Len() > 0 {
+				parts = append(parts, strings.TrimRight(current.String(), "\n"))
+				current.Reset()
+			}
+			for len(blockRunes) > maxLen {
+				splitAt := maxLen
+				for i := maxLen - 1; i > maxLen/2; i-- {
+					if blockRunes[i] == '\n' || blockRunes[i] == ' ' {
+						splitAt = i + 1
+						break
+					}
+				}
+				parts = append(parts, strings.TrimSpace(string(blockRunes[:splitAt])))
+				blockRunes = blockRunes[splitAt:]
+			}
+			if len(blockRunes) > 0 {
+				current.WriteString(strings.TrimLeft(string(blockRunes), "\n "))
+			}
+			continue
+		}
 		if current.Len() > 0 && len([]rune(current.String()))+len([]rune(block))+2 > maxLen {
 			parts = append(parts, strings.TrimRight(current.String(), "\n"))
 			current.Reset()
