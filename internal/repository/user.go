@@ -133,9 +133,41 @@ func (r *UserRepository) SetNotificationsEnabled(ctx context.Context, userID str
 }
 
 func (r *UserRepository) DeleteUser(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, id)
+	result, err := r.db.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("delete user %s: %w", id, err)
 	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		return sql.ErrNoRows
+	}
 	return nil
+}
+
+func (r *UserRepository) ExportUserData(ctx context.Context, id string) (*domain.UserDataExport, error) {
+	user, err := r.GetUserByID(ctx, id)
+	if err != nil || user == nil {
+		return nil, err
+	}
+	result := &domain.UserDataExport{
+		ExportedAt:      time.Now().UTC(),
+		User:            *user,
+		Subscriptions:   []domain.Subscription{},
+		SupportRequests: []domain.SupportRequest{},
+	}
+	if err = r.db.SelectContext(ctx, &result.Subscriptions, `
+		SELECT id, user_id, object_id, object_type, created_at, updated_at
+		FROM subscriptions
+		WHERE user_id=$1
+		ORDER BY created_at`, id); err != nil {
+		return nil, fmt.Errorf("export subscriptions for user %s: %w", id, err)
+	}
+	if err = r.db.SelectContext(ctx, &result.SupportRequests, `
+		SELECT id, user_id, request_type, details, status, review_note,
+			reviewed_by, reviewed_at, created_at, updated_at
+		FROM support_requests
+		WHERE user_id=$1
+		ORDER BY created_at`, id); err != nil {
+		return nil, fmt.Errorf("export support requests for user %s: %w", id, err)
+	}
+	return result, nil
 }

@@ -35,6 +35,23 @@ func (r *NotificationRepository) EnqueueScheduleChange(
 	return nil
 }
 
+func (r *NotificationRepository) EnqueueAdminAlert(
+	ctx context.Context,
+	alertID, body string,
+) error {
+	if _, err := r.db.ExecContext(ctx, `
+		INSERT INTO bot_outbox (id, user_id, kind, body)
+		SELECT $1 || ':' || u.id, u.id, 'admin_alert', $2
+		FROM users u
+		WHERE u.is_admin
+		ON CONFLICT (id) DO NOTHING`,
+		alertID, body,
+	); err != nil {
+		return fmt.Errorf("enqueue admin alert %s: %w", alertID, err)
+	}
+	return nil
+}
+
 // ClaimPending atomically leases due deliveries for two minutes. A crashed
 // worker therefore cannot leave a notification permanently stuck.
 func (r *NotificationRepository) ClaimPending(ctx context.Context, limit int) ([]domain.NotificationDelivery, error) {
@@ -86,9 +103,9 @@ func (r *NotificationRepository) ClaimBotOutbox(ctx context.Context, limit int) 
 		UPDATE bot_outbox o
 		SET status='cancelled', updated_at=NOW()
 		FROM users u
-		WHERE o.user_id=u.id AND o.kind='support_request'
+		WHERE o.user_id=u.id AND o.kind IN ('support_request', 'admin_alert')
 			AND o.status='pending' AND NOT u.is_admin`); err != nil {
-		return nil, fmt.Errorf("cancel support messages for former admins: %w", err)
+		return nil, fmt.Errorf("cancel admin messages for former admins: %w", err)
 	}
 	var items []domain.BotOutboxDelivery
 	err := r.db.SelectContext(ctx, &items, `
@@ -138,7 +155,7 @@ func (r *NotificationRepository) IsBotOutboxActive(ctx context.Context, id strin
 			FROM bot_outbox o
 			JOIN users u ON u.id=o.user_id
 			WHERE o.id=$1 AND o.status='pending'
-				AND (o.kind <> 'support_request' OR u.is_admin)
+				AND (o.kind NOT IN ('support_request', 'admin_alert') OR u.is_admin)
 		)`, id)
 	if err != nil {
 		return false, fmt.Errorf("check bot outbox %s eligibility: %w", id, err)
@@ -181,6 +198,14 @@ func (r *NotificationRepository) MarkBotOutboxFailed(
 		return fmt.Errorf("mark bot outbox %s failed: %w", id, err)
 	}
 	return nil
+}
+
+func (r *NotificationRepository) MarkBotOutboxPermanentFailure(
+	ctx context.Context,
+	id string,
+	deliveryErr error,
+) error {
+	return r.markPermanentFailure(ctx, "bot_outbox", id, deliveryErr)
 }
 
 func (r *NotificationRepository) MarkDelivered(ctx context.Context, id string) error {
@@ -247,6 +272,36 @@ func (r *NotificationRepository) MarkFailed(
 			last_error=$4, updated_at=NOW()
 		WHERE id=$1`, id, status, retryAfter.Seconds(), errorText); err != nil {
 		return fmt.Errorf("mark notification %s failed: %w", id, err)
+	}
+	return nil
+}
+
+func (r *NotificationRepository) MarkPermanentFailure(
+	ctx context.Context,
+	id string,
+	deliveryErr error,
+) error {
+	return r.markPermanentFailure(ctx, "notification_deliveries", id, deliveryErr)
+}
+
+func (r *NotificationRepository) markPermanentFailure(
+	ctx context.Context,
+	table string,
+	id string,
+	deliveryErr error,
+) error {
+	errorText := ""
+	if deliveryErr != nil {
+		errorText = deliveryErr.Error()
+		if len(errorText) > 1000 {
+			errorText = errorText[:1000]
+		}
+	}
+	query := `UPDATE ` + table + `
+		SET status='failed', last_error=$2, updated_at=NOW()
+		WHERE id=$1`
+	if _, err := r.db.ExecContext(ctx, query, id, errorText); err != nil {
+		return fmt.Errorf("mark %s %s permanently failed: %w", table, id, err)
 	}
 	return nil
 }
