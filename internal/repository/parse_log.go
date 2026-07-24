@@ -79,3 +79,23 @@ func (r *ParseLogRepository) DeleteParseLog(ctx context.Context, id string) erro
 	}
 	return nil
 }
+
+func (r *ParseLogRepository) FailInterrupted(ctx context.Context, olderThan time.Duration) (int64, error) {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE parse_logs
+		SET status='failed',
+			finished_at=NOW(),
+			error_message=COALESCE(error_message, 'Проход прерван до завершения процесса')
+		WHERE status='running'
+		  AND started_at < NOW()-($1 * INTERVAL '1 second')`,
+		olderThan.Seconds(),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("mark interrupted parse logs: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count interrupted parse logs: %w", err)
+	}
+	return count, nil
+}

@@ -122,6 +122,20 @@ func (r *LessonRepository) GetLessonsByGroupID(ctx context.Context, groupID stri
 	return lessons, nil
 }
 
+func (r *LessonRepository) GetLessonsByUniversityID(
+	ctx context.Context,
+	universityID string,
+) ([]domain.Lesson, error) {
+	var lessons []domain.Lesson
+	err := r.db.SelectContext(ctx, &lessons,
+		lessonSelect+` WHERE university_id = $1 ORDER BY group_id, day_of_week, time_start`,
+		universityID)
+	if err != nil {
+		return nil, fmt.Errorf("get lessons by university %s: %w", universityID, err)
+	}
+	return lessons, nil
+}
+
 func (r *LessonRepository) GetLessonsByTeacher(ctx context.Context, teacher string) ([]domain.Lesson, error) {
 	var lessons []domain.Lesson
 	err := r.db.SelectContext(ctx, &lessons,
