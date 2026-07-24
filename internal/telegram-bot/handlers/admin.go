@@ -33,5 +33,5 @@ func (h *Handler) HandleAdmin(c telegram.Context) error {
 	menu := &telegram.ReplyMarkup{}
 	button := menu.WebApp("Открыть редактор", &telegram.WebApp{URL: miniAppURL})
 	menu.Inline(menu.Row(button))
-	return c.Send("Админ-панель Scheduler", menu)
+	return c.Send("Админ-панель Scheduler\nМетрики сервиса: /metrics", menu)
 }

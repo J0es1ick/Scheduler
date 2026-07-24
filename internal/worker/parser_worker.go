@@ -75,6 +75,9 @@ func (w *ParserWorker) tick(ctx context.Context) {
 	runCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 
+	if err := w.parserSvc.CleanupInterruptedRuns(runCtx, 35*time.Minute); err != nil {
+		slog.Error("parser worker: stale run cleanup failed", "err", err)
+	}
 	if err := w.parserSvc.RunAllActiveSources(runCtx); err != nil {
 		slog.Error("parser worker: run active sources failed", "err", err)
 	}
