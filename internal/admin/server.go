@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +24,7 @@ type Server struct {
 	store  *Store
 	auth   *AuthManager
 	parser *service.ParserService
+	logins *loginGuard
 
 	runningMu sync.RWMutex
 	running   map[string]bool
@@ -34,6 +36,7 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService) (
 		store:   store,
 		auth:    auth,
 		parser:  parser,
+		logins:  newLoginGuard(),
 		running: make(map[string]bool),
 	}
 	assets, err := adminui.Files()
@@ -47,14 +50,22 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService) (
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", server.handleHealth)
+	mux.HandleFunc("GET /api/ready", server.handleReady)
+	mux.HandleFunc("GET /metrics", server.handleMetrics)
 	mux.HandleFunc("POST /api/auth/access-key", server.handleAccessKeyLogin)
 	mux.HandleFunc("POST /api/auth/telegram", server.handleTelegramLogin)
 	server.protected(mux, "GET /api/auth/me", server.handleMe)
 	server.protected(mux, "POST /api/auth/logout", server.handleLogout)
+	server.protected(mux, "POST /api/client-errors", server.handleClientError)
 	server.protected(mux, "GET /api/dashboard", server.handleDashboard)
 	server.protected(mux, "GET /api/sources", server.handleSources)
 	server.protected(mux, "PATCH /api/sources/{id}", server.handleUpdateSource)
 	server.protected(mux, "POST /api/sources/{id}/sync", server.handleSyncSource)
+	server.protected(mux, "POST /api/sources/{id}/rollback", server.handleRollbackSource)
+	server.protected(mux, "GET /api/parser-snapshots", server.handleParserSnapshots)
+	server.protected(mux, "POST /api/parser-snapshots/{id}/publish", server.handlePublishSnapshot)
+	server.protected(mux, "POST /api/parser-snapshots/{id}/reject", server.handleRejectSnapshot)
+	server.protected(mux, "GET /api/operations", server.handleOperations)
 	server.protected(mux, "GET /api/logs", server.handleLogs)
 	server.protected(mux, "GET /api/universities", server.handleUniversities)
 	server.protected(mux, "GET /api/groups", server.handleGroups)
@@ -82,16 +93,75 @@ func (s *Server) protected(mux *http.ServeMux, pattern string, handler http.Hand
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "time": time.Now()})
+}
+
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 	if err := s.store.Ping(ctx); err != nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "База данных недоступна")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "time": time.Now()})
+	operations, err := s.store.OperationalHealth(ctx)
+	if err != nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "Не удалось проверить состояние сервиса")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ready", "operations": operations})
+}
+
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	operations, err := s.store.OperationalHealth(ctx)
+	if err != nil {
+		http.Error(w, "metrics unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	status := 1
+	if operations.Status != "healthy" {
+		status = 0
+	}
+	_, _ = fmt.Fprintf(w, `# HELP scheduler_health Overall scheduler health (1 healthy, 0 degraded).
+# TYPE scheduler_health gauge
+scheduler_health %d
+# TYPE scheduler_sources gauge
+scheduler_sources{state="healthy"} %d
+scheduler_sources{state="running"} %d
+scheduler_sources{state="stale"} %d
+scheduler_sources{state="error"} %d
+scheduler_sources{state="quarantined"} %d
+# TYPE scheduler_notification_queue gauge
+scheduler_notification_queue{queue="schedule",status="pending"} %d
+scheduler_notification_queue{queue="schedule",status="failed"} %d
+scheduler_notification_queue{queue="outbox",status="pending"} %d
+scheduler_notification_queue{queue="outbox",status="failed"} %d
+# TYPE scheduler_oldest_pending_seconds gauge
+scheduler_oldest_pending_seconds %d
+`,
+		status,
+		operations.SourcesHealthy,
+		operations.SourcesRunning,
+		operations.SourcesStale,
+		operations.SourcesError,
+		operations.SourcesQuarantined,
+		operations.PendingNotifications,
+		operations.FailedNotifications,
+		operations.PendingOutbox,
+		operations.FailedOutbox,
+		operations.OldestPendingSeconds,
+	)
 }
 
 func (s *Server) handleAccessKeyLogin(w http.ResponseWriter, r *http.Request) {
+	ip := requestIP(r)
+	if allowed, retryAfter := s.logins.allowed(ip, time.Now()); !allowed {
+		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retryAfter.Seconds()))))
+		writeAPIError(w, http.StatusTooManyRequests, "Слишком много попыток входа. Повторите позже.")
+		return
+	}
 	var request struct {
 		AccessKey string `json:"access_key"`
 	}
@@ -101,16 +171,45 @@ func (s *Server) handleAccessKeyLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	identity, err := s.auth.LoginWithAccessKey(request.AccessKey)
 	if err != nil {
+		s.logins.failed(ip, time.Now())
 		writeAPIError(w, http.StatusUnauthorized, "Неверный ключ администратора")
 		return
 	}
+	s.logins.succeeded(ip)
 	identity, err = s.auth.IssueSession(w, identity)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "Не удалось создать сессию")
 		return
 	}
-	_ = s.store.WriteAudit(r.Context(), identity, "login", "session", "", map[string]any{"method": "access_key"}, requestIP(r))
+	_ = s.store.WriteAudit(r.Context(), identity, "login", "session", "", map[string]any{"method": "access_key"}, ip)
 	writeJSON(w, http.StatusOK, map[string]any{"user": identity})
+}
+
+func (s *Server) handleClientError(w http.ResponseWriter, r *http.Request) {
+	var report struct {
+		Message string `json:"message"`
+		Stack   string `json:"stack"`
+		URL     string `json:"url"`
+	}
+	if err := decodeJSON(r, &report); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "Некорректный отчёт об ошибке")
+		return
+	}
+	identity := identityFromContext(r.Context())
+	slog.Error("admin client error",
+		"admin_id", identity.ID,
+		"message", truncateReportField(report.Message, 1000),
+		"stack", truncateReportField(report.Stack, 4000),
+		"url", truncateReportField(report.URL, 500),
+	)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func truncateReportField(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit]
 }
 
 func (s *Server) handleTelegramLogin(w http.ResponseWriter, r *http.Request) {
@@ -168,6 +267,120 @@ func (s *Server) handleSources(w http.ResponseWriter, r *http.Request) {
 	}
 	s.enrichRunning(sources)
 	writeJSON(w, http.StatusOK, map[string]any{"items": sources})
+}
+
+func (s *Server) handleOperations(w http.ResponseWriter, r *http.Request) {
+	operations, err := s.store.OperationalHealth(r.Context())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "Не удалось проверить состояние сервиса")
+		return
+	}
+	writeJSON(w, http.StatusOK, operations)
+}
+
+func (s *Server) handleParserSnapshots(w http.ResponseWriter, r *http.Request) {
+	items, err := s.store.ParserSnapshots(
+		r.Context(),
+		strings.TrimSpace(r.URL.Query().Get("source")),
+		strings.TrimSpace(r.URL.Query().Get("status")),
+		queryInt(r, "limit", 50),
+	)
+	if err != nil {
+		slog.Error("admin list parser snapshots failed", "err", err)
+		writeAPIError(w, http.StatusInternalServerError, "Не удалось загрузить снимки")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (s *Server) handlePublishSnapshot(w http.ResponseWriter, r *http.Request) {
+	snapshotID := r.PathValue("id")
+	var request struct {
+		ReviewNote string `json:"review_note"`
+	}
+	if r.ContentLength > 0 {
+		if err := decodeJSON(r, &request); err != nil {
+			writeAPIError(w, http.StatusBadRequest, "Некорректный запрос")
+			return
+		}
+	}
+	identity := identityFromContext(r.Context())
+	snapshot, err := s.parser.PublishSnapshot(
+		r.Context(), snapshotID, identity.ID, strings.TrimSpace(request.ReviewNote),
+	)
+	if errors.Is(err, service.ErrDataSourceBusy) {
+		writeAPIError(w, http.StatusConflict, "Источник сейчас обновляется")
+		return
+	}
+	if errors.Is(err, sql.ErrNoRows) || snapshot == nil && err == nil {
+		writeAPIError(w, http.StatusNotFound, "Снимок не найден")
+		return
+	}
+	if err != nil {
+		slog.Error("admin publish parser snapshot failed", "snapshot", snapshotID, "err", err)
+		writeAPIError(w, http.StatusConflict, "Снимок нельзя опубликовать: "+err.Error())
+		return
+	}
+	_ = s.store.WriteAudit(r.Context(), identity, "publish_parser_snapshot", "parser_snapshot", snapshotID,
+		map[string]any{
+			"source_id":   snapshot.DataSourceID,
+			"groups":      snapshot.GroupCount,
+			"lessons":     snapshot.LessonCount,
+			"review_note": request.ReviewNote,
+		}, requestIP(r))
+	writeJSON(w, http.StatusOK, snapshot)
+}
+
+func (s *Server) handleRejectSnapshot(w http.ResponseWriter, r *http.Request) {
+	snapshotID := r.PathValue("id")
+	var request struct {
+		ReviewNote string `json:"review_note"`
+	}
+	if err := decodeJSON(r, &request); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "Некорректный запрос")
+		return
+	}
+	request.ReviewNote = strings.TrimSpace(request.ReviewNote)
+	if request.ReviewNote == "" {
+		writeAPIError(w, http.StatusBadRequest, "Укажите причину отклонения")
+		return
+	}
+	identity := identityFromContext(r.Context())
+	if err := s.parser.RejectSnapshot(r.Context(), snapshotID, identity.ID, request.ReviewNote); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeAPIError(w, http.StatusNotFound, "Снимок не найден или уже обработан")
+			return
+		}
+		writeAPIError(w, http.StatusInternalServerError, "Не удалось отклонить снимок")
+		return
+	}
+	_ = s.store.WriteAudit(r.Context(), identity, "reject_parser_snapshot", "parser_snapshot", snapshotID,
+		map[string]any{"review_note": request.ReviewNote}, requestIP(r))
+	writeJSON(w, http.StatusOK, map[string]any{"status": "rejected"})
+}
+
+func (s *Server) handleRollbackSource(w http.ResponseWriter, r *http.Request) {
+	sourceID := r.PathValue("id")
+	identity := identityFromContext(r.Context())
+	snapshot, err := s.parser.RollbackSource(
+		r.Context(), sourceID, identity.ID, "Откат из административной панели",
+	)
+	if errors.Is(err, service.ErrDataSourceBusy) {
+		writeAPIError(w, http.StatusConflict, "Источник сейчас обновляется")
+		return
+	}
+	if err != nil {
+		slog.Error("admin rollback source failed", "source", sourceID, "err", err)
+		writeAPIError(w, http.StatusInternalServerError, "Не удалось восстановить предыдущий снимок")
+		return
+	}
+	if snapshot == nil {
+		writeAPIError(w, http.StatusNotFound, "Предыдущий опубликованный снимок отсутствует")
+		return
+	}
+	_ = s.store.WriteAudit(r.Context(), identity, "rollback_parser_snapshot", "data_source", sourceID,
+		map[string]any{"snapshot_id": snapshot.ID}, requestIP(r))
+	writeJSON(w, http.StatusOK, snapshot)
 }
 
 func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {

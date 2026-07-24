@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/J0es1ick/Scheduler/internal/domain"
+	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )
@@ -65,6 +67,11 @@ func (s *Store) Dashboard(ctx context.Context) (*Dashboard, error) {
 		GROUP BY u.id, u.name ORDER BY u.name`); err != nil {
 		return nil, fmt.Errorf("admin university breakdown: %w", err)
 	}
+	operations, err := s.OperationalHealth(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result.Operations = *operations
 	return &result, nil
 }
 
@@ -74,8 +81,12 @@ func (s *Store) Sources(ctx context.Context) ([]SourceView, error) {
 		SELECT ds.id, ds.university_id, u.name AS university_name,
 			COALESCE(u.full_name, '') AS university_full_name,
 			COALESCE(u.schedule_url, '') AS schedule_url,
-			ds.adapter_type, ds.update_interval, ds.last_run_at,
+			ds.adapter_type, ds.update_interval, ds.last_run_at, ds.last_success_at,
 			COALESCE(ds.last_error, '') AS last_error,
+			ds.consecutive_failures,
+			COALESCE(ds.current_snapshot_id, '') AS current_snapshot_id,
+			(SELECT COUNT(*)::int FROM parser_snapshots ps
+				WHERE ps.data_source_id=ds.id AND ps.status='quarantined') AS quarantined_count,
 			COALESCE(latest.status::text, '') AS latest_status,
 			latest.started_at AS latest_started_at,
 			latest.finished_at AS latest_finished_at,
@@ -104,13 +115,74 @@ func (s *Store) Sources(ctx context.Context) ([]SourceView, error) {
 		switch {
 		case source.Running:
 			source.Health = "running"
+		case source.QuarantinedCount > 0:
+			source.Health = "quarantined"
 		case source.LastError != "":
 			source.Health = "error"
+		case source.LastSuccessAt == nil ||
+			now.Sub(*source.LastSuccessAt) > 2*time.Duration(source.UpdateInterval)*time.Second+5*time.Minute:
+			source.Health = "stale"
 		default:
 			source.Health = "healthy"
 		}
 	}
 	return sources, nil
+}
+
+func (s *Store) OperationalHealth(ctx context.Context) (*OperationalHealth, error) {
+	result := &OperationalHealth{Database: true, CheckedAt: time.Now()}
+	sources, err := s.Sources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result.SourcesTotal = len(sources)
+	for _, source := range sources {
+		switch source.Health {
+		case "healthy":
+			result.SourcesHealthy++
+		case "running":
+			result.SourcesRunning++
+		case "stale":
+			result.SourcesStale++
+		case "quarantined":
+			result.SourcesQuarantined++
+		default:
+			result.SourcesError++
+		}
+	}
+	if err := s.db.GetContext(ctx, result, `
+		SELECT
+			(SELECT COUNT(*)::int FROM notification_deliveries WHERE status='pending') AS pending_notifications,
+			(SELECT COUNT(*)::int FROM notification_deliveries WHERE status='failed') AS failed_notifications,
+			(SELECT COUNT(*)::int FROM bot_outbox WHERE status='pending') AS pending_outbox,
+			(SELECT COUNT(*)::int FROM bot_outbox WHERE status='failed') AS failed_outbox,
+			COALESCE((
+				SELECT EXTRACT(EPOCH FROM (NOW()-MIN(created_at)))::bigint
+				FROM (
+					SELECT created_at FROM notification_deliveries WHERE status='pending'
+					UNION ALL
+					SELECT created_at FROM bot_outbox WHERE status='pending'
+				) pending
+			), 0) AS oldest_pending_seconds,
+			(SELECT MAX(finished_at) FROM parse_logs WHERE status='success') AS last_successful_parse_at`,
+	); err != nil {
+		return nil, fmt.Errorf("load operational health: %w", err)
+	}
+	result.Status = "healthy"
+	if result.SourcesStale > 0 || result.SourcesError > 0 ||
+		result.SourcesQuarantined > 0 || result.FailedNotifications > 0 ||
+		result.FailedOutbox > 0 || result.OldestPendingSeconds > 300 {
+		result.Status = "degraded"
+	}
+	return result, nil
+}
+
+func (s *Store) ParserSnapshots(
+	ctx context.Context,
+	sourceID, status string,
+	limit int,
+) ([]domain.ParserSnapshot, error) {
+	return repository.NewParserSnapshotRepository(s.db).List(ctx, sourceID, status, limit)
 }
 
 func (s *Store) Logs(ctx context.Context, limit int, sourceID, status string) ([]ParseLogView, error) {

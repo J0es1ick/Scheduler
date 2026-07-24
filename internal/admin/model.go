@@ -18,6 +18,7 @@ type Dashboard struct {
 	RecentLogs   []ParseLogView        `json:"recent_logs"`
 	Trend        []TrendPoint          `json:"trend"`
 	Universities []UniversityBreakdown `json:"universities"`
+	Operations   OperationalHealth     `json:"operations"`
 }
 
 type DashboardStats struct {
@@ -30,24 +31,46 @@ type DashboardStats struct {
 }
 
 type SourceView struct {
-	ID                 string     `json:"id" db:"id"`
-	UniversityID       string     `json:"university_id" db:"university_id"`
-	UniversityName     string     `json:"university_name" db:"university_name"`
-	UniversityFullName string     `json:"university_full_name" db:"university_full_name"`
-	ScheduleURL        string     `json:"schedule_url" db:"schedule_url"`
-	AdapterType        string     `json:"adapter_type" db:"adapter_type"`
-	UpdateInterval     int        `json:"update_interval" db:"update_interval"`
-	LastRunAt          *time.Time `json:"last_run_at" db:"last_run_at"`
-	NextRunAt          *time.Time `json:"next_run_at"`
-	LastError          string     `json:"last_error" db:"last_error"`
-	LatestStatus       string     `json:"latest_status" db:"latest_status"`
-	LatestStartedAt    *time.Time `json:"latest_started_at" db:"latest_started_at"`
-	LatestFinishedAt   *time.Time `json:"latest_finished_at" db:"latest_finished_at"`
-	LatestRecords      int        `json:"latest_records" db:"latest_records"`
-	GroupCount         int        `json:"group_count" db:"group_count"`
-	LessonCount        int        `json:"lesson_count" db:"lesson_count"`
-	Running            bool       `json:"running"`
-	Health             string     `json:"health"`
+	ID                  string     `json:"id" db:"id"`
+	UniversityID        string     `json:"university_id" db:"university_id"`
+	UniversityName      string     `json:"university_name" db:"university_name"`
+	UniversityFullName  string     `json:"university_full_name" db:"university_full_name"`
+	ScheduleURL         string     `json:"schedule_url" db:"schedule_url"`
+	AdapterType         string     `json:"adapter_type" db:"adapter_type"`
+	UpdateInterval      int        `json:"update_interval" db:"update_interval"`
+	LastRunAt           *time.Time `json:"last_run_at" db:"last_run_at"`
+	LastSuccessAt       *time.Time `json:"last_success_at" db:"last_success_at"`
+	NextRunAt           *time.Time `json:"next_run_at"`
+	LastError           string     `json:"last_error" db:"last_error"`
+	ConsecutiveFailures int        `json:"consecutive_failures" db:"consecutive_failures"`
+	CurrentSnapshotID   string     `json:"current_snapshot_id" db:"current_snapshot_id"`
+	QuarantinedCount    int        `json:"quarantined_count" db:"quarantined_count"`
+	LatestStatus        string     `json:"latest_status" db:"latest_status"`
+	LatestStartedAt     *time.Time `json:"latest_started_at" db:"latest_started_at"`
+	LatestFinishedAt    *time.Time `json:"latest_finished_at" db:"latest_finished_at"`
+	LatestRecords       int        `json:"latest_records" db:"latest_records"`
+	GroupCount          int        `json:"group_count" db:"group_count"`
+	LessonCount         int        `json:"lesson_count" db:"lesson_count"`
+	Running             bool       `json:"running"`
+	Health              string     `json:"health"`
+}
+
+type OperationalHealth struct {
+	Status                string     `json:"status"`
+	Database              bool       `json:"database"`
+	SourcesTotal          int        `json:"sources_total"`
+	SourcesHealthy        int        `json:"sources_healthy"`
+	SourcesRunning        int        `json:"sources_running"`
+	SourcesStale          int        `json:"sources_stale"`
+	SourcesError          int        `json:"sources_error"`
+	SourcesQuarantined    int        `json:"sources_quarantined"`
+	PendingNotifications  int        `json:"pending_notifications" db:"pending_notifications"`
+	FailedNotifications   int        `json:"failed_notifications" db:"failed_notifications"`
+	PendingOutbox         int        `json:"pending_outbox" db:"pending_outbox"`
+	FailedOutbox          int        `json:"failed_outbox" db:"failed_outbox"`
+	OldestPendingSeconds  int64      `json:"oldest_pending_seconds" db:"oldest_pending_seconds"`
+	LastSuccessfulParseAt *time.Time `json:"last_successful_parse_at" db:"last_successful_parse_at"`
+	CheckedAt             time.Time  `json:"checked_at"`
 }
 
 type ParseLogView struct {
