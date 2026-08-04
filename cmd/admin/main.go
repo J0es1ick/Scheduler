@@ -14,8 +14,8 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/config"
 	"github.com/J0es1ick/Scheduler/internal/database"
 	"github.com/J0es1ick/Scheduler/internal/repository"
-	"github.com/J0es1ick/Scheduler/internal/scrapper/ispu"
-	"github.com/J0es1ick/Scheduler/internal/scrapper/isuct"
+	"github.com/J0es1ick/Scheduler/internal/scraper/ispu"
+	"github.com/J0es1ick/Scheduler/internal/scraper/isuct"
 	"github.com/J0es1ick/Scheduler/internal/service"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -24,7 +24,7 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
-	cfg, err := config.InitConfig()
+	cfg, err := config.InitAdminConfig()
 	if err != nil {
 		logger.Error("admin config init failed", "err", err)
 		os.Exit(1)
@@ -55,13 +55,22 @@ func main() {
 		scheduleService,
 		repository.NewParserSnapshotRepository(db.DB),
 		repository.NewNotificationRepository(db.DB),
+		repository.NewParserDiagnosticRepository(db.DB),
 	)
 	parserService.RegisterAdapter(isuct.UniversityID, isuct.New(""))
 	parserService.RegisterAdapter(ispu.UniversityID, ispu.New(""))
 
 	store := admin.NewStore(db.DB)
-	auth := admin.NewAuthManager(cfg.BotToken, cfg.Admin.AccessToken, cfg.Admin.PublicURL)
-	adminServer, err := admin.NewServer(store, auth, parserService)
+	auth := admin.NewAuthManager(
+		cfg.BotToken,
+		cfg.Admin.AccessToken,
+		cfg.Admin.AccessKeyLoginEnabled,
+		cfg.Admin.CookieSecure,
+	)
+	adminServer, err := admin.NewServer(store, auth, parserService, admin.ServerOptions{
+		MetricsToken:      cfg.Admin.MetricsToken,
+		TrustedProxyCIDRs: cfg.Admin.TrustedProxyCIDRs,
+	})
 	if err != nil {
 		logger.Error("admin server init failed", "err", err)
 		os.Exit(1)

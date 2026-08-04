@@ -9,8 +9,8 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/config"
 	"github.com/J0es1ick/Scheduler/internal/database"
 	"github.com/J0es1ick/Scheduler/internal/repository"
-	"github.com/J0es1ick/Scheduler/internal/scrapper/ispu"
-	"github.com/J0es1ick/Scheduler/internal/scrapper/isuct"
+	"github.com/J0es1ick/Scheduler/internal/scraper/ispu"
+	"github.com/J0es1ick/Scheduler/internal/scraper/isuct"
 	"github.com/J0es1ick/Scheduler/internal/service"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -49,6 +49,7 @@ func main() {
 		scheduleService,
 		repository.NewParserSnapshotRepository(db.DB),
 		repository.NewNotificationRepository(db.DB),
+		repository.NewParserDiagnosticRepository(db.DB),
 	)
 	parserService.RegisterAdapter(isuct.UniversityID, isuct.New(""))
 	parserService.RegisterAdapter(ispu.UniversityID, ispu.New(""))
