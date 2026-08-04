@@ -42,7 +42,7 @@ func (s *Server) handleEditorSchedule(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateEditorLesson(w http.ResponseWriter, r *http.Request) {
 	var request lessonMutationRequest
-	if err := decodeJSON(r, &request); err != nil {
+	if err := decodeJSON(w, r, &request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "Некорректный запрос")
 		return
 	}
@@ -57,14 +57,14 @@ func (s *Server) handleCreateEditorLesson(w http.ResponseWriter, r *http.Request
 		writeEditorError(w, err)
 		return
 	}
-	_ = s.store.WriteAudit(r.Context(), identity, "create_lesson", "lesson", id,
-		map[string]any{"group_id": lesson.GroupID, "subject": lesson.Subject}, requestIP(r))
+	s.writeAudit(r.Context(), identity, "create_lesson", "lesson", id,
+		map[string]any{"group_id": lesson.GroupID, "subject": lesson.Subject}, s.requestIP(r))
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
 }
 
 func (s *Server) handleUpdateEditorLesson(w http.ResponseWriter, r *http.Request) {
 	var request lessonMutationRequest
-	if err := decodeJSON(r, &request); err != nil {
+	if err := decodeJSON(w, r, &request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "Некорректный запрос")
 		return
 	}
@@ -86,8 +86,8 @@ func (s *Server) handleUpdateEditorLesson(w http.ResponseWriter, r *http.Request
 		writeEditorError(w, err)
 		return
 	}
-	_ = s.store.WriteAudit(r.Context(), identity, "update_lesson", "lesson", resultID,
-		map[string]any{"subject": lesson.Subject}, requestIP(r))
+	s.writeAudit(r.Context(), identity, "update_lesson", "lesson", resultID,
+		map[string]any{"subject": lesson.Subject}, s.requestIP(r))
 	writeJSON(w, http.StatusOK, map[string]any{"id": resultID})
 }
 
@@ -97,7 +97,7 @@ func (s *Server) handleDeleteEditorLesson(w http.ResponseWriter, r *http.Request
 		Subject           string `json:"subject"`
 		GroupID           string `json:"group_id"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
+	if err := decodeJSON(w, r, &request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "Некорректный запрос")
 		return
 	}
@@ -112,8 +112,8 @@ func (s *Server) handleDeleteEditorLesson(w http.ResponseWriter, r *http.Request
 		writeEditorError(w, err)
 		return
 	}
-	_ = s.store.WriteAudit(r.Context(), identity, "delete_lesson", "lesson", lessonID,
-		map[string]any{"group_id": request.GroupID, "subject": request.Subject}, requestIP(r))
+	s.writeAudit(r.Context(), identity, "delete_lesson", "lesson", lessonID,
+		map[string]any{"group_id": request.GroupID, "subject": request.Subject}, s.requestIP(r))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -124,8 +124,8 @@ func (s *Server) handleRestoreEditorLesson(w http.ResponseWriter, r *http.Reques
 		writeEditorError(w, err)
 		return
 	}
-	_ = s.store.WriteAudit(r.Context(), identity, "restore_lesson", "lesson", lessonID,
-		map[string]any{}, requestIP(r))
+	s.writeAudit(r.Context(), identity, "restore_lesson", "lesson", lessonID,
+		map[string]any{}, s.requestIP(r))
 	writeJSON(w, http.StatusOK, map[string]any{"status": "restored"})
 }
 

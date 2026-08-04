@@ -2,6 +2,8 @@ package admin
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -11,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,26 +21,51 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/adminui"
 	"github.com/J0es1ick/Scheduler/internal/service"
+	"github.com/google/uuid"
 )
 
+const (
+	requestIDHeader       = "X-Request-ID"
+	internalAdminIDHeader = "X-Scheduler-Admin-ID"
+)
+
+type ServerOptions struct {
+	MetricsToken      string
+	TrustedProxyCIDRs string
+}
+
 type Server struct {
-	store  *Store
-	auth   *AuthManager
-	parser *service.ParserService
-	logins *loginGuard
+	store          *Store
+	auth           *AuthManager
+	parser         *service.ParserService
+	logins         *loginGuard
+	globalLogins   *loginGuard
+	metricsToken   string
+	trustedProxies []*net.IPNet
 
 	runningMu sync.RWMutex
 	running   map[string]bool
 	handler   http.Handler
 }
 
-func NewServer(store *Store, auth *AuthManager, parser *service.ParserService) (*Server, error) {
+func NewServer(store *Store, auth *AuthManager, parser *service.ParserService, options ...ServerOptions) (*Server, error) {
+	var opts ServerOptions
+	if len(options) > 0 {
+		opts = options[0]
+	}
+	trustedProxies, err := parseTrustedProxies(opts.TrustedProxyCIDRs)
+	if err != nil {
+		return nil, err
+	}
 	server := &Server{
-		store:   store,
-		auth:    auth,
-		parser:  parser,
-		logins:  newLoginGuard(),
-		running: make(map[string]bool),
+		store:          store,
+		auth:           auth,
+		parser:         parser,
+		logins:         newLoginGuard(),
+		globalLogins:   newLoginGuard(50),
+		metricsToken:   strings.TrimSpace(opts.MetricsToken),
+		trustedProxies: trustedProxies,
+		running:        make(map[string]bool),
 	}
 	assets, err := adminui.Files()
 	if err != nil {
@@ -52,6 +80,7 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService) (
 	mux.HandleFunc("GET /api/health", server.handleHealth)
 	mux.HandleFunc("GET /api/ready", server.handleReady)
 	mux.HandleFunc("GET /metrics", server.handleMetrics)
+	mux.HandleFunc("GET /api/auth/config", server.handleAuthConfig)
 	mux.HandleFunc("POST /api/auth/access-key", server.handleAccessKeyLogin)
 	mux.HandleFunc("POST /api/auth/telegram", server.handleTelegramLogin)
 	server.protected(mux, "GET /api/auth/me", server.handleMe)
@@ -63,6 +92,8 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService) (
 	server.protected(mux, "POST /api/sources/{id}/sync", server.handleSyncSource)
 	server.protected(mux, "POST /api/sources/{id}/rollback", server.handleRollbackSource)
 	server.protected(mux, "GET /api/parser-snapshots", server.handleParserSnapshots)
+	server.protected(mux, "GET /api/parser-snapshots/{id}/preview", server.handleParserSnapshotPreview)
+	server.protected(mux, "GET /api/parser-snapshots/{id}/schedule", server.handleParserSnapshotSchedule)
 	server.protected(mux, "POST /api/parser-snapshots/{id}/publish", server.handlePublishSnapshot)
 	server.protected(mux, "POST /api/parser-snapshots/{id}/reject", server.handleRejectSnapshot)
 	server.protected(mux, "GET /api/operations", server.handleOperations)
@@ -82,14 +113,59 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService) (
 	server.protected(mux, "GET /api/audit", server.handleAudit)
 	mux.Handle("/", spaHandler(assets, index))
 
-	server.handler = server.recoverPanic(server.securityHeaders(server.requestLog(mux)))
+	server.handler = server.requestContext(server.requestLog(server.recoverPanic(server.securityHeaders(mux))))
 	return server, nil
 }
 
 func (s *Server) Handler() http.Handler { return s.handler }
 
 func (s *Server) protected(mux *http.ServeMux, pattern string, handler http.HandlerFunc) {
-	mux.Handle(pattern, s.auth.Require(s.store, handler))
+	protectedHandler := http.Handler(handler)
+	if isMutationPattern(pattern) && pattern != "POST /api/client-errors" {
+		next := protectedHandler
+		protectedHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			identity := identityFromContext(r.Context())
+			details := map[string]any{
+				"method":     r.Method,
+				"path":       r.URL.Path,
+				"request_id": r.Header.Get(requestIDHeader),
+			}
+			if err := s.store.WriteAudit(
+				r.Context(), identity, "mutation_requested", "http_request", pattern, details, s.requestIP(r),
+			); err != nil {
+				slog.Error("admin mutation audit precondition failed", "pattern", pattern, "admin_id", identity.ID, "err", err)
+				writeAPIError(w, http.StatusServiceUnavailable, "Не удалось зафиксировать административное действие")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+	mux.Handle(pattern, s.auth.Require(s.store, protectedHandler))
+}
+
+func isMutationPattern(pattern string) bool {
+	return !strings.HasPrefix(pattern, http.MethodGet+" ") &&
+		!strings.HasPrefix(pattern, http.MethodHead+" ") &&
+		!strings.HasPrefix(pattern, http.MethodOptions+" ")
+}
+
+func (s *Server) writeAudit(
+	ctx context.Context,
+	identity AdminIdentity,
+	action, objectType, objectID string,
+	details any,
+	ipAddress string,
+) {
+	if err := s.store.WriteAudit(ctx, identity, action, objectType, objectID, details, ipAddress); err != nil {
+		slog.Error(
+			"admin audit write failed",
+			"action", action,
+			"object_type", objectType,
+			"object_id", objectID,
+			"admin_id", identity.ID,
+			"err", err,
+		)
+	}
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -112,6 +188,10 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if s.metricsToken == "" || !constantTimeTokenEqual(bearerToken(r), s.metricsToken) {
+		http.NotFound(w, r)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 	operations, err := s.store.OperationalHealth(ctx)
@@ -155,34 +235,67 @@ scheduler_oldest_pending_seconds %d
 	)
 }
 
+func bearerToken(r *http.Request) string {
+	value := strings.TrimSpace(r.Header.Get("Authorization"))
+	if len(value) < 7 || !strings.EqualFold(value[:7], "Bearer ") {
+		return ""
+	}
+	return strings.TrimSpace(value[7:])
+}
+
+func constantTimeTokenEqual(actual, expected string) bool {
+	actualHash := sha256.Sum256([]byte(actual))
+	expectedHash := sha256.Sum256([]byte(expected))
+	return subtle.ConstantTimeCompare(actualHash[:], expectedHash[:]) == 1
+}
+
 func (s *Server) handleAccessKeyLogin(w http.ResponseWriter, r *http.Request) {
-	ip := requestIP(r)
-	if allowed, retryAfter := s.logins.allowed(ip, time.Now()); !allowed {
+	if !s.auth.AccessKeyEnabled() {
+		http.NotFound(w, r)
+		return
+	}
+	ip := s.requestIP(r)
+	now := time.Now()
+	if allowed, retryAfter := s.logins.allowed(ip, now); !allowed {
 		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retryAfter.Seconds()))))
 		writeAPIError(w, http.StatusTooManyRequests, "Слишком много попыток входа. Повторите позже.")
+		return
+	}
+	if allowed, retryAfter := s.globalLogins.allowed("access-key", now); !allowed {
+		w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retryAfter.Seconds()))))
+		writeAPIError(w, http.StatusTooManyRequests, "Вход по аварийному ключу временно заблокирован.")
 		return
 	}
 	var request struct {
 		AccessKey string `json:"access_key"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
+	if err := decodeJSON(w, r, &request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "Некорректный запрос")
 		return
 	}
 	identity, err := s.auth.LoginWithAccessKey(request.AccessKey)
 	if err != nil {
-		s.logins.failed(ip, time.Now())
+		now = time.Now()
+		s.logins.failed(ip, now)
+		s.globalLogins.failed("access-key", now)
 		writeAPIError(w, http.StatusUnauthorized, "Неверный ключ администратора")
 		return
 	}
 	s.logins.succeeded(ip)
+	s.globalLogins.succeeded("access-key")
 	identity, err = s.auth.IssueSession(w, identity)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "Не удалось создать сессию")
 		return
 	}
-	_ = s.store.WriteAudit(r.Context(), identity, "login", "session", "", map[string]any{"method": "access_key"}, ip)
+	s.writeAudit(r.Context(), identity, "login", "session", "", map[string]any{"method": "access_key"}, ip)
 	writeJSON(w, http.StatusOK, map[string]any{"user": identity})
+}
+
+func (s *Server) handleAuthConfig(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"access_key_enabled": s.auth.AccessKeyEnabled(),
+	})
 }
 
 func (s *Server) handleClientError(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +304,7 @@ func (s *Server) handleClientError(w http.ResponseWriter, r *http.Request) {
 		Stack   string `json:"stack"`
 		URL     string `json:"url"`
 	}
-	if err := decodeJSON(r, &report); err != nil {
+	if err := decodeJSON(w, r, &report); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "Некорректный отчёт об ошибке")
 		return
 	}
@@ -216,7 +329,7 @@ func (s *Server) handleTelegramLogin(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		InitData string `json:"init_data"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
+	if err := decodeJSON(w, r, &request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "Некорректный запрос")
 		return
 	}
@@ -230,7 +343,7 @@ func (s *Server) handleTelegramLogin(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "Не удалось создать сессию")
 		return
 	}
-	_ = s.store.WriteAudit(r.Context(), identity, "login", "session", "", map[string]any{"method": "telegram"}, requestIP(r))
+	s.writeAudit(r.Context(), identity, "login", "session", "", map[string]any{"method": "telegram"}, s.requestIP(r))
 	writeJSON(w, http.StatusOK, map[string]any{"user": identity})
 }
 
@@ -243,7 +356,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	identity := identityFromContext(r.Context())
-	_ = s.store.WriteAudit(r.Context(), identity, "logout", "session", "", map[string]any{}, requestIP(r))
+	s.writeAudit(r.Context(), identity, "logout", "session", "", map[string]any{}, s.requestIP(r))
 	s.auth.Logout(w, r)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -293,13 +406,55 @@ func (s *Server) handleParserSnapshots(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
+func (s *Server) handleParserSnapshotPreview(w http.ResponseWriter, r *http.Request) {
+	preview, err := s.store.ParserSnapshotPreview(r.Context(), r.PathValue("id"))
+	if errors.Is(err, ErrNotFound) {
+		writeAPIError(w, http.StatusNotFound, "Снимок не найден")
+		return
+	}
+	if err != nil {
+		slog.Error("admin load parser snapshot preview failed", "snapshot", r.PathValue("id"), "err", err)
+		writeAPIError(w, http.StatusInternalServerError, "Не удалось подготовить сравнение снимка")
+		return
+	}
+	writeJSON(w, http.StatusOK, preview)
+}
+
+func (s *Server) handleParserSnapshotSchedule(w http.ResponseWriter, r *http.Request) {
+	groupID := strings.TrimSpace(r.URL.Query().Get("group"))
+	if groupID == "" {
+		writeAPIError(w, http.StatusBadRequest, "Укажите учебную группу")
+		return
+	}
+	comparison, err := s.store.ParserSnapshotSchedule(
+		r.Context(),
+		r.PathValue("id"),
+		groupID,
+	)
+	if errors.Is(err, ErrNotFound) {
+		writeAPIError(w, http.StatusNotFound, "Снимок или группа не найдены")
+		return
+	}
+	if err != nil {
+		slog.Error(
+			"admin load parser snapshot schedule failed",
+			"snapshot", r.PathValue("id"),
+			"group", groupID,
+			"err", err,
+		)
+		writeAPIError(w, http.StatusInternalServerError, "Не удалось загрузить расписание группы")
+		return
+	}
+	writeJSON(w, http.StatusOK, comparison)
+}
+
 func (s *Server) handlePublishSnapshot(w http.ResponseWriter, r *http.Request) {
 	snapshotID := r.PathValue("id")
 	var request struct {
 		ReviewNote string `json:"review_note"`
 	}
 	if r.ContentLength > 0 {
-		if err := decodeJSON(r, &request); err != nil {
+		if err := decodeJSON(w, r, &request); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "Некорректный запрос")
 			return
 		}
@@ -321,13 +476,13 @@ func (s *Server) handlePublishSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusConflict, "Снимок нельзя опубликовать: "+err.Error())
 		return
 	}
-	_ = s.store.WriteAudit(r.Context(), identity, "publish_parser_snapshot", "parser_snapshot", snapshotID,
+	s.writeAudit(r.Context(), identity, "publish_parser_snapshot", "parser_snapshot", snapshotID,
 		map[string]any{
 			"source_id":   snapshot.DataSourceID,
 			"groups":      snapshot.GroupCount,
 			"lessons":     snapshot.LessonCount,
 			"review_note": request.ReviewNote,
-		}, requestIP(r))
+		}, s.requestIP(r))
 	writeJSON(w, http.StatusOK, snapshot)
 }
 
@@ -336,7 +491,7 @@ func (s *Server) handleRejectSnapshot(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		ReviewNote string `json:"review_note"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
+	if err := decodeJSON(w, r, &request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "Некорректный запрос")
 		return
 	}
@@ -354,8 +509,8 @@ func (s *Server) handleRejectSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "Не удалось отклонить снимок")
 		return
 	}
-	_ = s.store.WriteAudit(r.Context(), identity, "reject_parser_snapshot", "parser_snapshot", snapshotID,
-		map[string]any{"review_note": request.ReviewNote}, requestIP(r))
+	s.writeAudit(r.Context(), identity, "reject_parser_snapshot", "parser_snapshot", snapshotID,
+		map[string]any{"review_note": request.ReviewNote}, s.requestIP(r))
 	writeJSON(w, http.StatusOK, map[string]any{"status": "rejected"})
 }
 
@@ -378,8 +533,8 @@ func (s *Server) handleRollbackSource(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "Предыдущий опубликованный снимок отсутствует")
 		return
 	}
-	_ = s.store.WriteAudit(r.Context(), identity, "rollback_parser_snapshot", "data_source", sourceID,
-		map[string]any{"snapshot_id": snapshot.ID}, requestIP(r))
+	s.writeAudit(r.Context(), identity, "rollback_parser_snapshot", "data_source", sourceID,
+		map[string]any{"snapshot_id": snapshot.ID}, s.requestIP(r))
 	writeJSON(w, http.StatusOK, snapshot)
 }
 
@@ -388,7 +543,7 @@ func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		UpdateInterval int `json:"update_interval"`
 	}
-	if err := decodeJSON(r, &request); err != nil || request.UpdateInterval < 300 || request.UpdateInterval > 604800 {
+	if err := decodeJSON(w, r, &request); err != nil || request.UpdateInterval < 300 || request.UpdateInterval > 604800 {
 		writeAPIError(w, http.StatusBadRequest, "Интервал должен быть от 5 минут до 7 дней")
 		return
 	}
@@ -401,8 +556,8 @@ func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := identityFromContext(r.Context())
-	_ = s.store.WriteAudit(r.Context(), identity, "update_interval", "data_source", sourceID,
-		map[string]any{"update_interval": request.UpdateInterval}, requestIP(r))
+	s.writeAudit(r.Context(), identity, "update_interval", "data_source", sourceID,
+		map[string]any{"update_interval": request.UpdateInterval}, s.requestIP(r))
 	writeJSON(w, http.StatusOK, map[string]any{"status": "updated"})
 }
 
@@ -417,8 +572,8 @@ func (s *Server) handleSyncSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := identityFromContext(r.Context())
-	ipAddress := requestIP(r)
-	_ = s.store.WriteAudit(r.Context(), identity, "sync_requested", "data_source", sourceID, map[string]any{}, ipAddress)
+	ipAddress := s.requestIP(r)
+	s.writeAudit(r.Context(), identity, "sync_requested", "data_source", sourceID, map[string]any{}, ipAddress)
 	go func() {
 		defer s.finishSync(sourceID)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
@@ -433,7 +588,7 @@ func (s *Server) handleSyncSource(w http.ResponseWriter, r *http.Request) {
 		} else {
 			slog.Info("admin manual sync complete", "source", sourceID, "records", records)
 		}
-		_ = s.store.WriteAudit(context.Background(), identity, action, "data_source", sourceID, details, ipAddress)
+		s.writeAudit(context.Background(), identity, action, "data_source", sourceID, details, ipAddress)
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "started", "source_id": sourceID})
 }
@@ -508,7 +663,7 @@ func (s *Server) handleResolveSupportRequest(w http.ResponseWriter, r *http.Requ
 		Status     string `json:"status"`
 		ReviewNote string `json:"review_note"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
+	if err := decodeJSON(w, r, &request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "Некорректный запрос")
 		return
 	}
@@ -542,8 +697,8 @@ func (s *Server) handleResolveSupportRequest(w http.ResponseWriter, r *http.Requ
 		writeAPIError(w, http.StatusInternalServerError, "Не удалось обработать обращение")
 		return
 	}
-	_ = s.store.WriteAudit(r.Context(), identity, "resolve_support_request", "support_request", requestID,
-		map[string]any{"status": request.Status, "review_note": request.ReviewNote}, requestIP(r))
+	s.writeAudit(r.Context(), identity, "resolve_support_request", "support_request", requestID,
+		map[string]any{"status": request.Status, "review_note": request.ReviewNote}, s.requestIP(r))
 	writeJSON(w, http.StatusOK, map[string]any{"status": request.Status})
 }
 
@@ -552,7 +707,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		IsAdmin bool `json:"is_admin"`
 	}
-	if err := decodeJSON(r, &request); err != nil {
+	if err := decodeJSON(w, r, &request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "Некорректный запрос")
 		return
 	}
@@ -569,8 +724,8 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "Не удалось изменить роль")
 		return
 	}
-	_ = s.store.WriteAudit(r.Context(), identity, "update_admin_role", "user", userID,
-		map[string]any{"is_admin": request.IsAdmin}, requestIP(r))
+	s.writeAudit(r.Context(), identity, "update_admin_role", "user", userID,
+		map[string]any{"is_admin": request.IsAdmin}, s.requestIP(r))
 	writeJSON(w, http.StatusOK, map[string]any{"status": "updated"})
 }
 
@@ -620,13 +775,59 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
+type responseCapture struct {
+	http.ResponseWriter
+	status int
+	bytes  int
+}
+
+func (w *responseCapture) WriteHeader(status int) {
+	if w.status != 0 {
+		return
+	}
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *responseCapture) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	n, err := w.ResponseWriter.Write(body)
+	w.bytes += n
+	return n, err
+}
+
+func (s *Server) requestContext(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := uuid.NewString()
+		w.Header().Set(requestIDHeader, requestID)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestIDContextKey{}, requestID)))
+	})
+}
+
 func (s *Server) requestLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
-		next.ServeHTTP(w, r)
-		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/health" {
-			slog.Debug("admin request", "method", r.Method, "path", r.URL.Path, "elapsed", time.Since(started))
+		capture := &responseCapture{ResponseWriter: w}
+		next.ServeHTTP(capture, r)
+		if !strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api/health" {
+			return
 		}
+		status := capture.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		slog.Info("admin request",
+			"request_id", requestIDFromContext(r.Context()),
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", status,
+			"bytes", capture.bytes,
+			"elapsed", time.Since(started),
+			"admin_id", r.Header.Get(internalAdminIDHeader),
+			"ip", s.requestIP(r),
+		)
 	})
 }
 
@@ -634,8 +835,15 @@ func (s *Server) recoverPanic(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				slog.Error("admin request panic", "panic", recovered, "path", r.URL.Path)
-				writeAPIError(w, http.StatusInternalServerError, "Внутренняя ошибка сервера")
+				slog.Error("admin request panic",
+					"request_id", requestIDFromContext(r.Context()),
+					"panic", recovered,
+					"path", r.URL.Path,
+					"stack", string(debug.Stack()),
+				)
+				if capture, ok := w.(*responseCapture); !ok || capture.status == 0 {
+					writeAPIError(w, http.StatusInternalServerError, "Внутренняя ошибка сервера")
+				}
 			}
 		}()
 		next.ServeHTTP(w, r)
@@ -665,11 +873,21 @@ func spaHandler(assets fs.FS, index []byte) http.Handler {
 	})
 }
 
-func decodeJSON(r *http.Request, target any) error {
+func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	defer r.Body.Close()
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
-	return decoder.Decode(target)
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("request body must contain a single JSON value")
+		}
+		return err
+	}
+	return nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -679,7 +897,33 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 }
 
 func writeAPIError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]any{"error": message, "status": status})
+	writeJSON(w, status, map[string]any{
+		"code":       httpErrorCode(status),
+		"error":      message,
+		"status":     status,
+		"request_id": w.Header().Get(requestIDHeader),
+	})
+}
+
+func httpErrorCode(status int) string {
+	switch status {
+	case http.StatusBadRequest:
+		return "request.invalid"
+	case http.StatusUnauthorized:
+		return "auth.required"
+	case http.StatusForbidden:
+		return "auth.forbidden"
+	case http.StatusNotFound:
+		return "resource.not_found"
+	case http.StatusConflict:
+		return "resource.conflict"
+	case http.StatusTooManyRequests:
+		return "request.rate_limited"
+	case http.StatusServiceUnavailable:
+		return "service.unavailable"
+	default:
+		return "service.internal_error"
+	}
 }
 
 func queryInt(r *http.Request, name string, fallback int) int {
@@ -690,10 +934,65 @@ func queryInt(r *http.Request, name string, fallback int) int {
 	return value
 }
 
-func requestIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err == nil {
-		return host
+type requestIDContextKey struct{}
+
+func requestIDFromContext(ctx context.Context) string {
+	value, _ := ctx.Value(requestIDContextKey{}).(string)
+	return value
+}
+
+func parseTrustedProxies(raw string) ([]*net.IPNet, error) {
+	var result []*net.IPNet
+	for _, value := range strings.Split(raw, ",") {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		_, network, err := net.ParseCIDR(value)
+		if err != nil {
+			return nil, fmt.Errorf("admin trusted proxy %q: %w", value, err)
+		}
+		result = append(result, network)
 	}
-	return r.RemoteAddr
+	return result, nil
+}
+
+func (s *Server) requestIP(r *http.Request) string {
+	remote := remoteIP(r.RemoteAddr)
+	if remote == nil || !s.isTrustedProxy(remote) {
+		if remote != nil {
+			return remote.String()
+		}
+		return r.RemoteAddr
+	}
+	for _, value := range []string{r.Header.Get("CF-Connecting-IP"), firstForwardedIP(r.Header.Get("X-Forwarded-For"))} {
+		if candidate := net.ParseIP(strings.TrimSpace(value)); candidate != nil {
+			return candidate.String()
+		}
+	}
+	return remote.String()
+}
+
+func (s *Server) isTrustedProxy(ip net.IP) bool {
+	for _, network := range s.trustedProxies {
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func remoteIP(address string) net.IP {
+	host, _, err := net.SplitHostPort(address)
+	if err == nil {
+		return net.ParseIP(host)
+	}
+	return net.ParseIP(address)
+}
+
+func firstForwardedIP(value string) string {
+	if index := strings.IndexByte(value, ','); index >= 0 {
+		return value[:index]
+	}
+	return value
 }

@@ -28,7 +28,10 @@ var (
 	ErrConflict     = errors.New("conflict")
 )
 
-const adminSessionCookie = "scheduler_admin_session"
+const (
+	adminSessionCookie = "scheduler_admin_session"
+	maxAdminSessions   = 10_000
+)
 
 type session struct {
 	identity AdminIdentity
@@ -42,29 +45,35 @@ type telegramAdminChecker interface {
 }
 
 type AuthManager struct {
-	botToken    string
-	accessToken string
-	secure      bool
-	ttl         time.Duration
+	botToken       string
+	accessToken    string
+	accessKeyLogin bool
+	cookieSecure   bool
+	ttl            time.Duration
+	maxSessions    int
 
 	mu       sync.Mutex
 	sessions map[string]session
 }
 
-func NewAuthManager(botToken, accessToken, publicURL string) *AuthManager {
+func NewAuthManager(botToken, accessToken string, accessKeyLogin, cookieSecure bool) *AuthManager {
 	return &AuthManager{
-		botToken:    botToken,
-		accessToken: accessToken,
-		secure:      strings.HasPrefix(strings.ToLower(publicURL), "https://"),
-		ttl:         12 * time.Hour,
-		sessions:    make(map[string]session),
+		botToken:       botToken,
+		accessToken:    accessToken,
+		accessKeyLogin: accessKeyLogin,
+		cookieSecure:   cookieSecure,
+		ttl:            12 * time.Hour,
+		maxSessions:    maxAdminSessions,
+		sessions:       make(map[string]session),
 	}
 }
 
-func (a *AuthManager) AccessKeyEnabled() bool { return a.accessToken != "" }
+func (a *AuthManager) AccessKeyEnabled() bool {
+	return a.accessKeyLogin && a.accessToken != ""
+}
 
 func (a *AuthManager) LoginWithAccessKey(key string) (AdminIdentity, error) {
-	if a.accessToken == "" {
+	if !a.AccessKeyEnabled() {
 		return AdminIdentity{}, ErrForbidden
 	}
 	expected := sha256.Sum256([]byte(a.accessToken))
@@ -112,6 +121,9 @@ func (a *AuthManager) IssueSession(w http.ResponseWriter, identity AdminIdentity
 	identity.CSRFToken = csrf
 	a.mu.Lock()
 	a.cleanupExpiredLocked(time.Now())
+	if len(a.sessions) >= a.maxSessions {
+		a.evictEarliestSessionLocked()
+	}
 	a.sessions[token] = session{identity: identity, expires: time.Now().Add(a.ttl)}
 	a.mu.Unlock()
 	http.SetCookie(w, &http.Cookie{
@@ -120,7 +132,7 @@ func (a *AuthManager) IssueSession(w http.ResponseWriter, identity AdminIdentity
 		Path:     "/",
 		MaxAge:   int(a.ttl.Seconds()),
 		HttpOnly: true,
-		Secure:   a.secure,
+		Secure:   a.cookieSecure,
 		SameSite: http.SameSiteStrictMode,
 	})
 	return identity, nil
@@ -138,7 +150,7 @@ func (a *AuthManager) Logout(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   a.secure,
+		Secure:   a.cookieSecure,
 		SameSite: http.SameSiteStrictMode,
 	})
 }
@@ -170,6 +182,7 @@ func (a *AuthManager) Require(store telegramAdminChecker, next http.Handler) htt
 			}
 		}
 		w.Header().Set("Cache-Control", "no-store")
+		r.Header.Set(internalAdminIDHeader, identity.ID)
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), identityContextKey{}, identity)))
 	})
 }
@@ -195,6 +208,20 @@ func (a *AuthManager) cleanupExpiredLocked(now time.Time) {
 		if current.expires.Before(now) {
 			delete(a.sessions, token)
 		}
+	}
+}
+
+func (a *AuthManager) evictEarliestSessionLocked() {
+	var earliestToken string
+	var earliestExpiry time.Time
+	for token, current := range a.sessions {
+		if earliestToken == "" || current.expires.Before(earliestExpiry) {
+			earliestToken = token
+			earliestExpiry = current.expires
+		}
+	}
+	if earliestToken != "" {
+		delete(a.sessions, earliestToken)
 	}
 }
 
