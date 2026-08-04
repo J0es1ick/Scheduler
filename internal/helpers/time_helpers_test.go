@@ -39,6 +39,16 @@ func TestNormalizeDateEqual(t *testing.T) {
 	}
 }
 
+func TestNormalizeDateTreatsSameCivilDateAsEqualAcrossLocations(t *testing.T) {
+	moscow := time.FixedZone("MSK", 3*60*60)
+	utcDate := time.Date(2026, 4, 25, 23, 59, 0, 0, time.UTC)
+	moscowDate := time.Date(2026, 4, 25, 0, 1, 0, 0, moscow)
+
+	if !NormalizeDate(utcDate).Equal(NormalizeDate(moscowDate)) {
+		t.Fatalf("same civil date must not depend on timezone")
+	}
+}
+
 func TestDetermineWeekType(t *testing.T) {
 	start := time.Date(2026, 2, 9, 0, 0, 0, 0, time.UTC) // начало семестра = нечётная неделя
 
@@ -50,5 +60,15 @@ func TestDetermineWeekType(t *testing.T) {
 	week2 := time.Date(2026, 2, 16, 0, 0, 0, 0, time.UTC)
 	if DetermineWeekType(week2, start) != domain.WeekTypeEven {
 		t.Errorf("Вторая неделя должна быть чётной")
+	}
+}
+
+func TestDetermineWeekTypeIgnoresTimezoneOffsets(t *testing.T) {
+	moscow := time.FixedZone("MSK", 3*60*60)
+	semesterStart := time.Date(2026, 2, 9, 0, 0, 0, 0, time.UTC)
+	secondWeek := time.Date(2026, 2, 16, 0, 0, 0, 0, moscow)
+
+	if got := DetermineWeekType(secondWeek, semesterStart); got != domain.WeekTypeEven {
+		t.Fatalf("second week = %q, want %q", got, domain.WeekTypeEven)
 	}
 }
