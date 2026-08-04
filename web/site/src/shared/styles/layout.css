@@ -1,0 +1,147 @@
+.public-header {
+  position: sticky;
+  z-index: 50;
+  top: 0;
+  border-bottom: 1px solid rgba(197, 187, 171, 0.82);
+  background: rgba(244, 240, 230, 0.92);
+  backdrop-filter: blur(14px);
+}
+
+.public-header-inner {
+  min-height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+}
+
+.public-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  flex: 0 0 auto;
+}
+
+.public-brand > span:last-child {
+  display: grid;
+  line-height: 1;
+}
+
+.public-brand strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 19px;
+  font-weight: 600;
+}
+
+.public-brand small {
+  margin-top: 5px;
+  color: #77746b;
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.public-brand-mark {
+  position: relative;
+  width: 39px;
+  height: 39px;
+  border: 1px solid #4c5547;
+  border-radius: 8px;
+  background: #626b58;
+  box-shadow: 3px 3px 0 #c8aa73;
+}
+
+.public-brand-mark i {
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  height: 2px;
+  background: #fffaf0;
+}
+
+.public-brand-mark i:first-child {
+  top: 12px;
+}
+
+.public-brand-mark i:nth-child(2) {
+  top: 20px;
+}
+
+.public-brand-mark b {
+  position: absolute;
+  right: 8px;
+  bottom: 7px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #fffaf0;
+}
+
+.public-header nav {
+  display: flex;
+  align-items: center;
+  gap: 27px;
+  color: #5f6159;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.public-header nav > a:not(.public-header-cta) {
+  transition: color 150ms ease;
+}
+
+.public-header nav > a:not(.public-header-cta):hover {
+  color: #282b25;
+}
+
+.public-header-cta {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 15px;
+  color: #fffdf7;
+  border-radius: 8px;
+  background: #596350;
+  box-shadow: 0 5px 14px rgba(74, 83, 65, 0.16);
+}
+
+.public-menu-button {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid #cfc7b8;
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+
+.public-footer {
+  padding: 32px 0;
+  border-top: 1px solid #d0c6b7;
+  background: #e9e2d6;
+}
+
+.public-footer > div {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 35px;
+}
+
+.public-footer p {
+  margin: 0;
+  color: #757168;
+  font-size: 11px;
+}
+
+.public-footer > div > div {
+  display: flex;
+  gap: 22px;
+  color: #5f6159;
+  font-size: 12px;
+  font-weight: 600;
+}
+

@@ -1,0 +1,58 @@
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  min-height: 100%;
+  scroll-behavior: smooth;
+  background: #f4f0e6;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+button {
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1,
+h2 {
+  font-family:
+    "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-weight: 600;
+}
+
+.public-site {
+  min-height: 100vh;
+  color: #282b25;
+  background:
+    radial-gradient(circle at 9% 4%, rgba(181, 135, 67, 0.12), transparent 23rem),
+    #f4f0e6;
+}
+
+.public-site a {
+  text-decoration: none;
+}
+
+.public-container {
+  width: min(1180px, calc(100% - 48px));
+  margin: 0 auto;
+}
+
