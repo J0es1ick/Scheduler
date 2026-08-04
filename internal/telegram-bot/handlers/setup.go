@@ -49,6 +49,10 @@ func (h *Handler) HandleSearchTypeSelect(c tgbotapi.Context) error {
 }
 
 func (h *Handler) HandleTextInput(c tgbotapi.Context) error {
+	if isGroupChat(c) {
+		return nil
+	}
+
 	userID := c.Sender().ID
 	state := h.StateManager.Get(userID)
 	if state == nil {
