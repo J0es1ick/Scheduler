@@ -2,6 +2,8 @@ package database
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/config"
@@ -13,12 +15,7 @@ type Database struct {
 }
 
 func NewDatabase(cfg *config.Config) (*Database, error) {
-	dsn := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		cfg.Database.User, cfg.Database.Password,
-		cfg.Database.Host, cfg.Database.Port,
-		cfg.Database.Name,
-	)
+	dsn := connectionString(cfg.Database)
 
 	db, err := sqlx.Connect("pgx", dsn)
 	if err != nil {
@@ -31,6 +28,19 @@ func NewDatabase(cfg *config.Config) (*Database, error) {
 	db.SetConnMaxIdleTime(2 * time.Minute)
 
 	return &Database{DB: db}, nil
+}
+
+func connectionString(cfg config.DatabaseConfig) string {
+	dsn := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(cfg.User, cfg.Password),
+		Host:   net.JoinHostPort(cfg.Host, cfg.Port),
+		Path:   "/" + cfg.Name,
+	}
+	query := dsn.Query()
+	query.Set("sslmode", cfg.SSLMode)
+	dsn.RawQuery = query.Encode()
+	return dsn.String()
 }
 
 func (d *Database) Close() error {
