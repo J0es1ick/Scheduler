@@ -2,6 +2,7 @@ package isuct
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -32,6 +33,41 @@ func TestParseAJAXScheduleFragment(t *testing.T) {
 	}
 	if fragment == "" {
 		t.Fatal("expected schedule HTML fragment")
+	}
+}
+
+func TestParseAJAXScheduleFragmentRejectsBOMOnlyResponse(t *testing.T) {
+	_, err := parseAJAXScheduleFragment([]byte{0xEF, 0xBB, 0xBF})
+	if !errors.Is(err, errEmptyAJAXResponse) {
+		t.Fatalf("error = %v, want errEmptyAJAXResponse", err)
+	}
+}
+
+func TestResponseDiagnosticKeepsBoundedSafeDetails(t *testing.T) {
+	diagnostic := responseDiagnostic(
+		httpResponse{
+			Body:        []byte{0xEF, 0xBB, 0xBF},
+			StatusCode:  200,
+			ContentType: "text/html; charset=UTF-8",
+		},
+		"isuct.ajax.empty_response",
+		"empty",
+	)
+	if diagnostic.ResponseSize != 3 {
+		t.Errorf("response size = %d, want 3", diagnostic.ResponseSize)
+	}
+	if diagnostic.ResponsePreview != "<UTF-8 BOM>" {
+		t.Errorf("preview = %q, want BOM marker", diagnostic.ResponsePreview)
+	}
+	if diagnostic.ResponseSHA256 == "" {
+		t.Error("response hash is empty")
+	}
+	if diagnostic.Retryable || !diagnostic.StopBatch {
+		t.Errorf(
+			"unexpected retry policy: retryable=%v stopBatch=%v",
+			diagnostic.Retryable,
+			diagnostic.StopBatch,
+		)
 	}
 }
 
