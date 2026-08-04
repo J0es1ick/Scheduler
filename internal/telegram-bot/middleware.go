@@ -12,6 +12,8 @@ import (
 
 var ErrBotBusy = errors.New("bot handler capacity exhausted")
 
+var ErrSenderBusy = errors.New("sender handler queue is full")
+
 func RecoverPanics() tele.MiddlewareFunc {
 	return func(next tele.HandlerFunc) tele.HandlerFunc {
 		return func(c tele.Context) (err error) {
@@ -50,7 +52,12 @@ func LimitConcurrent(maxConcurrent int) tele.MiddlewareFunc {
 	}
 }
 
-func SerializeBySender() tele.MiddlewareFunc {
+func SerializeBySender(maxPending ...int) tele.MiddlewareFunc {
+	queueLimit := 8
+	if len(maxPending) > 0 {
+		queueLimit = max(0, maxPending[0])
+	}
+	maxActive := queueLimit + 1
 	var registryMu sync.Mutex
 	locks := make(map[int64]*senderMutex)
 
@@ -66,6 +73,15 @@ func SerializeBySender() tele.MiddlewareFunc {
 			if lock == nil {
 				lock = &senderMutex{}
 				locks[id] = lock
+			}
+			if lock.users >= maxActive {
+				registryMu.Unlock()
+				slog.Warn(
+					"Telegram update dropped because sender queue is full",
+					"user_id", id,
+					"max_pending", queueLimit,
+				)
+				return ErrSenderBusy
 			}
 			lock.users++
 			registryMu.Unlock()

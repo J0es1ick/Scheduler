@@ -38,6 +38,13 @@ func TestInitConfigReadsEnvironmentWithoutDotEnv(t *testing.T) {
 	if cfg.BotUsername != "schedule_free_bot" {
 		t.Fatalf("bot username = %q", cfg.BotUsername)
 	}
+	if cfg.BotMaxConcurrentHandlers != 32 || cfg.BotMaxPendingPerSender != 8 {
+		t.Fatalf(
+			"bot handler limits = concurrent:%d pending-per-sender:%d",
+			cfg.BotMaxConcurrentHandlers,
+			cfg.BotMaxPendingPerSender,
+		)
+	}
 }
 
 func TestInitConfigRejectsUnknownDatabaseSSLMode(t *testing.T) {
@@ -82,5 +89,19 @@ func TestInitAdminConfigRequiresMetricsToken(t *testing.T) {
 	t.Setenv("ADMIN_METRICS_TOKEN", "")
 	if _, err := InitAdminConfig(); err == nil {
 		t.Fatal("admin config without metrics token must be rejected")
+	}
+}
+
+func TestInitConfigRejectsNegativeSenderQueueLimit(t *testing.T) {
+	t.Setenv("BOT_TOKEN", "test-token")
+	t.Setenv("DATABASE_HOST", "postgres")
+	t.Setenv("DATABASE_PORT", "5432")
+	t.Setenv("DATABASE_USER", "scheduler")
+	t.Setenv("DATABASE_PASSWORD", "secret")
+	t.Setenv("DATABASE_NAME", "scheduler")
+	t.Setenv("BOT_MAX_PENDING_PER_SENDER", "-1")
+
+	if _, err := InitConfig(); err == nil {
+		t.Fatal("negative per-sender queue limit must be rejected")
 	}
 }

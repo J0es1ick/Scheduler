@@ -1,0 +1,8 @@
+.env export-ignore
+.cache export-ignore
+.gocache export-ignore
+.runtime export-ignore
+web/admin/node_modules export-ignore
+web/site/node_modules export-ignore
+web/admin/playwright-report export-ignore
+web/admin/test-results export-ignore

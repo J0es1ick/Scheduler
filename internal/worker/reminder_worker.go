@@ -16,7 +16,10 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/service"
 )
 
-const reminderLookaheadDays = 1
+const (
+	reminderLookaheadDays = 1
+	reminderBatchSize     = 250
+)
 
 type ReminderWorker struct {
 	repository      *repository.ReminderRepository
@@ -30,6 +33,8 @@ type reminderSlot struct {
 	TimeEnd   string
 	Lessons   []domain.Lesson
 }
+
+type reminderScheduleCache map[string]map[string][]domain.Lesson
 
 func NewReminderWorker(
 	repository *repository.ReminderRepository,
@@ -68,84 +73,116 @@ func (w *ReminderWorker) tick(parent context.Context) {
 	ctx, cancel := context.WithTimeout(parent, 45*time.Second)
 	defer cancel()
 
-	recipients, err := w.repository.ActiveRecipients(ctx)
-	if err != nil {
-		slog.Error("lesson reminder worker: load recipients failed", "err", err)
-		return
-	}
 	now := w.now().In(time.Local)
-	schedules := make(map[string]map[string][]domain.Lesson)
-	for _, recipient := range recipients {
-		if ctx.Err() != nil {
+	schedules := make(reminderScheduleCache)
+	afterUserID := ""
+	for {
+		recipients, err := w.repository.ActiveRecipientsPage(
+			ctx,
+			afterUserID,
+			reminderBatchSize,
+		)
+		if err != nil {
+			slog.Error("lesson reminder worker: load recipients failed", "err", err)
 			return
 		}
-		for offset := 0; offset <= reminderLookaheadDays; offset++ {
-			date := dateOnly(now).AddDate(0, 0, offset)
-			dateKey := date.Format("2006-01-02")
-			groupSchedules := schedules[recipient.GroupID]
-			if groupSchedules == nil {
-				groupSchedules = make(map[string][]domain.Lesson)
-				schedules[recipient.GroupID] = groupSchedules
-			}
-			lessons, loaded := groupSchedules[dateKey]
-			if !loaded {
-				lessons, err = w.scheduleService.GetScheduleForGroup(
-					ctx,
-					recipient.GroupID,
-					date,
-				)
-				if err != nil {
-					slog.Error(
-						"lesson reminder worker: load schedule failed",
-						"group_id", recipient.GroupID,
-						"date", dateKey,
-						"err", err,
-					)
-					groupSchedules[dateKey] = []domain.Lesson{}
-					continue
-				}
-				groupSchedules[dateKey] = lessons
-			}
-			for _, slot := range reminderSlots(lessons) {
-				startsAt, parseErr := lessonStart(date, slot.TimeStart)
-				if parseErr != nil {
-					slog.Warn(
-						"lesson reminder worker: invalid lesson time",
-						"group_id", recipient.GroupID,
-						"time_start", slot.TimeStart,
-						"err", parseErr,
-					)
-					continue
-				}
-				until := startsAt.Sub(now)
-				if until <= 0 ||
-					until > time.Duration(recipient.ReminderMinutes)*time.Minute {
-					continue
-				}
-				id := reminderID(
-					recipient.UserID,
-					recipient.GroupID,
-					date,
-					slot.TimeStart,
-					slot.TimeEnd,
-				)
-				body := reminderText(recipient, date, slot, until)
-				if err = w.repository.Enqueue(
-					ctx,
-					id,
-					recipient.UserID,
-					recipient.GroupID,
-					body,
-				); err != nil {
-					slog.Error(
-						"lesson reminder worker: enqueue failed",
-						"user_id", recipient.UserID,
-						"group_id", recipient.GroupID,
-						"err", err,
-					)
-				}
-			}
+		if len(recipients) == 0 {
+			return
 		}
+		for _, recipient := range recipients {
+			if ctx.Err() != nil {
+				return
+			}
+			w.enqueueRecipientReminders(ctx, recipient, now, schedules)
+		}
+		afterUserID = recipients[len(recipients)-1].UserID
+		if len(recipients) < reminderBatchSize {
+			return
+		}
+	}
+}
+
+func (w *ReminderWorker) enqueueRecipientReminders(
+	ctx context.Context,
+	recipient domain.ReminderRecipient,
+	now time.Time,
+	schedules reminderScheduleCache,
+) {
+	for offset := 0; offset <= reminderLookaheadDays; offset++ {
+		date := dateOnly(now).AddDate(0, 0, offset)
+		dateKey := date.Format("2006-01-02")
+		groupSchedules := schedules[recipient.GroupID]
+		if groupSchedules == nil {
+			groupSchedules = make(map[string][]domain.Lesson)
+			schedules[recipient.GroupID] = groupSchedules
+		}
+
+		lessons, loaded := groupSchedules[dateKey]
+		if !loaded {
+			var err error
+			lessons, err = w.scheduleService.GetScheduleForGroup(ctx, recipient.GroupID, date)
+			if err != nil {
+				slog.Error(
+					"lesson reminder worker: load schedule failed",
+					"group_id", recipient.GroupID,
+					"date", dateKey,
+					"err", err,
+				)
+				groupSchedules[dateKey] = []domain.Lesson{}
+				continue
+			}
+			groupSchedules[dateKey] = lessons
+		}
+
+		for _, slot := range reminderSlots(lessons) {
+			w.enqueueReminderSlot(ctx, recipient, date, now, slot)
+		}
+	}
+}
+
+func (w *ReminderWorker) enqueueReminderSlot(
+	ctx context.Context,
+	recipient domain.ReminderRecipient,
+	date time.Time,
+	now time.Time,
+	slot reminderSlot,
+) {
+	startsAt, err := lessonStart(date, slot.TimeStart)
+	if err != nil {
+		slog.Warn(
+			"lesson reminder worker: invalid lesson time",
+			"group_id", recipient.GroupID,
+			"time_start", slot.TimeStart,
+			"err", err,
+		)
+		return
+	}
+	until := startsAt.Sub(now)
+	if until <= 0 || until > time.Duration(recipient.ReminderMinutes)*time.Minute {
+		return
+	}
+
+	id := reminderID(
+		recipient.UserID,
+		recipient.GroupID,
+		date,
+		slot.TimeStart,
+		slot.TimeEnd,
+	)
+	body := reminderText(recipient, date, slot, until)
+	if err := w.repository.Enqueue(
+		ctx,
+		id,
+		recipient.UserID,
+		recipient.GroupID,
+		body,
+	); err != nil {
+		slog.Error(
+			"lesson reminder worker: enqueue failed",
+			"user_id", recipient.UserID,
+			"group_id", recipient.GroupID,
+			"err", err,
+		)
 	}
 }
 

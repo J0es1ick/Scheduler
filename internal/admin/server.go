@@ -965,12 +965,32 @@ func (s *Server) requestIP(r *http.Request) string {
 		}
 		return r.RemoteAddr
 	}
-	for _, value := range []string{r.Header.Get("CF-Connecting-IP"), firstForwardedIP(r.Header.Get("X-Forwarded-For"))} {
-		if candidate := net.ParseIP(strings.TrimSpace(value)); candidate != nil {
+	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); forwarded != "" {
+		if candidate, valid := s.forwardedClientIP(remote, forwarded); valid {
 			return candidate.String()
 		}
+		return remote.String()
+	}
+	if candidate := net.ParseIP(strings.TrimSpace(r.Header.Get("CF-Connecting-IP"))); candidate != nil {
+		return candidate.String()
 	}
 	return remote.String()
+}
+
+func (s *Server) forwardedClientIP(remote net.IP, value string) (net.IP, bool) {
+	current := remote
+	parts := strings.Split(value, ",")
+	for index := len(parts) - 1; index >= 0; index-- {
+		if !s.isTrustedProxy(current) {
+			return current, true
+		}
+		candidate := net.ParseIP(strings.TrimSpace(parts[index]))
+		if candidate == nil {
+			return nil, false
+		}
+		current = candidate
+	}
+	return current, true
 }
 
 func (s *Server) isTrustedProxy(ip net.IP) bool {
@@ -988,11 +1008,4 @@ func remoteIP(address string) net.IP {
 		return net.ParseIP(host)
 	}
 	return net.ParseIP(address)
-}
-
-func firstForwardedIP(value string) string {
-	if index := strings.IndexByte(value, ','); index >= 0 {
-		return value[:index]
-	}
-	return value
 }

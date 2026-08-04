@@ -1,9 +1,13 @@
 .git
-.agents
-.codex
 .env
 .gocache
+.gocache-*
+.cache
 .runtime
 web/admin/node_modules
+web/site/node_modules
 bot.zip
 bot_new.zip
+*.zip
+web/admin/playwright-report
+web/admin/test-results

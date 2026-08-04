@@ -129,8 +129,8 @@ func main() {
 	)
 	bot.Use(
 		botpkg.RecoverPanics(),
+		botpkg.SerializeBySender(cfg.BotMaxPendingPerSender),
 		botpkg.LimitConcurrent(cfg.BotMaxConcurrentHandlers),
-		botpkg.SerializeBySender(),
 	)
 	commandsReady := botpkg.Register(ctx, bot, handler)
 
