@@ -10,12 +10,16 @@ import (
 )
 
 type Config struct {
-	BotToken     string         `mapstructure:"BOT_TOKEN"`
-	ProjectURL   string         `mapstructure:"PROJECT_URL"`
-	BotPublicURL string         `mapstructure:"BOT_PUBLIC_URL"`
-	Database     DatabaseConfig `mapstructure:",squash"`
-	Admin        AdminConfig    `mapstructure:",squash"`
-	Site         SiteConfig     `mapstructure:",squash"`
+	BotToken                 string         `mapstructure:"BOT_TOKEN"`
+	BotUsername              string         `mapstructure:"BOT_USERNAME"`
+	BotHealthPort            string         `mapstructure:"BOT_HEALTH_PORT"`
+	BotMaxConcurrentHandlers int            `mapstructure:"BOT_MAX_CONCURRENT_HANDLERS"`
+	BotStateTTLMinutes       int            `mapstructure:"BOT_STATE_TTL_MINUTES"`
+	ProjectURL               string         `mapstructure:"PROJECT_URL"`
+	BotPublicURL             string         `mapstructure:"BOT_PUBLIC_URL"`
+	Database                 DatabaseConfig `mapstructure:",squash"`
+	Admin                    AdminConfig    `mapstructure:",squash"`
+	Site                     SiteConfig     `mapstructure:",squash"`
 }
 
 type DatabaseConfig struct {
@@ -24,12 +28,17 @@ type DatabaseConfig struct {
 	User     string `mapstructure:"DATABASE_USER"`
 	Password string `mapstructure:"DATABASE_PASSWORD"`
 	Name     string `mapstructure:"DATABASE_NAME"`
+	SSLMode  string `mapstructure:"DATABASE_SSLMODE"`
 }
 
 type AdminConfig struct {
-	Port        string `mapstructure:"ADMIN_PORT"`
-	AccessToken string `mapstructure:"ADMIN_ACCESS_TOKEN"`
-	PublicURL   string `mapstructure:"ADMIN_PUBLIC_URL"`
+	Port                  string `mapstructure:"ADMIN_PORT"`
+	AccessToken           string `mapstructure:"ADMIN_ACCESS_TOKEN"`
+	AccessKeyLoginEnabled bool   `mapstructure:"ADMIN_ACCESS_LOGIN_ENABLED"`
+	CookieSecure          bool   `mapstructure:"ADMIN_COOKIE_SECURE"`
+	PublicURL             string `mapstructure:"ADMIN_PUBLIC_URL"`
+	TrustedProxyCIDRs     string `mapstructure:"ADMIN_TRUSTED_PROXY_CIDRS"`
+	MetricsToken          string `mapstructure:"ADMIN_METRICS_TOKEN"`
 }
 
 type SiteConfig struct {
@@ -38,6 +47,17 @@ type SiteConfig struct {
 
 func InitConfig() (*Config, error) {
 	return initConfig(true)
+}
+
+func InitAdminConfig() (*Config, error) {
+	cfg, err := initConfig(true)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(cfg.Admin.MetricsToken) == "" {
+		return nil, errors.New("config: validation: missing required env vars: ADMIN_METRICS_TOKEN")
+	}
+	return cfg, nil
 }
 
 func InitSiteConfig() (*Config, error) {
@@ -50,11 +70,22 @@ func initConfig(requireBotToken bool) (*Config, error) {
 	reader.SetConfigType("env")
 	reader.AutomaticEnv()
 	reader.SetDefault("ADMIN_PORT", "18080")
+	reader.SetDefault("DATABASE_SSLMODE", "disable")
+	reader.SetDefault("BOT_HEALTH_PORT", "18082")
+	reader.SetDefault("BOT_MAX_CONCURRENT_HANDLERS", 32)
+	reader.SetDefault("BOT_STATE_TTL_MINUTES", 30)
+	reader.SetDefault("ADMIN_ACCESS_LOGIN_ENABLED", false)
+	reader.SetDefault("ADMIN_COOKIE_SECURE", true)
+	reader.SetDefault("ADMIN_TRUSTED_PROXY_CIDRS", "127.0.0.1/32,::1/128")
 	reader.SetDefault("SITE_PORT", "18081")
 	reader.SetDefault("PROJECT_URL", "https://github.com/J0es1ick/Scheduler")
 	reader.SetDefault("BOT_PUBLIC_URL", "https://t.me/schedule_free_bot")
 	for _, key := range []string{
 		"BOT_TOKEN",
+		"BOT_USERNAME",
+		"BOT_HEALTH_PORT",
+		"BOT_MAX_CONCURRENT_HANDLERS",
+		"BOT_STATE_TTL_MINUTES",
 		"PROJECT_URL",
 		"BOT_PUBLIC_URL",
 		"DATABASE_HOST",
@@ -62,9 +93,14 @@ func initConfig(requireBotToken bool) (*Config, error) {
 		"DATABASE_USER",
 		"DATABASE_PASSWORD",
 		"DATABASE_NAME",
+		"DATABASE_SSLMODE",
 		"ADMIN_PORT",
 		"ADMIN_ACCESS_TOKEN",
+		"ADMIN_ACCESS_LOGIN_ENABLED",
+		"ADMIN_COOKIE_SECURE",
 		"ADMIN_PUBLIC_URL",
+		"ADMIN_TRUSTED_PROXY_CIDRS",
+		"ADMIN_METRICS_TOKEN",
 		"SITE_PORT",
 	} {
 		if err := reader.BindEnv(key); err != nil {
@@ -110,8 +146,33 @@ func (c *Config) validate(requireBotToken bool) error {
 	if c.Database.Name == "" {
 		missing = append(missing, "DATABASE_NAME")
 	}
+	if c.Admin.AccessKeyLoginEnabled && c.Admin.AccessToken == "" {
+		missing = append(missing, "ADMIN_ACCESS_TOKEN (required when ADMIN_ACCESS_LOGIN_ENABLED=true)")
+	}
+	if strings.TrimSpace(c.BotHealthPort) == "" {
+		missing = append(missing, "BOT_HEALTH_PORT")
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required env vars: %s", strings.Join(missing, ", "))
+	}
+	sslMode := strings.ToLower(strings.TrimSpace(c.Database.SSLMode))
+	allowedSSLModes := map[string]bool{
+		"disable":     true,
+		"allow":       true,
+		"prefer":      true,
+		"require":     true,
+		"verify-ca":   true,
+		"verify-full": true,
+	}
+	if !allowedSSLModes[sslMode] {
+		return fmt.Errorf("DATABASE_SSLMODE must be one of disable, allow, prefer, require, verify-ca, verify-full")
+	}
+	c.Database.SSLMode = sslMode
+	if c.BotMaxConcurrentHandlers <= 0 {
+		return errors.New("BOT_MAX_CONCURRENT_HANDLERS must be greater than zero")
+	}
+	if c.BotStateTTLMinutes <= 0 {
+		return errors.New("BOT_STATE_TTL_MINUTES must be greater than zero")
 	}
 	return nil
 }
