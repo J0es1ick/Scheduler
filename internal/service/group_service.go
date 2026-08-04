@@ -29,3 +29,11 @@ func (s *GroupService) GetGroupByID(ctx context.Context, groupID string) (*domai
 func (s *GroupService) GetGroupByName(ctx context.Context, universityID, groupName string) (*domain.Group, error) {
 	return s.groupRepo.GetGroupByName(ctx, universityID, groupName)
 }
+
+func (s *GroupService) FindActiveByName(
+	ctx context.Context,
+	universityID string,
+	groupName string,
+) ([]domain.Group, error) {
+	return s.groupRepo.FindActiveByName(ctx, universityID, groupName)
+}

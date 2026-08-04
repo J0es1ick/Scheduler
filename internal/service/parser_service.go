@@ -2,22 +2,26 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
-	"github.com/J0es1ick/Scheduler/internal/scrapper"
+	scrapper "github.com/J0es1ick/Scheduler/internal/scraper"
 	"github.com/google/uuid"
 )
 
 const scheduleFetchConcurrency = 3
 const scheduleFetchAttempts = 3
+const scheduleCircuitThreshold = 3
+const parserDiagnosticRetention = 30 * 24 * time.Hour
 
 var (
 	ErrDataSourceBusy     = errors.New("parser: data source is already running")
@@ -31,6 +35,7 @@ type ParserService struct {
 	scheduleSvc      *ScheduleService
 	snapshotRepo     *repository.ParserSnapshotRepository
 	notificationRepo *repository.NotificationRepository
+	diagnosticRepo   *repository.ParserDiagnosticRepository
 	adapters         map[string]scrapper.SourceAdapter
 }
 
@@ -41,6 +46,7 @@ func NewParserService(
 	scheduleSvc *ScheduleService,
 	snapshotRepo *repository.ParserSnapshotRepository,
 	notificationRepo *repository.NotificationRepository,
+	diagnosticRepo *repository.ParserDiagnosticRepository,
 ) *ParserService {
 	return &ParserService{
 		dataSourceRepo:   dataSourceRepo,
@@ -49,6 +55,7 @@ func NewParserService(
 		scheduleSvc:      scheduleSvc,
 		snapshotRepo:     snapshotRepo,
 		notificationRepo: notificationRepo,
+		diagnosticRepo:   diagnosticRepo,
 		adapters:         make(map[string]scrapper.SourceAdapter),
 	}
 }
@@ -104,14 +111,22 @@ func (s *ParserService) RunDataSource(ctx context.Context, dataSourceID string) 
 	fail := func(records int, runErr error) (int, error) {
 		message := truncate(runErr.Error(), 4000)
 		_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "failed", records, message)
-		failures, recordErr := s.dataSourceRepo.RecordFailure(ctx, ds.ID, message)
+		failures, nextRetryAt, recordErr := s.dataSourceRepo.RecordFailure(
+			ctx,
+			ds.ID,
+			message,
+		)
 		if recordErr != nil {
 			slog.Error("parser: record source failure failed", "source", ds.ID, "err", recordErr)
 		}
 		if failures == 1 || failures%3 == 0 {
 			s.enqueueAdminAlert(ctx, "parser-failure:"+logID, fmt.Sprintf(
-				"⚠️ Ошибка обновления расписания\n\nИсточник: %s\nПопытка подряд: %d\nОшибка: %s",
-				adapter.Name(), failures, truncate(message, 1200),
+				"⚠️ Ошибка обновления расписания\n\nИсточник: %s\n"+
+					"Попытка подряд: %d\nСледующая попытка: %s\nОшибка: %s",
+				adapter.Name(),
+				failures,
+				nextRetryAt.In(time.Local).Format("02.01.2006 15:04"),
+				truncate(message, 1200),
 			))
 		}
 		return records, runErr
@@ -125,21 +140,29 @@ func (s *ParserService) RunDataSource(ctx context.Context, dataSourceID string) 
 		return fail(0, fmt.Errorf("parser: FetchGroups [%s] returned no groups", adapter.Name()))
 	}
 
-	results := s.fetchSchedules(ctx, adapter, groups)
-	var fetchErrors []error
-	for _, result := range results {
-		if result.err != nil {
-			fetchErrors = append(fetchErrors, fmt.Errorf("group %s: %w", result.group.Name, result.err))
-		}
+	fetchReport := s.fetchSchedules(ctx, adapter, groups)
+	s.saveScheduleDiagnostics(ctx, logID, ds.ID, fetchReport)
+	if fetchReport.Failed > 0 {
+		return fail(0, fetchReport.Error(len(groups)))
 	}
-	if len(fetchErrors) > 0 {
-		return fail(0, fmt.Errorf(
-			"parser: candidate was not published because %d/%d schedule requests failed: %w",
-			len(fetchErrors), len(groups), errors.Join(fetchErrors...),
-		))
-	}
+	results := fetchReport.Results
 
 	payload, lessonCount := buildScheduleSnapshot(adapter.UniversityID(), semesterID, results)
+	existingGroups, err := s.groupRepo.GetGroupsByUniversityID(ctx, adapter.UniversityID())
+	if err != nil {
+		return fail(lessonCount, fmt.Errorf("parser: load existing group identities: %w", err))
+	}
+	payload, remappedGroups, err := repository.CanonicalizeSnapshotGroupIDs(payload, existingGroups)
+	if err != nil {
+		return fail(lessonCount, fmt.Errorf("parser: reconcile group identities: %w", err))
+	}
+	if remappedGroups > 0 {
+		slog.Info(
+			"parser: source group identifiers reconciled",
+			"adapter", adapter.Name(),
+			"groups", remappedGroups,
+		)
+	}
 	baseline, err := s.snapshotRepo.Baseline(ctx, adapter.UniversityID(), ds.ID)
 	if err != nil {
 		return fail(lessonCount, fmt.Errorf("parser: load baseline: %w", err))
@@ -258,29 +281,31 @@ func (s *ParserService) publishSnapshot(
 	if err != nil {
 		return nil, err
 	}
-	published, err := s.snapshotRepo.Publish(ctx, snapshotID, actorID, reviewNote)
-	if err != nil {
-		return nil, err
-	}
-	after, err := s.captureEffectiveSchedules(ctx, candidate.Payload.UniversityID, groupIDs)
-	if err != nil {
-		slog.Error("parser: published snapshot but failed to read resulting schedules",
-			"snapshot", snapshotID, "err", err)
-		return published, nil
-	}
-	for groupID := range groupIDs {
-		diff := CompareLessonSnapshots(before[groupID], after[groupID])
-		if !diff.Changed() || s.notificationRepo == nil {
-			continue
+	var hook repository.SnapshotPublicationHook
+	if s.notificationRepo != nil {
+		hook = func(ctx context.Context, publication *repository.SnapshotPublication) error {
+			afterLessons, err := publication.EffectiveLessonsByUniversity(
+				ctx, candidate.Payload.UniversityID,
+			)
+			if err != nil {
+				return err
+			}
+			after := schedulesByGroup(groupIDs, afterLessons)
+			for groupID := range groupIDs {
+				diff := CompareLessonSnapshots(before[groupID], after[groupID])
+				if !diff.Changed() {
+					continue
+				}
+				if err = publication.EnqueueScheduleChange(
+					ctx, uuid.NewString(), groupID, "parser", scheduleChangeSummary(diff),
+				); err != nil {
+					return err
+				}
+			}
+			return nil
 		}
-		if enqueueErr := s.notificationRepo.EnqueueScheduleChange(
-			ctx, uuid.NewString(), groupID, "parser", scheduleChangeSummary(diff),
-		); enqueueErr != nil {
-			slog.Error("parser: enqueue schedule notification failed",
-				"group", groupID, "snapshot", snapshotID, "err", enqueueErr)
-		}
 	}
-	return published, nil
+	return s.snapshotRepo.PublishWithHook(ctx, snapshotID, actorID, reviewNote, hook)
 }
 
 func (s *ParserService) captureEffectiveSchedules(
@@ -288,18 +313,25 @@ func (s *ParserService) captureEffectiveSchedules(
 	universityID string,
 	groupIDs map[string]struct{},
 ) (map[string][]domain.Lesson, error) {
-	result := make(map[string][]domain.Lesson, len(groupIDs))
-	for groupID := range groupIDs {
-		result[groupID] = []domain.Lesson{}
-	}
 	lessons, err := s.scheduleSvc.GetAllLessonsForUniversity(ctx, universityID)
 	if err != nil {
 		return nil, fmt.Errorf("read effective schedule for university %s: %w", universityID, err)
 	}
+	return schedulesByGroup(groupIDs, lessons), nil
+}
+
+func schedulesByGroup(
+	groupIDs map[string]struct{},
+	lessons []domain.Lesson,
+) map[string][]domain.Lesson {
+	result := make(map[string][]domain.Lesson, len(groupIDs))
+	for groupID := range groupIDs {
+		result[groupID] = []domain.Lesson{}
+	}
 	for _, lesson := range lessons {
 		result[lesson.GroupID] = append(result[lesson.GroupID], lesson)
 	}
-	return result, nil
+	return result
 }
 
 func (s *ParserService) enqueueAdminAlert(ctx context.Context, id, body string) {
@@ -549,32 +581,116 @@ type groupScheduleResult struct {
 	err     error
 }
 
+type scheduleDiagnosticAggregate struct {
+	Diagnostic   scrapper.ResponseDiagnostic
+	FirstGroupID string
+	Occurrences  int
+}
+
+type scheduleFetchReport struct {
+	Results     []groupScheduleResult
+	Attempted   int
+	Failed      int
+	Skipped     int
+	FirstError  error
+	Diagnostics map[string]*scheduleDiagnosticAggregate
+	Circuit     *scheduleDiagnosticAggregate
+}
+
+func (r scheduleFetchReport) Error(total int) error {
+	if r.Circuit != nil {
+		return fmt.Errorf(
+			"parser: обновление не опубликовано: %s; "+
+				"одинаковый ответ получен %d раза, проверено %d из %d групп, "+
+				"пропущено %d; рабочее расписание сохранено",
+			r.Circuit.Diagnostic.Summary,
+			r.Circuit.Occurrences,
+			r.Attempted,
+			total,
+			r.Skipped,
+		)
+	}
+	first := "неизвестная ошибка"
+	if r.FirstError != nil {
+		first = truncate(r.FirstError.Error(), 500)
+	}
+	return fmt.Errorf(
+		"parser: обновление не опубликовано: ошибки у %d из %d проверенных групп; "+
+			"первая ошибка: %s; рабочее расписание сохранено",
+		r.Failed,
+		r.Attempted,
+		first,
+	)
+}
+
 func (s *ParserService) fetchSchedules(
 	ctx context.Context,
 	adapter scrapper.SourceAdapter,
 	groups []domain.Group,
-) []groupScheduleResult {
-	results := make([]groupScheduleResult, len(groups))
-	sem := make(chan struct{}, scheduleFetchConcurrency)
-	var wg sync.WaitGroup
-	for i, group := range groups {
-		i, group := i, group
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-			case <-ctx.Done():
-				results[i] = groupScheduleResult{group: group, err: ctx.Err()}
-				return
-			}
-			lessons, err := fetchScheduleWithRetry(ctx, adapter, group.ID)
-			results[i] = groupScheduleResult{group: group, lessons: lessons, err: err}
-		}()
+) scheduleFetchReport {
+	report := scheduleFetchReport{
+		Results:     make([]groupScheduleResult, len(groups)),
+		Diagnostics: make(map[string]*scheduleDiagnosticAggregate),
 	}
-	wg.Wait()
-	return results
+	for batchStart := 0; batchStart < len(groups); batchStart += scheduleFetchConcurrency {
+		batchEnd := min(batchStart+scheduleFetchConcurrency, len(groups))
+		var wg sync.WaitGroup
+		for index := batchStart; index < batchEnd; index++ {
+			index := index
+			group := groups[index]
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				lessons, err := fetchScheduleWithRetry(ctx, adapter, group.ID)
+				report.Results[index] = groupScheduleResult{
+					group:   group,
+					lessons: lessons,
+					err:     err,
+				}
+			}()
+		}
+		wg.Wait()
+		report.Attempted += batchEnd - batchStart
+
+		for index := batchStart; index < batchEnd; index++ {
+			result := report.Results[index]
+			if result.err == nil {
+				continue
+			}
+			report.Failed++
+			if report.FirstError == nil {
+				report.FirstError = fmt.Errorf(
+					"group %s: %w",
+					result.group.Name,
+					result.err,
+				)
+			}
+			diagnostic, ok := scrapper.ExtractResponseDiagnostic(result.err)
+			if !ok {
+				continue
+			}
+			key := diagnosticKey(diagnostic)
+			aggregate := report.Diagnostics[key]
+			if aggregate == nil {
+				aggregate = &scheduleDiagnosticAggregate{
+					Diagnostic:   diagnostic,
+					FirstGroupID: result.group.ID,
+				}
+				report.Diagnostics[key] = aggregate
+			}
+			aggregate.Occurrences++
+			if diagnostic.StopBatch &&
+				aggregate.Occurrences >= scheduleCircuitThreshold &&
+				report.Circuit == nil {
+				report.Circuit = aggregate
+			}
+		}
+		if report.Circuit != nil || ctx.Err() != nil {
+			break
+		}
+	}
+	report.Skipped = len(groups) - report.Attempted
+	return report
 }
 
 func fetchScheduleWithRetry(
@@ -589,6 +705,10 @@ func fetchScheduleWithRetry(
 			return lessons, nil
 		}
 		lastErr = err
+		if diagnostic, ok := scrapper.ExtractResponseDiagnostic(err); ok &&
+			!diagnostic.Retryable {
+			break
+		}
 		if attempt == scheduleFetchAttempts || ctx.Err() != nil {
 			break
 		}
@@ -601,6 +721,73 @@ func fetchScheduleWithRetry(
 		}
 	}
 	return nil, lastErr
+}
+
+func diagnosticKey(diagnostic scrapper.ResponseDiagnostic) string {
+	return strings.Join(
+		[]string{
+			diagnostic.Category,
+			fmt.Sprint(diagnostic.HTTPStatus),
+			diagnostic.ResponseSHA256,
+		},
+		"|",
+	)
+}
+
+func (s *ParserService) saveScheduleDiagnostics(
+	ctx context.Context,
+	logID string,
+	dataSourceID string,
+	report scheduleFetchReport,
+) {
+	if s.diagnosticRepo == nil || len(report.Diagnostics) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(report.Diagnostics))
+	for key := range report.Diagnostics {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	if len(keys) > 10 {
+		keys = keys[:10]
+	}
+	for _, key := range keys {
+		aggregate := report.Diagnostics[key]
+		metadata, _ := json.Marshal(map[string]any{
+			"attempted_groups": report.Attempted,
+			"failed_groups":    report.Failed,
+			"skipped_groups":   report.Skipped,
+			"circuit_open":     report.Circuit == aggregate,
+		})
+		diagnostic := aggregate.Diagnostic
+		item := &domain.ParserDiagnostic{
+			ID:              uuid.NewString(),
+			ParseLogID:      logID,
+			DataSourceID:    dataSourceID,
+			Stage:           "schedule_fetch",
+			Category:        diagnostic.Category,
+			Summary:         diagnostic.Summary,
+			GroupID:         aggregate.FirstGroupID,
+			HTTPStatus:      diagnostic.HTTPStatus,
+			ContentType:     diagnostic.ContentType,
+			ResponseSize:    diagnostic.ResponseSize,
+			ResponseSHA256:  diagnostic.ResponseSHA256,
+			ResponsePreview: diagnostic.ResponsePreview,
+			Occurrences:     aggregate.Occurrences,
+			Metadata:        metadata,
+		}
+		if err := s.diagnosticRepo.Create(ctx, item); err != nil {
+			slog.Error(
+				"parser: save response diagnostic failed",
+				"source", dataSourceID,
+				"category", diagnostic.Category,
+				"err", err,
+			)
+		}
+	}
+	if err := s.diagnosticRepo.Prune(ctx, parserDiagnosticRetention); err != nil {
+		slog.Error("parser: prune response diagnostics failed", "err", err)
+	}
 }
 
 func (s *ParserService) RunAllActiveSources(ctx context.Context) error {

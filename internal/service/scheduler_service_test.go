@@ -36,6 +36,28 @@ func TestLessonMatchesDateUsesSourceValidityAsParityAnchor(t *testing.T) {
 	}
 }
 
+func TestLessonMatchesDateUsesCivilDatesAcrossLocations(t *testing.T) {
+	moscow := time.FixedZone("MSK", 3*60*60)
+	specialDate := time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC)
+	lesson := domain.Lesson{SpecialDate: &specialDate}
+	queryDate := time.Date(2026, 3, 2, 12, 0, 0, 0, moscow)
+
+	if !lessonMatchesDate(lesson, queryDate, nil) {
+		t.Fatal("special date must match the same civil date in another timezone")
+	}
+
+	validFrom := time.Date(2026, 2, 9, 0, 0, 0, 0, time.UTC)
+	oddLesson := domain.Lesson{
+		DayOfWeek: 1,
+		WeekType:  domain.WeekTypeOdd,
+		ValidFrom: &validFrom,
+	}
+	twoWeeksLater := time.Date(2026, 2, 23, 8, 0, 0, 0, moscow)
+	if !lessonMatchesDate(oddLesson, twoWeeksLater, nil) {
+		t.Fatal("validity parity must be calculated from civil dates")
+	}
+}
+
 func TestCompareLessonSnapshotsIgnoresIDsOrderAndUpdatedAt(t *testing.T) {
 	first := domain.Lesson{
 		ID: "source:old", GroupID: "g1", UniversityID: "u1", SemesterID: "s1",
