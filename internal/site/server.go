@@ -15,6 +15,7 @@ import (
 
 type Server struct {
 	store      *Store
+	publicInfo *publicInfoCache
 	projectURL string
 	botURL     string
 	handler    http.Handler
@@ -23,6 +24,7 @@ type Server struct {
 func NewServer(store *Store, projectURL, botURL string) (*Server, error) {
 	server := &Server{
 		store:      store,
+		publicInfo: newPublicInfoCache(),
 		projectURL: projectURL,
 		botURL:     botURL,
 	}
@@ -68,7 +70,9 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePublicInfo(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-	info, err := s.store.PublicInfo(ctx, s.projectURL, s.botURL)
+	info, err := s.publicInfo.Get(ctx, func(loadContext context.Context) (*PublicInfo, error) {
+		return s.store.PublicInfo(loadContext, s.projectURL, s.botURL)
+	})
 	if err != nil {
 		slog.Error("public project info failed", "err", err)
 		writeError(w, http.StatusServiceUnavailable, "Статистика проекта временно недоступна")

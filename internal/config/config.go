@@ -14,6 +14,7 @@ type Config struct {
 	BotUsername              string         `mapstructure:"BOT_USERNAME"`
 	BotHealthPort            string         `mapstructure:"BOT_HEALTH_PORT"`
 	BotMaxConcurrentHandlers int            `mapstructure:"BOT_MAX_CONCURRENT_HANDLERS"`
+	BotMaxPendingPerSender   int            `mapstructure:"BOT_MAX_PENDING_PER_SENDER"`
 	BotStateTTLMinutes       int            `mapstructure:"BOT_STATE_TTL_MINUTES"`
 	ProjectURL               string         `mapstructure:"PROJECT_URL"`
 	BotPublicURL             string         `mapstructure:"BOT_PUBLIC_URL"`
@@ -73,6 +74,7 @@ func initConfig(requireBotToken bool) (*Config, error) {
 	reader.SetDefault("DATABASE_SSLMODE", "disable")
 	reader.SetDefault("BOT_HEALTH_PORT", "18082")
 	reader.SetDefault("BOT_MAX_CONCURRENT_HANDLERS", 32)
+	reader.SetDefault("BOT_MAX_PENDING_PER_SENDER", 8)
 	reader.SetDefault("BOT_STATE_TTL_MINUTES", 30)
 	reader.SetDefault("ADMIN_ACCESS_LOGIN_ENABLED", false)
 	reader.SetDefault("ADMIN_COOKIE_SECURE", true)
@@ -85,6 +87,7 @@ func initConfig(requireBotToken bool) (*Config, error) {
 		"BOT_USERNAME",
 		"BOT_HEALTH_PORT",
 		"BOT_MAX_CONCURRENT_HANDLERS",
+		"BOT_MAX_PENDING_PER_SENDER",
 		"BOT_STATE_TTL_MINUTES",
 		"PROJECT_URL",
 		"BOT_PUBLIC_URL",
@@ -170,6 +173,9 @@ func (c *Config) validate(requireBotToken bool) error {
 	c.Database.SSLMode = sslMode
 	if c.BotMaxConcurrentHandlers <= 0 {
 		return errors.New("BOT_MAX_CONCURRENT_HANDLERS must be greater than zero")
+	}
+	if c.BotMaxPendingPerSender < 0 {
+		return errors.New("BOT_MAX_PENDING_PER_SENDER must not be negative")
 	}
 	if c.BotStateTTLMinutes <= 0 {
 		return errors.New("BOT_STATE_TTL_MINUTES must be greater than zero")

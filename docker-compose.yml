@@ -1,3 +1,28 @@
+x-app-image: &app-image
+  build: .
+  image: scheduler-app:local
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+
+x-app-environment: &app-environment
+  DATABASE_HOST: postgres
+  DATABASE_PORT: 5432
+  DATABASE_USER: ${DATABASE_USER:-postgres}
+  DATABASE_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD is required}
+  DATABASE_NAME: ${DATABASE_NAME:-scheduler}
+  DATABASE_SSLMODE: disable
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:16
@@ -8,7 +33,7 @@ services:
       POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-postgres}
       POSTGRES_DB: ${DATABASE_NAME:-scheduler}
     ports:
-      - "${DATABASE_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-55432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -16,46 +41,106 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
+    logging: *default-logging
 
   bot:
-    build: .
-    image: scheduler-app:local
+    <<: *app-image
     container_name: scheduler-bot
     restart: unless-stopped
     init: true
     env_file: .env
     environment:
-      DATABASE_HOST: postgres
-      DATABASE_PORT: 5432
+      <<: *app-environment
+      BOT_HEALTH_PORT: 8082
     command: ["/app/scheduler-bot"]
     depends_on:
       postgres:
         condition: service_healthy
     stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8082/ready >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    logging: *default-logging
 
   admin:
-    build: .
-    image: scheduler-app:local
+    <<: *app-image
     container_name: scheduler-admin
     restart: unless-stopped
     init: true
     env_file: .env
     environment:
-      DATABASE_HOST: postgres
-      DATABASE_PORT: 5432
+      <<: *app-environment
       ADMIN_PORT: 8080
     command: ["/app/scheduler-admin"]
     ports:
-      - "${ADMIN_PORT:-8080}:8080"
+      - "${ADMIN_BIND_ADDRESS:-127.0.0.1}:${ADMIN_HOST_PORT:-18080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/api/health >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/api/ready >/dev/null || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 6
     stop_grace_period: 20s
+    logging: *default-logging
+
+  site:
+    <<: *app-image
+    container_name: scheduler-site
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      <<: *app-environment
+      SITE_PORT: 8080
+    command: ["/app/scheduler-site"]
+    ports:
+      - "${SITE_BIND_ADDRESS:-127.0.0.1}:${SITE_HOST_PORT:-18081}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/api/ready >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    stop_grace_period: 20s
+    logging: *default-logging
+
+  backup:
+    build: ./docker/postgres-backup
+    image: scheduler-postgres-backup:local
+    container_name: scheduler-backup
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    environment:
+      <<: *app-environment
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_MAX_AGE_SECONDS: ${BACKUP_MAX_AGE_SECONDS:-90000}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      - pgbackups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/scheduler-backup-health"]
+      interval: 60s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+    logging: *default-logging
 
 volumes:
   pgdata:
+  pgbackups:

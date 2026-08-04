@@ -16,9 +16,14 @@ func NewReminderRepository(db *sqlx.DB) *ReminderRepository {
 	return &ReminderRepository{db: db}
 }
 
-func (r *ReminderRepository) ActiveRecipients(
+func (r *ReminderRepository) ActiveRecipientsPage(
 	ctx context.Context,
+	afterUserID string,
+	limit int,
 ) ([]domain.ReminderRecipient, error) {
+	if limit <= 0 {
+		return []domain.ReminderRecipient{}, nil
+	}
 	var recipients []domain.ReminderRecipient
 	if err := r.db.SelectContext(ctx, &recipients, `
 		SELECT u.id AS user_id, u.default_group_id AS group_id,
@@ -29,7 +34,9 @@ func (r *ReminderRepository) ActiveRecipients(
 		JOIN universities un ON un.id=g.university_id AND un.is_active
 		WHERE u.reminder_enabled
 			AND u.default_group_id IS NOT NULL
-		ORDER BY u.id`); err != nil {
+			AND ($1 = '' OR u.id > $1)
+		ORDER BY u.id
+		LIMIT $2`, afterUserID, limit); err != nil {
 		return nil, fmt.Errorf("list active reminder recipients: %w", err)
 	}
 	if recipients == nil {

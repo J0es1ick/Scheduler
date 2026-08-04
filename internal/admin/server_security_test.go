@@ -40,6 +40,36 @@ func TestRequestIPTrustsForwardedHeaderOnlyFromConfiguredProxy(t *testing.T) {
 	}
 }
 
+func TestRequestIPIgnoresSpoofedLeftmostForwardedAddress(t *testing.T) {
+	proxies, err := parseTrustedProxies("127.0.0.1/32")
+	if err != nil {
+		t.Fatalf("parse trusted proxies: %v", err)
+	}
+	server := &Server{trustedProxies: proxies}
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.RemoteAddr = "127.0.0.1:44000"
+	request.Header.Set("X-Forwarded-For", "203.0.113.25, 198.51.100.14")
+
+	if got := server.requestIP(request); got != "198.51.100.14" {
+		t.Fatalf("forwarded client IP = %q, want nearest untrusted hop", got)
+	}
+}
+
+func TestRequestIPWalksKnownProxyChainRightToLeft(t *testing.T) {
+	proxies, err := parseTrustedProxies("127.0.0.1/32,198.51.100.0/24")
+	if err != nil {
+		t.Fatalf("parse trusted proxies: %v", err)
+	}
+	server := &Server{trustedProxies: proxies}
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.RemoteAddr = "127.0.0.1:44000"
+	request.Header.Set("X-Forwarded-For", "203.0.113.25, 198.51.100.14")
+
+	if got := server.requestIP(request); got != "203.0.113.25" {
+		t.Fatalf("forwarded client IP = %q, want original client", got)
+	}
+}
+
 func TestRecoverPanicDoesNotOverwriteStartedResponse(t *testing.T) {
 	server := &Server{}
 	handler := server.requestContext(server.requestLog(server.recoverPanic(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
