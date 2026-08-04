@@ -43,6 +43,7 @@ export default function App() {
   const [user, setUser] = useState<AdminIdentity | null>(null);
   const [booting, setBooting] = useState(true);
   const [authError, setAuthError] = useState("");
+  const [accessKeyEnabled, setAccessKeyEnabled] = useState(false);
   const [view, setView] = useState<ViewName>(viewFromHash);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const telegram = window.Telegram?.WebApp;
@@ -58,6 +59,12 @@ export default function App() {
 
     let active = true;
     async function bootstrap() {
+      try {
+        const authConfig = await api.authConfig();
+        if (active) setAccessKeyEnabled(authConfig.access_key_enabled);
+      } catch {
+        // игнор
+      }
       try {
         const identity = await api.me();
         if (active) setUser(identity);
@@ -93,6 +100,18 @@ export default function App() {
     const syncHash = () => setView(viewFromHash());
     window.addEventListener("hashchange", syncHash);
     return () => window.removeEventListener("hashchange", syncHash);
+  }, []);
+
+  useEffect(() => {
+    const sessionExpired = () => {
+      setUser(null);
+      setAuthError(
+        "Сессия истекла. Войдите снова через Telegram или аварийный ключ.",
+      );
+    };
+    window.addEventListener("scheduler:session-expired", sessionExpired);
+    return () =>
+      window.removeEventListener("scheduler:session-expired", sessionExpired);
   }, []);
 
   function navigate(next: ViewName) {
@@ -158,6 +177,7 @@ export default function App() {
         onLogin={login}
         loading={booting}
         telegramDetected={telegramDetected && booting}
+        accessKeyEnabled={accessKeyEnabled}
         error={authError}
       />
     );
