@@ -14,7 +14,7 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
-	scrapper "github.com/J0es1ick/Scheduler/internal/scraper"
+	"github.com/J0es1ick/Scheduler/internal/scraper"
 	"github.com/google/uuid"
 )
 
@@ -36,7 +36,7 @@ type ParserService struct {
 	snapshotRepo     *repository.ParserSnapshotRepository
 	notificationRepo *repository.NotificationRepository
 	diagnosticRepo   *repository.ParserDiagnosticRepository
-	adapters         map[string]scrapper.SourceAdapter
+	adapters         map[string]scraper.SourceAdapter
 }
 
 func NewParserService(
@@ -56,11 +56,11 @@ func NewParserService(
 		snapshotRepo:     snapshotRepo,
 		notificationRepo: notificationRepo,
 		diagnosticRepo:   diagnosticRepo,
-		adapters:         make(map[string]scrapper.SourceAdapter),
+		adapters:         make(map[string]scraper.SourceAdapter),
 	}
 }
 
-func (s *ParserService) RegisterAdapter(adapterType string, adapter scrapper.SourceAdapter) {
+func (s *ParserService) RegisterAdapter(adapterType string, adapter scraper.SourceAdapter) {
 	s.adapters[adapterType] = adapter
 }
 
@@ -582,7 +582,7 @@ type groupScheduleResult struct {
 }
 
 type scheduleDiagnosticAggregate struct {
-	Diagnostic   scrapper.ResponseDiagnostic
+	Diagnostic   scraper.ResponseDiagnostic
 	FirstGroupID string
 	Occurrences  int
 }
@@ -625,7 +625,7 @@ func (r scheduleFetchReport) Error(total int) error {
 
 func (s *ParserService) fetchSchedules(
 	ctx context.Context,
-	adapter scrapper.SourceAdapter,
+	adapter scraper.SourceAdapter,
 	groups []domain.Group,
 ) scheduleFetchReport {
 	report := scheduleFetchReport{
@@ -665,7 +665,7 @@ func (s *ParserService) fetchSchedules(
 					result.err,
 				)
 			}
-			diagnostic, ok := scrapper.ExtractResponseDiagnostic(result.err)
+			diagnostic, ok := scraper.ExtractResponseDiagnostic(result.err)
 			if !ok {
 				continue
 			}
@@ -695,7 +695,7 @@ func (s *ParserService) fetchSchedules(
 
 func fetchScheduleWithRetry(
 	ctx context.Context,
-	adapter scrapper.SourceAdapter,
+	adapter scraper.SourceAdapter,
 	groupID string,
 ) ([]domain.Lesson, error) {
 	var lastErr error
@@ -705,7 +705,7 @@ func fetchScheduleWithRetry(
 			return lessons, nil
 		}
 		lastErr = err
-		if diagnostic, ok := scrapper.ExtractResponseDiagnostic(err); ok &&
+		if diagnostic, ok := scraper.ExtractResponseDiagnostic(err); ok &&
 			!diagnostic.Retryable {
 			break
 		}
@@ -723,7 +723,7 @@ func fetchScheduleWithRetry(
 	return nil, lastErr
 }
 
-func diagnosticKey(diagnostic scrapper.ResponseDiagnostic) string {
+func diagnosticKey(diagnostic scraper.ResponseDiagnostic) string {
 	return strings.Join(
 		[]string{
 			diagnostic.Category,
