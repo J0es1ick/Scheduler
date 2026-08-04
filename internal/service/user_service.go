@@ -72,6 +72,18 @@ func (s *UserService) SetNotificationsEnabled(ctx context.Context, userID string
 	return s.userRepo.SetNotificationsEnabled(ctx, userID, enabled)
 }
 
+func (s *UserService) SetLessonReminder(
+	ctx context.Context,
+	userID string,
+	enabled bool,
+	minutes int,
+) error {
+	if minutes < 5 || minutes > 180 {
+		return fmt.Errorf("reminder minutes must be between 5 and 180")
+	}
+	return s.userRepo.SetLessonReminder(ctx, userID, enabled, minutes)
+}
+
 func (s *UserService) ExportData(ctx context.Context, userID string) (*domain.UserDataExport, error) {
 	return s.userRepo.ExportUserData(ctx, userID)
 }
