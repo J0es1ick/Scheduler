@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
-	"github.com/J0es1ick/Scheduler/internal/scrapper"
+	"github.com/J0es1ick/Scheduler/internal/scraper"
 	"github.com/PuerkitoBio/goquery"
 )
 
@@ -68,19 +68,14 @@ type Adapter struct {
 	formBuildID string
 }
 
-var _ scrapper.SourceAdapter = (*Adapter)(nil)
+var _ scraper.SourceAdapter = (*Adapter)(nil)
 
 func New(semesterID string) *Adapter {
 	jar, _ := cookiejar.New(nil)
 	client := &http.Client{
-		Timeout: httpTimeout,
-		Jar:     jar,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return fmt.Errorf("isuct: too many redirects")
-			}
-			return nil
-		},
+		Timeout:       httpTimeout,
+		Jar:           jar,
+		CheckRedirect: scraper.SameHostRedirectPolicy(5),
 	}
 	return newAdapter(defaultBaseURL, semesterID, client)
 }
@@ -373,15 +368,41 @@ func (a *Adapter) postScheduleAJAX(ctx context.Context, extID, groupName, formBu
 	form.Set("_triggering_element_value", "Показать расписание")
 	form.Set("ajax_page_state[theme]", "isuct")
 
-	body, err := a.do(ctx, http.MethodPost, a.ajaxURL, form, func(req *http.Request) {
+	response, err := a.doResponse(ctx, http.MethodPost, a.ajaxURL, form, func(req *http.Request) {
 		req.Header.Set("X-Requested-With", "XMLHttpRequest")
 		req.Header.Set("Referer", a.scheduleURL)
 		req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
 	})
 	if err != nil {
+		if response.StatusCode > 0 {
+			return "", scraper.NewDiagnosticError(
+				err,
+				responseDiagnostic(
+					response,
+					"isuct.ajax.http_status",
+					fmt.Sprintf(
+						"ИГХТУ вернул HTTP %d вместо расписания",
+						response.StatusCode,
+					),
+				),
+			)
+		}
 		return "", err
 	}
-	return parseAJAXScheduleFragment(body)
+	fragment, err := parseAJAXScheduleFragment(response.Body)
+	if err == nil {
+		return fragment, nil
+	}
+	category := "isuct.ajax.invalid_response"
+	summary := "ИГХТУ вернул некорректный AJAX-ответ вместо расписания"
+	if errors.Is(err, errEmptyAJAXResponse) {
+		category = "isuct.ajax.empty_response"
+		summary = "ИГХТУ вернул пустой AJAX-ответ вместо расписания"
+	}
+	return "", scraper.NewDiagnosticError(
+		err,
+		responseDiagnostic(response, category, summary),
+	)
 }
 
 type ajaxCommand struct {
@@ -391,6 +412,9 @@ type ajaxCommand struct {
 
 func parseAJAXScheduleFragment(body []byte) (string, error) {
 	body = bytes.TrimPrefix(bytes.TrimSpace(body), []byte{0xEF, 0xBB, 0xBF})
+	if len(body) == 0 {
+		return "", errEmptyAJAXResponse
+	}
 	var commands []ajaxCommand
 	if err := json.Unmarshal(body, &commands); err != nil {
 		return "", fmt.Errorf("decode AJAX JSON: %w", err)
@@ -569,8 +593,30 @@ func lessonStableID(gid string, day int, start, subject, teacher, room, weekType
 	return fmt.Sprintf("%x", hash[:12])
 }
 
-func (a *Adapter) do(ctx context.Context, method, requestURL string, form url.Values, configure func(*http.Request)) ([]byte, error) {
+type httpResponse struct {
+	Body        []byte
+	StatusCode  int
+	ContentType string
+}
+
+func (a *Adapter) do(
+	ctx context.Context,
+	method, requestURL string,
+	form url.Values,
+	configure func(*http.Request),
+) ([]byte, error) {
+	response, err := a.doResponse(ctx, method, requestURL, form, configure)
+	return response.Body, err
+}
+
+func (a *Adapter) doResponse(
+	ctx context.Context,
+	method, requestURL string,
+	form url.Values,
+	configure func(*http.Request),
+) (httpResponse, error) {
 	var lastErr error
+	var lastResponse httpResponse
 	for attempt := 1; attempt <= maxHTTPAttempts; attempt++ {
 		var body io.Reader
 		if form != nil {
@@ -578,7 +624,7 @@ func (a *Adapter) do(ctx context.Context, method, requestURL string, form url.Va
 		}
 		req, err := http.NewRequestWithContext(ctx, method, requestURL, body)
 		if err != nil {
-			return nil, err
+			return httpResponse{}, err
 		}
 		setCommonHeaders(req)
 		if form != nil {
@@ -589,16 +635,24 @@ func (a *Adapter) do(ctx context.Context, method, requestURL string, form url.Va
 		}
 		resp, err := a.client.Do(req)
 		if err == nil {
-			responseBody, readErr := io.ReadAll(resp.Body)
+			responseBody, readErr := scraper.ReadLimitedBody(resp.Body, scraper.MaxResponseBodyBytes)
 			resp.Body.Close()
+			lastResponse = httpResponse{
+				Body:        responseBody,
+				StatusCode:  resp.StatusCode,
+				ContentType: resp.Header.Get("Content-Type"),
+			}
 			if readErr != nil {
+				if errors.Is(readErr, scraper.ErrResponseTooLarge) {
+					return lastResponse, readErr
+				}
 				err = readErr
 			} else if resp.StatusCode == http.StatusOK {
-				return responseBody, nil
+				return lastResponse, nil
 			} else {
 				err = fmt.Errorf("HTTP %d", resp.StatusCode)
 				if resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
-					return nil, err
+					return lastResponse, err
 				}
 			}
 		}
@@ -610,10 +664,50 @@ func (a *Adapter) do(ctx context.Context, method, requestURL string, form url.Va
 		select {
 		case <-time.After(delay):
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return lastResponse, ctx.Err()
 		}
 	}
-	return nil, lastErr
+	return lastResponse, lastErr
+}
+
+func responseDiagnostic(
+	response httpResponse,
+	category string,
+	summary string,
+) scraper.ResponseDiagnostic {
+	hash := sha256.Sum256(response.Body)
+	return scraper.ResponseDiagnostic{
+		Category:        category,
+		Summary:         summary,
+		HTTPStatus:      response.StatusCode,
+		ContentType:     response.ContentType,
+		ResponseSize:    len(response.Body),
+		ResponseSHA256:  fmt.Sprintf("%x", hash[:]),
+		ResponsePreview: safeResponsePreview(response.Body),
+		Retryable:       false,
+		StopBatch:       true,
+	}
+}
+
+func safeResponsePreview(body []byte) string {
+	const maximumRunes = 1024
+	withoutBOM := bytes.TrimPrefix(body, []byte{0xEF, 0xBB, 0xBF})
+	if len(withoutBOM) == 0 && len(body) > 0 {
+		return "<UTF-8 BOM>"
+	}
+	value := strings.ToValidUTF8(string(withoutBOM), "�")
+	value = strings.Map(func(character rune) rune {
+		if character == '\n' || character == '\r' || character == '\t' ||
+			character >= 32 {
+			return character
+		}
+		return '�'
+	}, value)
+	runes := []rune(value)
+	if len(runes) > maximumRunes {
+		runes = runes[:maximumRunes]
+	}
+	return string(runes)
 }
 
 func setCommonHeaders(req *http.Request) {

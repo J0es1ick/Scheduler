@@ -1,10 +1,59 @@
-package scrapper
+package scraper
 
 import (
 	"context"
+	"errors"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
 )
+
+type ResponseDiagnostic struct {
+	Category        string
+	Summary         string
+	HTTPStatus      int
+	ContentType     string
+	ResponseSize    int
+	ResponseSHA256  string
+	ResponsePreview string
+	Retryable       bool
+	StopBatch       bool
+}
+
+type DiagnosticError struct {
+	Err        error
+	Diagnostic ResponseDiagnostic
+}
+
+func (e *DiagnosticError) Error() string {
+	if e == nil || e.Err == nil {
+		return "source response diagnostic error"
+	}
+	return e.Err.Error()
+}
+
+func (e *DiagnosticError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func NewDiagnosticError(
+	err error,
+	diagnostic ResponseDiagnostic,
+) error {
+	return &DiagnosticError{Err: err, Diagnostic: diagnostic}
+}
+
+func ExtractResponseDiagnostic(
+	err error,
+) (ResponseDiagnostic, bool) {
+	var diagnosticError *DiagnosticError
+	if !errors.As(err, &diagnosticError) || diagnosticError == nil {
+		return ResponseDiagnostic{}, false
+	}
+	return diagnosticError.Diagnostic, true
+}
 
 // SourceAdapter — единый интерфейс, который обязан реализовать каждый парсер университета.
 // Все адаптеры должны быть независимы друг от друга и от конкретного транспорта (HTTP, файл и т.д.).

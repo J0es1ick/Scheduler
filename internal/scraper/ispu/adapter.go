@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
-	"github.com/J0es1ick/Scheduler/internal/scrapper"
+	"github.com/J0es1ick/Scheduler/internal/scraper"
 	"github.com/PuerkitoBio/goquery"
 )
 
@@ -79,17 +79,12 @@ type option struct {
 	selected bool
 }
 
-var _ scrapper.SourceAdapter = (*Adapter)(nil)
+var _ scraper.SourceAdapter = (*Adapter)(nil)
 
 func New(semesterID string) *Adapter {
 	client := &http.Client{
-		Timeout: httpTimeout,
-		CheckRedirect: func(_ *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
-				return errors.New("ispu: too many redirects")
-			}
-			return nil
-		},
+		Timeout:       httpTimeout,
+		CheckRedirect: scraper.SameHostRedirectPolicy(5),
 	}
 	return newAdapter(defaultBaseURL, semesterID, client)
 }
@@ -821,9 +816,12 @@ func (a *Adapter) do(ctx context.Context, method string, form url.Values) ([]byt
 
 		resp, requestErr := a.client.Do(req)
 		if requestErr == nil {
-			body, readErr := io.ReadAll(resp.Body)
+			body, readErr := scraper.ReadLimitedBody(resp.Body, scraper.MaxResponseBodyBytes)
 			resp.Body.Close()
 			if readErr != nil {
+				if errors.Is(readErr, scraper.ErrResponseTooLarge) {
+					return nil, readErr
+				}
 				requestErr = readErr
 			} else if resp.StatusCode == http.StatusOK {
 				return body, nil
