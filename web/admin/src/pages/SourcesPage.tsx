@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   Check,
+  Eye,
   ExternalLink,
   RefreshCw,
   RotateCcw,
@@ -20,7 +21,9 @@ import {
   StatusPill,
   type ToastMessage,
 } from "../components";
+import { SnapshotReviewDialog } from "../features/snapshot-review/SnapshotReviewDialog";
 import { useRemote } from "../hooks";
+import type { ParserSnapshot } from "../types";
 
 export function SourcesPage({
   notify,
@@ -38,6 +41,10 @@ export function SourcesPage({
   const [intervalDrafts, setIntervalDrafts] = useState<Record<string, string>>(
     {},
   );
+  const [reviewing, setReviewing] = useState<{
+    snapshot: ParserSnapshot;
+    sourceName: string;
+  } | null>(null);
 
   async function sync(id: string) {
     setBusy(id);
@@ -81,7 +88,7 @@ export function SourcesPage({
         "Опубликовать этот снимок несмотря на обнаруженные отклонения?",
       )
     ) {
-      return;
+      return false;
     }
     setBusy(id);
     try {
@@ -91,11 +98,15 @@ export function SourcesPage({
       );
       notify("Снимок опубликован");
       await reload();
+      return true;
     } catch (caught) {
       notify(
-        caught instanceof Error ? caught.message : "Не удалось опубликовать снимок",
+        caught instanceof Error
+          ? caught.message
+          : "Не удалось опубликовать снимок",
         "error",
       );
+      return false;
     } finally {
       setBusy("");
     }
@@ -103,17 +114,21 @@ export function SourcesPage({
 
   async function rejectSnapshot(id: string) {
     const reason = window.prompt("Почему снимок отклонён?");
-    if (!reason?.trim()) return;
+    if (!reason?.trim()) return false;
     setBusy(id);
     try {
       await api.rejectParserSnapshot(id, reason.trim());
       notify("Снимок отклонён, рабочие данные не изменены");
       await reload();
+      return true;
     } catch (caught) {
       notify(
-        caught instanceof Error ? caught.message : "Не удалось отклонить снимок",
+        caught instanceof Error
+          ? caught.message
+          : "Не удалось отклонить снимок",
         "error",
       );
+      return false;
     } finally {
       setBusy("");
     }
@@ -183,9 +198,10 @@ export function SourcesPage({
 
       <section className="source-list card-surface">
         {(data?.sources ?? []).map((source) => {
-          const quarantined = data?.snapshots.filter(
-            (snapshot) => snapshot.data_source_id === source.id,
-          ) ?? [];
+          const quarantined =
+            data?.snapshots.filter(
+              (snapshot) => snapshot.data_source_id === source.id,
+            ) ?? [];
           const isBusy = busy === source.id || source.running;
           const duration =
             source.latest_finished_at && source.latest_started_at
@@ -207,9 +223,23 @@ export function SourcesPage({
 
               <div className="source-row-stats">
                 <div>
-                  <span>Последний запуск</span>
-                  <strong>{formatDateTime(source.last_run_at)}</strong>
-                  <em>{relativeTime(source.last_run_at)}</em>
+                  <span>
+                    {source.last_error
+                      ? "Следующая попытка"
+                      : "Последний запуск"}
+                  </span>
+                  <strong>
+                    {formatDateTime(
+                      source.last_error
+                        ? source.next_retry_at
+                        : source.last_run_at,
+                    )}
+                  </strong>
+                  <em>
+                    {source.last_error
+                      ? `${number.format(source.consecutive_failures)} ошибок подряд`
+                      : relativeTime(source.last_run_at)}
+                  </em>
                 </div>
                 <div>
                   <span>Результат</span>
@@ -287,6 +317,61 @@ export function SourcesPage({
                 <div className="source-error">
                   <strong>Последняя ошибка</strong>
                   <span>{source.last_error}</span>
+                  {source.diagnostic_id && (
+                    <details className="source-diagnostic">
+                      <summary>Диагностика ответа источника</summary>
+                      <dl>
+                        <div>
+                          <dt>Категория</dt>
+                          <dd>{source.diagnostic_category}</dd>
+                        </div>
+                        <div>
+                          <dt>Получено</dt>
+                          <dd>
+                            {formatDateTime(source.diagnostic_created_at)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>HTTP</dt>
+                          <dd>
+                            {source.diagnostic_http_status || "нет ответа"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Тип ответа</dt>
+                          <dd>
+                            {source.diagnostic_content_type || "не указан"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Размер</dt>
+                          <dd>
+                            {number.format(source.diagnostic_response_size)}{" "}
+                            байт
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Совпадений</dt>
+                          <dd>
+                            {number.format(source.diagnostic_occurrences)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Контрольная группа</dt>
+                          <dd>{source.diagnostic_group_id || "—"}</dd>
+                        </div>
+                        <div>
+                          <dt>SHA-256</dt>
+                          <dd className="diagnostic-hash">
+                            {source.diagnostic_response_sha256 || "—"}
+                          </dd>
+                        </div>
+                      </dl>
+                      {source.diagnostic_response_preview && (
+                        <pre>{source.diagnostic_response_preview}</pre>
+                      )}
+                    </details>
+                  )}
                 </div>
               )}
 
@@ -305,7 +390,9 @@ export function SourcesPage({
                   </div>
                   <ul>
                     {snapshot.anomaly_reasons.map((reason) => (
-                      <li key={`${snapshot.id}-${reason.code}-${reason.message}`}>
+                      <li
+                        key={`${snapshot.id}-${reason.code}-${reason.message}`}
+                      >
                         {reason.message}
                       </li>
                     ))}
@@ -317,6 +404,18 @@ export function SourcesPage({
                     </p>
                   )}
                   <div className="snapshot-quarantine-actions">
+                    <button
+                      className="button button-ghost"
+                      disabled={busy === snapshot.id}
+                      onClick={() =>
+                        setReviewing({
+                          snapshot,
+                          sourceName: source.university_name,
+                        })
+                      }
+                    >
+                      <Eye size={15} /> Изучить данные
+                    </button>
                     <button
                       className="button button-danger-soft"
                       disabled={busy === snapshot.id}
@@ -338,6 +437,16 @@ export function SourcesPage({
           );
         })}
       </section>
+      {reviewing && (
+        <SnapshotReviewDialog
+          snapshot={reviewing.snapshot}
+          sourceName={reviewing.sourceName}
+          busy={busy === reviewing.snapshot.id}
+          onClose={() => setReviewing(null)}
+          onPublish={() => publishSnapshot(reviewing.snapshot.id)}
+          onReject={() => rejectSnapshot(reviewing.snapshot.id)}
+        />
+      )}
     </div>
   );
 }

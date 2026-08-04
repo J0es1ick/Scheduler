@@ -9,6 +9,8 @@ import type {
   LessonMutationPayload,
   Page,
   ParserSnapshot,
+  SnapshotPreview,
+  SnapshotScheduleComparison,
   ParseLogView,
   SourceView,
   SupportRequestView,
@@ -18,10 +20,14 @@ import type {
 
 export class APIError extends Error {
   status: number;
+  code: string;
+  requestID: string;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code = "", requestID = "") {
     super(message);
     this.status = status;
+    this.code = code;
+    this.requestID = requestID;
   }
 }
 
@@ -44,15 +50,26 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers,
     credentials: "include",
   });
+  if (response.status === 401 && !path.startsWith("/api/auth/")) {
+    window.dispatchEvent(new CustomEvent("scheduler:session-expired"));
+  }
   if (!response.ok) {
     let message = `Ошибка ${response.status}`;
+    let code = "";
+    let requestID = response.headers.get("X-Request-ID") ?? "";
     try {
-      const payload = (await response.json()) as { error?: string };
+      const payload = (await response.json()) as {
+        error?: string;
+        code?: string;
+        request_id?: string;
+      };
       if (payload.error) message = payload.error;
+      if (payload.code) code = payload.code;
+      if (payload.request_id) requestID = payload.request_id;
     } catch {
       // Апи всё ещё может возвращать пустой ответ для ошибок уровня прокси.
     }
-    throw new APIError(response.status, message);
+    throw new APIError(response.status, message, code, requestID);
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
@@ -64,6 +81,8 @@ function rememberUser(user: AdminIdentity): AdminIdentity {
 }
 
 export const api = {
+  authConfig: () =>
+    request<{ access_key_enabled: boolean }>("/api/auth/config"),
   async me() {
     const payload = await request<{ user: AdminIdentity }>("/api/auth/me");
     return rememberUser(payload.user);
@@ -119,6 +138,16 @@ export const api = {
         `/api/parser-snapshots?${query}`,
       )
     ).items;
+  },
+  parserSnapshotPreview: (id: string) =>
+    request<SnapshotPreview>(
+      `/api/parser-snapshots/${encodeURIComponent(id)}/preview`,
+    ),
+  parserSnapshotSchedule: (id: string, groupID: string) => {
+    const query = new URLSearchParams({ group: groupID });
+    return request<SnapshotScheduleComparison>(
+      `/api/parser-snapshots/${encodeURIComponent(id)}/schedule?${query}`,
+    );
   },
   publishParserSnapshot: (id: string, reviewNote = "") =>
     request<ParserSnapshot>(

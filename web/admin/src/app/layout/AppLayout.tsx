@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import {
   Activity,
   CalendarDays,
-  CalendarRange,
   Database,
   History,
   LayoutDashboard,

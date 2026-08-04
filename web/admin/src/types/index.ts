@@ -34,6 +34,7 @@ export interface SourceView {
   next_run_at: string | null;
   last_error: string;
   consecutive_failures: number;
+  next_retry_at: string | null;
   current_snapshot_id: string;
   quarantined_count: number;
   latest_status: string;
@@ -42,6 +43,17 @@ export interface SourceView {
   latest_records: number;
   group_count: number;
   lesson_count: number;
+  diagnostic_id: string;
+  diagnostic_category: string;
+  diagnostic_summary: string;
+  diagnostic_group_id: string;
+  diagnostic_http_status: number;
+  diagnostic_content_type: string;
+  diagnostic_response_size: number;
+  diagnostic_response_sha256: string;
+  diagnostic_response_preview: string;
+  diagnostic_occurrences: number;
+  diagnostic_created_at: string | null;
   running: boolean;
   health: SourceHealth;
 }
@@ -103,6 +115,79 @@ export interface ParserSnapshot {
   created_at: string;
   published_at: string | null;
   reviewed_at: string | null;
+}
+
+export type SnapshotGroupStatus =
+  | "added"
+  | "removed"
+  | "changed"
+  | "unchanged";
+
+export interface SnapshotComparisonSummary {
+  added_groups: number;
+  removed_groups: number;
+  changed_groups: number;
+  unchanged_groups: number;
+  added_lessons: number;
+  removed_lessons: number;
+}
+
+export interface SnapshotGroupDiff {
+  id: string;
+  current_id: string;
+  candidate_id: string;
+  name: string;
+  status: SnapshotGroupStatus;
+  current_lessons: number;
+  candidate_lessons: number;
+  added_lessons: number;
+  removed_lessons: number;
+}
+
+export interface SnapshotPreview {
+  snapshot_id: string;
+  data_source_id: string;
+  status: ParserSnapshot["status"];
+  publishable: boolean;
+  created_at: string;
+  candidate_start_date: string;
+  candidate_end_date: string;
+  candidate_group_count: number;
+  candidate_lesson_count: number;
+  current_snapshot_id: string;
+  current_created_at: string | null;
+  current_group_count: number;
+  current_lesson_count: number;
+  comparison_available: boolean;
+  summary: SnapshotComparisonSummary;
+  groups: SnapshotGroupDiff[];
+}
+
+export interface SnapshotLesson {
+  id: string;
+  day_of_week: number;
+  special_date: string | null;
+  time_start: string;
+  time_end: string;
+  week_type: "every" | "odd" | "even" | "date";
+  subject: string;
+  type: string;
+  teacher: string;
+  room: string;
+  subgroup: number;
+  valid_from: string | null;
+  valid_to: string | null;
+  diff: "added" | "removed" | "unchanged";
+}
+
+export interface SnapshotScheduleComparison {
+  snapshot_id: string;
+  group_id: string;
+  group_name: string;
+  status: SnapshotGroupStatus;
+  comparison_available: boolean;
+  current: SnapshotLesson[];
+  candidate: SnapshotLesson[];
 }
 
 export interface OperationalHealth {

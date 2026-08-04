@@ -1,0 +1,263 @@
+.app-shell {
+  min-height: 100vh;
+  padding-left: 248px;
+}
+
+.sidebar {
+  position: fixed;
+  z-index: 30;
+  inset: 0 auto 0 0;
+  width: 248px;
+  display: flex;
+  flex-direction: column;
+  padding: 30px 22px 22px;
+  background: var(--paper-deep);
+  border-right: 1px solid var(--line-strong);
+}
+
+.logo-lockup {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.logo-lockup > div:last-child {
+  display: grid;
+  line-height: 1.1;
+}
+
+.logo-lockup strong {
+  color: var(--ink);
+  font-family: Georgia, serif;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.logo-lockup > div > span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.logo-mark {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
+  border: 1px solid #465044;
+  border-radius: 9px;
+  background: var(--olive);
+}
+
+.logo-mark-line {
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  height: 2px;
+  background: #f8f4eb;
+}
+
+.logo-mark .line-a {
+  top: 13px;
+}
+
+.logo-mark .line-b {
+  top: 21px;
+}
+
+.logo-mark-dot {
+  position: absolute;
+  right: 8px;
+  bottom: 7px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #f8f4eb;
+}
+
+.logo-lockup.is-compact .logo-mark {
+  width: 36px;
+  height: 36px;
+}
+
+.desktop-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 48px;
+}
+
+.nav-caption {
+  padding: 0 12px 10px;
+  color: var(--muted-light);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.desktop-nav button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: #5f6259;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.desktop-nav button:hover {
+  border-color: rgba(104, 112, 92, 0.18);
+  background: rgba(255, 253, 248, 0.5);
+  color: var(--ink);
+}
+
+.desktop-nav button.is-active {
+  border-color: #c8cdbd;
+  background: var(--surface);
+  color: var(--olive-dark);
+}
+
+.desktop-nav button.is-active::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  width: 3px;
+  height: 20px;
+  border-radius: 0 3px 3px 0;
+  background: var(--olive);
+}
+
+.sidebar-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding: 11px 12px;
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+  color: var(--olive-dark);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.sidebar-status svg {
+  color: var(--olive);
+}
+
+.sidebar-user {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 32px;
+  gap: 9px;
+  align-items: center;
+  margin-top: 15px;
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #bdc2b3;
+  border-radius: 50%;
+  background: var(--olive-soft);
+  color: var(--olive-dark);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sidebar-user > div:nth-child(2) {
+  display: grid;
+  min-width: 0;
+}
+
+.sidebar-user strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-user span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.sidebar-user button,
+.icon-button,
+.topbar-audit,
+.dialog-close {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
+.sidebar-user button:hover,
+.icon-button:hover,
+.topbar-audit:hover,
+.dialog-close:hover {
+  border-color: var(--line-strong);
+  color: var(--olive-dark);
+}
+
+.main-area {
+  width: min(100%, 1740px);
+  margin: 0 auto;
+  padding: 0 36px 52px;
+}
+
+.topbar {
+  min-height: 132px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+}
+
+.topbar p {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: capitalize;
+}
+
+.topbar h1 {
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(28px, 3vw, 42px);
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+.topbar > div > span:not(.mobile-brand) {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.mobile-brand,
+.mobile-nav {
+  display: none;
+}
+
+.content-area {
+  padding-top: 28px;
+}
+
+

@@ -6,11 +6,13 @@ export function LoginPage({
   onLogin,
   loading,
   telegramDetected,
+  accessKeyEnabled,
   error,
 }: {
   onLogin: (accessKey: string) => Promise<void>;
   loading: boolean;
   telegramDetected: boolean;
+  accessKeyEnabled: boolean;
   error: string;
 }) {
   const [accessKey, setAccessKey] = useState("");
@@ -45,36 +47,41 @@ export function LoginPage({
           <p>
             {telegramDetected
               ? "Проверяем вашу учётную запись Telegram…"
-              : "Введите ключ доступа из конфигурации сервиса."}
+              : accessKeyEnabled
+                ? "Введите аварийный ключ доступа из конфигурации сервиса."
+                : "Откройте админку из меню бота. Доступ проверяется по вашей роли в Telegram."}
           </p>
 
-          <form onSubmit={submit}>
-            <label htmlFor="access-key">Ключ доступа</label>
-            <div className="login-input">
-              <KeyRound size={17} />
-              <input
-                id="access-key"
-                type="password"
-                autoComplete="current-password"
-                value={accessKey}
-                onChange={(event) => setAccessKey(event.target.value)}
-                placeholder="Введите ключ"
-                autoFocus={!telegramDetected}
-              />
-            </div>
-            {error && (
-              <p className="login-error" role="alert">
-                {error}
-              </p>
-            )}
-            <button
-              className="login-submit"
-              disabled={loading || !accessKey.trim()}
-            >
-              <span>{loading ? "Проверяем…" : "Войти"}</span>
-              <ArrowRight size={18} />
-            </button>
-          </form>
+          {accessKeyEnabled && (
+            <form onSubmit={submit}>
+              <label htmlFor="access-key">Ключ доступа</label>
+              <div className="login-input">
+                <KeyRound size={17} />
+                <input
+                  id="access-key"
+                  type="password"
+                  autoComplete="current-password"
+                  value={accessKey}
+                  onChange={(event) => setAccessKey(event.target.value)}
+                  placeholder="Введите ключ"
+                  autoFocus={!telegramDetected}
+                />
+              </div>
+              <button
+                className="login-submit"
+                disabled={loading || !accessKey.trim()}
+              >
+                <span>{loading ? "Проверяем…" : "Войти"}</span>
+                <ArrowRight size={18} />
+              </button>
+            </form>
+          )}
+
+          {error && (
+            <p className="login-error" role="alert">
+              {error}
+            </p>
+          )}
 
           <div className="login-help">
             В Mini App вход выполняется автоматически для пользователей с ролью
