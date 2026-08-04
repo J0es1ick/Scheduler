@@ -16,6 +16,12 @@ type ParserSnapshotRepository struct {
 	db *sqlx.DB
 }
 
+type SnapshotPublication struct {
+	tx *sqlx.Tx
+}
+
+type SnapshotPublicationHook func(context.Context, *SnapshotPublication) error
+
 func NewParserSnapshotRepository(db *sqlx.DB) *ParserSnapshotRepository {
 	return &ParserSnapshotRepository{db: db}
 }
@@ -160,6 +166,14 @@ func (r *ParserSnapshotRepository) Publish(
 	ctx context.Context,
 	snapshotID, actorID, reviewNote string,
 ) (*domain.ParserSnapshot, error) {
+	return r.PublishWithHook(ctx, snapshotID, actorID, reviewNote, nil)
+}
+
+func (r *ParserSnapshotRepository) PublishWithHook(
+	ctx context.Context,
+	snapshotID, actorID, reviewNote string,
+	hook SnapshotPublicationHook,
+) (*domain.ParserSnapshot, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("publish snapshot: begin: %w", err)
@@ -187,6 +201,22 @@ func (r *ParserSnapshotRepository) Publish(
 		return nil, err
 	}
 	payload := snapshot.Payload
+	var existingGroups []domain.Group
+	if err = tx.SelectContext(ctx, &existingGroups, `
+		SELECT id, university_id, name, is_active, created_at, updated_at
+		FROM groups
+		WHERE university_id=$1`, payload.UniversityID); err != nil {
+		return nil, fmt.Errorf("publish snapshot: load group identities: %w", err)
+	}
+	payload, _, err = CanonicalizeSnapshotGroupIDs(payload, existingGroups)
+	if err != nil {
+		return nil, fmt.Errorf("publish snapshot: reconcile group identities: %w", err)
+	}
+	snapshot.Payload = payload
+	canonicalPayload, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("publish snapshot: encode canonical payload: %w", err)
+	}
 	if _, err = tx.ExecContext(ctx, `
 		INSERT INTO semesters (id, university_id, name, start_date, end_date)
 		VALUES ($1,$2,'Актуальный снимок',$3,$4)
@@ -248,16 +278,22 @@ func (r *ParserSnapshotRepository) Publish(
 		UPDATE parser_snapshots
 		SET status='published', reviewed_by=$2, review_note=$3,
 			reviewed_at=CASE WHEN $2='' THEN reviewed_at ELSE $4 END,
-			published_at=$4
-		WHERE id=$1`, snapshotID, actorID, reviewNote, now); err != nil {
+			published_at=$4, payload=$5::jsonb
+		WHERE id=$1`, snapshotID, actorID, reviewNote, now, canonicalPayload); err != nil {
 		return nil, fmt.Errorf("publish snapshot: mark published: %w", err)
 	}
 	if _, err = tx.ExecContext(ctx, `
 		UPDATE data_sources
 		SET current_snapshot_id=$2, last_success_at=$3, last_run_at=$3,
-			last_error='', consecutive_failures=0, updated_at=$3
+			last_error='', consecutive_failures=0, next_retry_at=NULL,
+			updated_at=$3
 		WHERE id=$1`, snapshot.DataSourceID, snapshotID, now); err != nil {
 		return nil, fmt.Errorf("publish snapshot: update source: %w", err)
+	}
+	if hook != nil {
+		if err = hook(ctx, &SnapshotPublication{tx: tx}); err != nil {
+			return nil, fmt.Errorf("publish snapshot: transactional hook: %w", err)
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return nil, fmt.Errorf("publish snapshot: commit: %w", err)
@@ -270,6 +306,36 @@ func (r *ParserSnapshotRepository) Publish(
 		snapshot.ReviewNote = reviewNote
 	}
 	return snapshot, nil
+}
+
+func (p *SnapshotPublication) EffectiveLessonsByUniversity(
+	ctx context.Context,
+	universityID string,
+) ([]domain.Lesson, error) {
+	var lessons []domain.Lesson
+	if err := p.tx.SelectContext(
+		ctx,
+		&lessons,
+		lessonSelect+` WHERE university_id=$1 ORDER BY group_id, day_of_week, time_start`,
+		universityID,
+	); err != nil {
+		return nil, fmt.Errorf("publication read effective lessons for university %s: %w", universityID, err)
+	}
+	return lessons, nil
+}
+
+func (p *SnapshotPublication) EnqueueScheduleChange(
+	ctx context.Context,
+	eventID, groupID, source, summary string,
+) error {
+	if _, err := p.tx.ExecContext(
+		ctx,
+		`SELECT enqueue_schedule_change($1, $2, $3, $4)`,
+		eventID, groupID, source, summary,
+	); err != nil {
+		return fmt.Errorf("publication enqueue schedule change for group %s: %w", groupID, err)
+	}
+	return nil
 }
 
 func (r *ParserSnapshotRepository) Reject(

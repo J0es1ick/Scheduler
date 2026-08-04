@@ -68,6 +68,33 @@ func (r *GroupRepository) GetGroupByName(ctx context.Context, universityID strin
 	return &group, nil
 }
 
+func (r *GroupRepository) FindActiveByName(
+	ctx context.Context,
+	universityID string,
+	name string,
+) ([]domain.Group, error) {
+	var groups []domain.Group
+	where := `LOWER(name)=LOWER($1) AND is_active=TRUE`
+	args := []any{name}
+	if universityID != "" {
+		where += ` AND university_id=$2`
+		args = append(args, universityID)
+	}
+	if err := r.db.SelectContext(ctx, &groups, `
+		SELECT id, university_id, name, is_active, created_at, updated_at
+		FROM groups
+		WHERE `+where+`
+		ORDER BY university_id, name`,
+		args...,
+	); err != nil {
+		return nil, fmt.Errorf("find active group by name %q: %w", name, err)
+	}
+	if groups == nil {
+		groups = []domain.Group{}
+	}
+	return groups, nil
+}
+
 func (r *GroupRepository) GetAllGroups(ctx context.Context) ([]domain.Group, error) {
 	var groups []domain.Group
 	query := `SELECT id, university_id, name, is_active, created_at, updated_at FROM groups`
