@@ -31,28 +31,40 @@ type DashboardStats struct {
 }
 
 type SourceView struct {
-	ID                  string     `json:"id" db:"id"`
-	UniversityID        string     `json:"university_id" db:"university_id"`
-	UniversityName      string     `json:"university_name" db:"university_name"`
-	UniversityFullName  string     `json:"university_full_name" db:"university_full_name"`
-	ScheduleURL         string     `json:"schedule_url" db:"schedule_url"`
-	AdapterType         string     `json:"adapter_type" db:"adapter_type"`
-	UpdateInterval      int        `json:"update_interval" db:"update_interval"`
-	LastRunAt           *time.Time `json:"last_run_at" db:"last_run_at"`
-	LastSuccessAt       *time.Time `json:"last_success_at" db:"last_success_at"`
-	NextRunAt           *time.Time `json:"next_run_at"`
-	LastError           string     `json:"last_error" db:"last_error"`
-	ConsecutiveFailures int        `json:"consecutive_failures" db:"consecutive_failures"`
-	CurrentSnapshotID   string     `json:"current_snapshot_id" db:"current_snapshot_id"`
-	QuarantinedCount    int        `json:"quarantined_count" db:"quarantined_count"`
-	LatestStatus        string     `json:"latest_status" db:"latest_status"`
-	LatestStartedAt     *time.Time `json:"latest_started_at" db:"latest_started_at"`
-	LatestFinishedAt    *time.Time `json:"latest_finished_at" db:"latest_finished_at"`
-	LatestRecords       int        `json:"latest_records" db:"latest_records"`
-	GroupCount          int        `json:"group_count" db:"group_count"`
-	LessonCount         int        `json:"lesson_count" db:"lesson_count"`
-	Running             bool       `json:"running"`
-	Health              string     `json:"health"`
+	ID                        string     `json:"id" db:"id"`
+	UniversityID              string     `json:"university_id" db:"university_id"`
+	UniversityName            string     `json:"university_name" db:"university_name"`
+	UniversityFullName        string     `json:"university_full_name" db:"university_full_name"`
+	ScheduleURL               string     `json:"schedule_url" db:"schedule_url"`
+	AdapterType               string     `json:"adapter_type" db:"adapter_type"`
+	UpdateInterval            int        `json:"update_interval" db:"update_interval"`
+	LastRunAt                 *time.Time `json:"last_run_at" db:"last_run_at"`
+	LastSuccessAt             *time.Time `json:"last_success_at" db:"last_success_at"`
+	NextRunAt                 *time.Time `json:"next_run_at"`
+	LastError                 string     `json:"last_error" db:"last_error"`
+	ConsecutiveFailures       int        `json:"consecutive_failures" db:"consecutive_failures"`
+	NextRetryAt               *time.Time `json:"next_retry_at" db:"next_retry_at"`
+	CurrentSnapshotID         string     `json:"current_snapshot_id" db:"current_snapshot_id"`
+	QuarantinedCount          int        `json:"quarantined_count" db:"quarantined_count"`
+	LatestStatus              string     `json:"latest_status" db:"latest_status"`
+	LatestStartedAt           *time.Time `json:"latest_started_at" db:"latest_started_at"`
+	LatestFinishedAt          *time.Time `json:"latest_finished_at" db:"latest_finished_at"`
+	LatestRecords             int        `json:"latest_records" db:"latest_records"`
+	GroupCount                int        `json:"group_count" db:"group_count"`
+	LessonCount               int        `json:"lesson_count" db:"lesson_count"`
+	DiagnosticID              string     `json:"diagnostic_id" db:"diagnostic_id"`
+	DiagnosticCategory        string     `json:"diagnostic_category" db:"diagnostic_category"`
+	DiagnosticSummary         string     `json:"diagnostic_summary" db:"diagnostic_summary"`
+	DiagnosticGroupID         string     `json:"diagnostic_group_id" db:"diagnostic_group_id"`
+	DiagnosticHTTPStatus      int        `json:"diagnostic_http_status" db:"diagnostic_http_status"`
+	DiagnosticContentType     string     `json:"diagnostic_content_type" db:"diagnostic_content_type"`
+	DiagnosticResponseSize    int        `json:"diagnostic_response_size" db:"diagnostic_response_size"`
+	DiagnosticResponseSHA256  string     `json:"diagnostic_response_sha256" db:"diagnostic_response_sha256"`
+	DiagnosticResponsePreview string     `json:"diagnostic_response_preview" db:"diagnostic_response_preview"`
+	DiagnosticOccurrences     int        `json:"diagnostic_occurrences" db:"diagnostic_occurrences"`
+	DiagnosticCreatedAt       *time.Time `json:"diagnostic_created_at" db:"diagnostic_created_at"`
+	Running                   bool       `json:"running"`
+	Health                    string     `json:"health"`
 }
 
 type OperationalHealth struct {

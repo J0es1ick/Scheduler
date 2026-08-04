@@ -83,7 +83,7 @@ func (s *Store) Sources(ctx context.Context) ([]SourceView, error) {
 			COALESCE(u.schedule_url, '') AS schedule_url,
 			ds.adapter_type, ds.update_interval, ds.last_run_at, ds.last_success_at,
 			COALESCE(ds.last_error, '') AS last_error,
-			ds.consecutive_failures,
+			ds.consecutive_failures, ds.next_retry_at,
 			COALESCE(ds.current_snapshot_id, '') AS current_snapshot_id,
 			(SELECT COUNT(*)::int FROM parser_snapshots ps
 				WHERE ps.data_source_id=ds.id AND ps.status='quarantined') AS quarantined_count,
@@ -93,13 +93,33 @@ func (s *Store) Sources(ctx context.Context) ([]SourceView, error) {
 			COALESCE(latest.records_fetched, 0) AS latest_records,
 			(SELECT COUNT(*) FROM groups g WHERE g.university_id=ds.university_id AND g.is_active)::int AS group_count,
 			(SELECT COUNT(*) FROM effective_lessons l JOIN groups g ON g.id=l.group_id
-				WHERE l.university_id=ds.university_id AND g.is_active)::int AS lesson_count
+				WHERE l.university_id=ds.university_id AND g.is_active)::int AS lesson_count,
+			COALESCE(diagnostic.id, '') AS diagnostic_id,
+			COALESCE(diagnostic.category, '') AS diagnostic_category,
+			COALESCE(diagnostic.summary, '') AS diagnostic_summary,
+			COALESCE(diagnostic.group_id, '') AS diagnostic_group_id,
+			COALESCE(diagnostic.http_status, 0) AS diagnostic_http_status,
+			COALESCE(diagnostic.content_type, '') AS diagnostic_content_type,
+			COALESCE(diagnostic.response_size, 0) AS diagnostic_response_size,
+			COALESCE(diagnostic.response_sha256, '') AS diagnostic_response_sha256,
+			COALESCE(diagnostic.response_preview, '') AS diagnostic_response_preview,
+			COALESCE(diagnostic.occurrences, 0) AS diagnostic_occurrences,
+			diagnostic.created_at AS diagnostic_created_at
 		FROM data_sources ds
 		JOIN universities u ON u.id=ds.university_id
 		LEFT JOIN LATERAL (
 			SELECT status, started_at, finished_at, records_fetched
 			FROM parse_logs WHERE data_source_id=ds.id ORDER BY started_at DESC LIMIT 1
 		) latest ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT id, category, summary, group_id, http_status, content_type,
+				response_size, response_sha256, response_preview,
+				occurrences, created_at
+			FROM parser_diagnostics
+			WHERE data_source_id=ds.id
+			ORDER BY created_at DESC
+			LIMIT 1
+		) diagnostic ON TRUE
 		ORDER BY u.name`)
 	if err != nil {
 		return nil, fmt.Errorf("admin list sources: %w", err)
@@ -107,7 +127,10 @@ func (s *Store) Sources(ctx context.Context) ([]SourceView, error) {
 	now := time.Now()
 	for i := range sources {
 		source := &sources[i]
-		if source.LastRunAt != nil {
+		source.LastError = compactParserError(source.LastError)
+		if source.LastError != "" && source.NextRetryAt != nil {
+			source.NextRunAt = source.NextRetryAt
+		} else if source.LastRunAt != nil {
 			next := source.LastRunAt.Add(time.Duration(source.UpdateInterval) * time.Second)
 			source.NextRunAt = &next
 		}
@@ -211,7 +234,28 @@ func (s *Store) Logs(ctx context.Context, limit int, sourceID, status string) ([
 	if err := s.db.SelectContext(ctx, &logs, query, args...); err != nil {
 		return nil, fmt.Errorf("admin list logs: %w", err)
 	}
+	for index := range logs {
+		logs[index].ErrorMessage = compactParserError(logs[index].ErrorMessage)
+	}
 	return logs, nil
+}
+
+func compactParserError(message string) string {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return ""
+	}
+	if marker := strings.Index(message, ": group "); marker >= 0 {
+		message = message[:marker] +
+			". Подробные ответы сохранены в диагностике источника."
+	}
+	const maximum = 700
+	runes := []rune(message)
+	if len(runes) > maximum {
+		message = string(runes[:maximum]) +
+			"… Подробные ответы сохранены в диагностике источника."
+	}
+	return message
 }
 
 func (s *Store) Universities(ctx context.Context) ([]UniversityOption, error) {

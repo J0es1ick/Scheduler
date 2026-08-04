@@ -38,7 +38,7 @@ func TestValidateTelegramInitData(t *testing.T) {
 }
 
 func TestAccessKeyAndSessionCSRF(t *testing.T) {
-	auth := NewAuthManager("bot-token", "correct-horse", "https://admin.example.test")
+	auth := NewAuthManager("bot-token", "correct-horse", true, true)
 	if _, err := auth.LoginWithAccessKey("wrong"); err != ErrUnauthorized {
 		t.Fatalf("wrong access key error = %v", err)
 	}
@@ -100,7 +100,7 @@ func (s *telegramAdminCheckerStub) TelegramAdmin(_ context.Context, id string) (
 }
 
 func TestTelegramSessionRechecksAdminRole(t *testing.T) {
-	auth := NewAuthManager("bot-token", "", "https://admin.example.test")
+	auth := NewAuthManager("bot-token", "", false, true)
 	checker := &telegramAdminCheckerStub{isAdmin: true}
 	recorder := httptest.NewRecorder()
 	_, err := auth.IssueSession(recorder, AdminIdentity{ID: "42", Name: "@admin", AuthMethod: "telegram"})
@@ -130,6 +130,21 @@ func TestTelegramSessionRechecksAdminRole(t *testing.T) {
 	}
 	if cookies := response.Result().Cookies(); len(cookies) == 0 || cookies[0].MaxAge >= 0 {
 		t.Fatalf("revoked session cookie was not cleared: %+v", cookies)
+	}
+}
+
+func TestSessionStoreIsBounded(t *testing.T) {
+	auth := NewAuthManager("bot-token", "access-key", true, true)
+	auth.maxSessions = 2
+
+	for index := 0; index < 3; index++ {
+		recorder := httptest.NewRecorder()
+		if _, err := auth.IssueSession(recorder, AdminIdentity{ID: strconv.Itoa(index)}); err != nil {
+			t.Fatalf("issue session %d: %v", index, err)
+		}
+	}
+	if len(auth.sessions) != 2 {
+		t.Fatalf("sessions = %d, want 2", len(auth.sessions))
 	}
 }
 

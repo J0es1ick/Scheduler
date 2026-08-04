@@ -6,9 +6,10 @@ import (
 )
 
 const (
-	loginAttemptWindow = 15 * time.Minute
-	loginBlockDuration = 15 * time.Minute
-	maxLoginFailures   = 5
+	loginAttemptWindow  = 15 * time.Minute
+	loginBlockDuration  = 15 * time.Minute
+	maxLoginFailures    = 5
+	maxTrackedLoginKeys = 10_000
 )
 
 type loginAttempt struct {
@@ -18,12 +19,17 @@ type loginAttempt struct {
 }
 
 type loginGuard struct {
-	mu       sync.Mutex
-	attempts map[string]loginAttempt
+	mu          sync.Mutex
+	attempts    map[string]loginAttempt
+	maxFailures int
 }
 
-func newLoginGuard() *loginGuard {
-	return &loginGuard{attempts: make(map[string]loginAttempt)}
+func newLoginGuard(maxFailures ...int) *loginGuard {
+	limit := maxLoginFailures
+	if len(maxFailures) > 0 && maxFailures[0] > 0 {
+		limit = maxFailures[0]
+	}
+	return &loginGuard{attempts: make(map[string]loginAttempt), maxFailures: limit}
 }
 
 func (g *loginGuard) allowed(key string, now time.Time) (bool, time.Duration) {
@@ -46,13 +52,20 @@ func (g *loginGuard) allowed(key string, now time.Time) (bool, time.Duration) {
 func (g *loginGuard) failed(key string, now time.Time) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if len(g.attempts) >= maxTrackedLoginKeys {
+		for candidate, current := range g.attempts {
+			if !current.blockedUntil.After(now) && now.Sub(current.windowStart) >= loginAttemptWindow {
+				delete(g.attempts, candidate)
+			}
+		}
+	}
 
 	attempt := g.attempts[key]
 	if attempt.windowStart.IsZero() || now.Sub(attempt.windowStart) >= loginAttemptWindow {
 		attempt = loginAttempt{windowStart: now}
 	}
 	attempt.failures++
-	if attempt.failures >= maxLoginFailures {
+	if attempt.failures >= g.maxFailures {
 		attempt.blockedUntil = now.Add(loginBlockDuration)
 	}
 	g.attempts[key] = attempt
