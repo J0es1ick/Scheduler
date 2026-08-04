@@ -7,7 +7,7 @@ import (
 )
 
 func NormalizeDate(t time.Time) time.Time {
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 func Weekday(t time.Time) int {
@@ -19,6 +19,8 @@ func Weekday(t time.Time) int {
 }
 
 func DetermineWeekType(date, semesterStart time.Time) domain.WeekType {
+	date = NormalizeDate(date)
+	semesterStart = NormalizeDate(semesterStart)
 	daysDiff := int(date.Sub(semesterStart).Hours() / 24)
 	if daysDiff < 0 {
 		daysDiff = 0
