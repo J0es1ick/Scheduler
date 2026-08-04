@@ -115,8 +115,18 @@ func (h *Handler) showSubscriptionSettings(c tele.Context, edit bool) error {
 		return h.settingsError(c, "load subscriptions", err)
 	}
 
-	text := subscriptionSettingsText(items, user.NotificationsEnabled)
-	markup := keyboards.SubscriptionSettings(items, user.NotificationsEnabled)
+	text := subscriptionSettingsText(
+		items,
+		user.NotificationsEnabled,
+		user.ReminderEnabled,
+		user.ReminderMinutes,
+	)
+	markup := keyboards.SubscriptionSettings(
+		items,
+		user.NotificationsEnabled,
+		user.ReminderEnabled,
+		user.ReminderMinutes,
+	)
 	if edit {
 		if err = c.Edit(text, markup); err == nil || strings.Contains(err.Error(), "message is not modified") {
 			return nil
@@ -126,13 +136,31 @@ func (h *Handler) showSubscriptionSettings(c tele.Context, edit bool) error {
 	return c.Send(text, markup)
 }
 
-func subscriptionSettingsText(items []domain.GroupSubscription, notificationsEnabled bool) string {
+func subscriptionSettingsText(
+	items []domain.GroupSubscription,
+	notificationsEnabled bool,
+	reminderEnabled bool,
+	reminderMinutes int,
+) string {
 	status := "включены"
 	if !notificationsEnabled {
 		status = "выключены"
 	}
 	var builder strings.Builder
-	fmt.Fprintf(&builder, "Настройки\n\nУведомления: %s\nПодписок: %d\n", status, len(items))
+	reminderStatus := "выключены"
+	if reminderEnabled {
+		reminderStatus = fmt.Sprintf(
+			"за %d мин. до пары основной группы",
+			reminderMinutes,
+		)
+	}
+	fmt.Fprintf(
+		&builder,
+		"Настройки\n\nУведомления: %s\nНапоминания: %s\nПодписок: %d\n",
+		status,
+		reminderStatus,
+		len(items),
+	)
 	if len(items) == 0 {
 		builder.WriteString("\nНет выбранных групп. Используйте /change_group, чтобы добавить основную группу.")
 		return builder.String()

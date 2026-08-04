@@ -33,6 +33,7 @@ type Handler struct {
 	SubscriptionService   *service.SubscriptionService
 	SupportRequestService *service.SupportRequestService
 	MetricsService        *service.MetricsService
+	ChatProfileService    *service.ChatProfileService
 	AdminPublicURL        string
 }
 
@@ -45,6 +46,7 @@ func NewHandler(
 	subscriptionService *service.SubscriptionService,
 	supportRequestService *service.SupportRequestService,
 	metricsService *service.MetricsService,
+	chatProfileService *service.ChatProfileService,
 	adminPublicURL string,
 ) *Handler {
 	return &Handler{
@@ -56,6 +58,7 @@ func NewHandler(
 		SubscriptionService:   subscriptionService,
 		SupportRequestService: supportRequestService,
 		MetricsService:        metricsService,
+		ChatProfileService:    chatProfileService,
 		AdminPublicURL:        adminPublicURL,
 	}
 }

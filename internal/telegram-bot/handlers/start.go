@@ -11,6 +11,17 @@ import (
 )
 
 func (h *Handler) HandleStart(c tele.Context) error {
+	if isGroupChat(c) {
+		return c.Send(
+			"Я могу показывать расписание прямо в этом чате.\n\n" +
+				"Администратору нужно один раз выбрать учебную группу:\n" +
+				"/set_chat_group isuct 3/147\n" +
+				"или /set_chat_group ispu 1-40\n\n" +
+				"После настройки участникам будут доступны /today, /tomorrow, " +
+				"/week, /twoweeks и /date.",
+		)
+	}
+
 	ctx, cancel := reqCtx()
 	defer cancel()
 

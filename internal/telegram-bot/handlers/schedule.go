@@ -106,102 +106,93 @@ func (h *Handler) sendSingleDay(c tgbotapi.Context, day dto.DaySchedule, univers
 	return c.Send(formatDaySchedule(day) + h.sourceFreshnessText(universityID))
 }
 
-// getScheduleForState загружает расписание группы за диапазон дат.
+// getScheduleForTarget загружает расписание группы за диапазон дат.
 // Принимает уже созданный ctx — вызывающий хэндлер владеет его таймаутом/отменой.
-func (h *Handler) getScheduleForState(ctx context.Context, state *dto.UserState, from, to time.Time) []dto.DaySchedule {
-	if state.SearchType != dto.SearchTypeGroup {
-		return nil
-	}
-	data, err := h.ScheduleService.GetScheduleForGroupRange(ctx, state.GroupID, from, to)
+func (h *Handler) getScheduleForTarget(
+	ctx context.Context,
+	target *scheduleTarget,
+	from time.Time,
+	to time.Time,
+) []dto.DaySchedule {
+	data, err := h.ScheduleService.GetScheduleForGroupRange(
+		ctx,
+		target.GroupID,
+		from,
+		to,
+	)
 	if err != nil {
-		slog.Error("GetScheduleForGroupRange failed", "groupID", state.GroupID, "err", err)
+		slog.Error(
+			"GetScheduleForGroupRange failed",
+			"groupID", target.GroupID,
+			"err", err,
+		)
 		return nil
 	}
 	return mapToDaySchedule(data)
 }
 
-// checkState проверяет наличие и готовность состояния пользователя.
-// Если состояние отсутствует или не завершено — отправляет подсказку и возвращает nil.
-func (h *Handler) checkState(c tgbotapi.Context) *dto.UserState {
-	ctx, cancel := reqCtx()
-	defer cancel()
-	state, err := h.readyState(ctx, c.Sender().ID)
-	if err != nil {
-		slog.Error("restore profile failed", "user_id", c.Sender().ID, "err", err)
-		_ = c.Send("Не удалось загрузить сохранённую группу. Попробуйте ещё раз позже.")
-		return nil
-	}
-	if state == nil {
-		_ = c.Send("Для начала работы используйте /start")
-		return nil
-	}
-	if state.Step != "done" {
-		state.Step = "awaiting_query"
-		state.SearchType = dto.SearchTypeGroup
-		state.Query = ""
-		h.StateManager.Set(c.Sender().ID, state)
-		remove := &tgbotapi.ReplyMarkup{RemoveKeyboard: true}
-		_ = c.Send("Настройка не завершена.", remove)
-		_ = c.Send(groupInputPrompt(state.UniversityID))
-		return nil
-	}
-	return state
-}
-
 func (h *Handler) HandleToday(c tgbotapi.Context) error {
-	state := h.checkState(c)
-	if state == nil {
-		return nil
-	}
 	ctx, cancel := reqCtx()
 	defer cancel()
+	target := h.scheduleTarget(ctx, c)
+	if target == nil {
+		return nil
+	}
 
 	now := time.Now()
-	days := h.getScheduleForState(ctx, state, now, now)
+	days := h.getScheduleForTarget(ctx, target, now, now)
 	if len(days) == 0 {
 		return c.Send("На сегодня занятий нет.")
 	}
-	return h.sendSingleDay(c, days[0], state.UniversityID)
+	return h.sendSingleDay(c, days[0], target.UniversityID)
 }
 
 func (h *Handler) HandleTomorrow(c tgbotapi.Context) error {
-	state := h.checkState(c)
-	if state == nil {
-		return nil
-	}
 	ctx, cancel := reqCtx()
 	defer cancel()
+	target := h.scheduleTarget(ctx, c)
+	if target == nil {
+		return nil
+	}
 
 	tomorrow := time.Now().AddDate(0, 0, 1)
-	days := h.getScheduleForState(ctx, state, tomorrow, tomorrow)
+	days := h.getScheduleForTarget(ctx, target, tomorrow, tomorrow)
 	if len(days) == 0 {
 		return c.Send("На завтра занятий нет.")
 	}
-	return h.sendSingleDay(c, days[0], state.UniversityID)
+	return h.sendSingleDay(c, days[0], target.UniversityID)
 }
 
 func (h *Handler) HandleWeek(c tgbotapi.Context) error {
-	state := h.checkState(c)
-	if state == nil {
-		return nil
-	}
 	ctx, cancel := reqCtx()
 	defer cancel()
+	target := h.scheduleTarget(ctx, c)
+	if target == nil {
+		return nil
+	}
 
 	now := time.Now()
-	return h.sendDays(c, h.getScheduleForState(ctx, state, now, now.AddDate(0, 0, 6)), state.UniversityID)
+	return h.sendDays(
+		c,
+		h.getScheduleForTarget(ctx, target, now, now.AddDate(0, 0, 6)),
+		target.UniversityID,
+	)
 }
 
 func (h *Handler) HandleTwoWeeks(c tgbotapi.Context) error {
-	state := h.checkState(c)
-	if state == nil {
-		return nil
-	}
 	ctx, cancel := reqCtx()
 	defer cancel()
+	target := h.scheduleTarget(ctx, c)
+	if target == nil {
+		return nil
+	}
 
 	now := time.Now()
-	return h.sendDays(c, h.getScheduleForState(ctx, state, now, now.AddDate(0, 0, 13)), state.UniversityID)
+	return h.sendDays(
+		c,
+		h.getScheduleForTarget(ctx, target, now, now.AddDate(0, 0, 13)),
+		target.UniversityID,
+	)
 }
 
 func (h *Handler) HandleWeekDay(c tgbotapi.Context) error {
@@ -209,11 +200,6 @@ func (h *Handler) HandleWeekDay(c tgbotapi.Context) error {
 }
 
 func (h *Handler) HandleWeekDaySelect(c tgbotapi.Context) error {
-	state := h.checkState(c)
-	if state == nil {
-		return nil
-	}
-
 	args := c.Args()
 	if len(args) == 0 {
 		_ = c.Respond()
@@ -230,16 +216,20 @@ func (h *Handler) HandleWeekDaySelect(c tgbotapi.Context) error {
 
 	ctx, cancel := reqCtx()
 	defer cancel()
+	target := h.scheduleTarget(ctx, c)
+	if target == nil {
+		return nil
+	}
 
 	now := time.Now()
-	days := h.getScheduleForState(ctx, state, now, now.AddDate(0, 0, 6))
+	days := h.getScheduleForTarget(ctx, target, now, now.AddDate(0, 0, 6))
 	for _, day := range days {
 		wd := int(day.Date.Weekday())
 		if wd == 0 {
 			wd = 7
 		}
 		if wd == weekdayNum {
-			return h.sendSingleDay(c, day, state.UniversityID)
+			return h.sendSingleDay(c, day, target.UniversityID)
 		}
 	}
 	return c.Send("В выбранный день занятий нет.")
