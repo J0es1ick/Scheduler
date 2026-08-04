@@ -72,6 +72,7 @@ func (r *DataSourceRepository) GetDataSourceByID(ctx context.Context, id string)
 		        last_success_at,
 		        COALESCE(last_error, '') AS last_error,
 		        consecutive_failures,
+		        next_retry_at,
 		        COALESCE(current_snapshot_id, '') AS current_snapshot_id,
 		        created_at, updated_at
 		 FROM data_sources WHERE id = $1`, id)
@@ -90,12 +91,13 @@ func (r *DataSourceRepository) UpdateDataSource(ctx context.Context, ds *domain.
 		 SET university_id = $1, adapter_type = $2, config = $3,
 		     update_interval = $4, last_run_at = $5, last_success_at = $6,
 		     last_error = $7, consecutive_failures = $8,
-		     current_snapshot_id = NULLIF($9, ''), updated_at = $10
-		 WHERE id = $11`,
+		     next_retry_at = $9,
+		     current_snapshot_id = NULLIF($10, ''), updated_at = $11
+		 WHERE id = $12`,
 		ds.UniversityID, ds.AdapterType, ds.Config,
 		ds.UpdateInterval, ds.LastRunAt, ds.LastSuccessAt,
-		ds.LastError, ds.ConsecutiveFailures, ds.CurrentSnapshotID, time.Now(),
-		ds.ID)
+		ds.LastError, ds.ConsecutiveFailures, ds.NextRetryAt,
+		ds.CurrentSnapshotID, time.Now(), ds.ID)
 	if err != nil {
 		return fmt.Errorf("update data source %s: %w", ds.ID, err)
 	}
@@ -118,6 +120,7 @@ func (r *DataSourceRepository) ListActiveDataSources(ctx context.Context) ([]*do
 		        last_success_at,
 		        COALESCE(last_error, '') AS last_error,
 		        consecutive_failures,
+		        next_retry_at,
 		        COALESCE(current_snapshot_id, '') AS current_snapshot_id,
 		        created_at, updated_at
 		 FROM data_sources
@@ -126,9 +129,17 @@ func (r *DataSourceRepository) ListActiveDataSources(ctx context.Context) ([]*do
 			WHERE ps.data_source_id=data_sources.id AND ps.status='quarantined'
 		 )
 		 AND (
-			COALESCE(last_error, '') <> ''
-			OR last_run_at IS NULL
-			OR last_run_at + make_interval(secs => update_interval) < NOW()
+			(
+				COALESCE(last_error, '') <> ''
+				AND COALESCE(next_retry_at, NOW()) <= NOW()
+			)
+			OR (
+				COALESCE(last_error, '') = ''
+				AND (
+					last_run_at IS NULL
+					OR last_run_at + make_interval(secs => update_interval) < NOW()
+				)
+			)
 		 )`)
 	if err != nil {
 		return nil, fmt.Errorf("list active data sources: %w", err)
@@ -144,6 +155,7 @@ func (r *DataSourceRepository) ListDataSourcesByUniversityID(ctx context.Context
 		        last_success_at,
 		        COALESCE(last_error, '') AS last_error,
 		        consecutive_failures,
+		        next_retry_at,
 		        COALESCE(current_snapshot_id, '') AS current_snapshot_id,
 		        created_at, updated_at
 		 FROM data_sources WHERE university_id = $1`, universityID)
@@ -156,19 +168,28 @@ func (r *DataSourceRepository) ListDataSourcesByUniversityID(ctx context.Context
 func (r *DataSourceRepository) RecordFailure(
 	ctx context.Context,
 	id, message string,
-) (int, error) {
-	var failures int
-	err := r.db.GetContext(ctx, &failures, `
+) (int, time.Time, error) {
+	var state struct {
+		Failures  int       `db:"consecutive_failures"`
+		NextRetry time.Time `db:"next_retry_at"`
+	}
+	err := r.db.GetContext(ctx, &state, `
 		UPDATE data_sources
 		SET last_run_at=NOW(), last_error=$2,
 			consecutive_failures=consecutive_failures+1,
+			next_retry_at=NOW() + (
+				LEAST(
+					21600.0,
+					300.0 * POWER(2.0, LEAST(consecutive_failures, 7))
+				) * INTERVAL '1 second'
+			),
 			updated_at=NOW()
 		WHERE id=$1
-		RETURNING consecutive_failures`, id, message)
+		RETURNING consecutive_failures, next_retry_at`, id, message)
 	if err != nil {
-		return 0, fmt.Errorf("record data source failure %s: %w", id, err)
+		return 0, time.Time{}, fmt.Errorf("record data source failure %s: %w", id, err)
 	}
-	return failures, nil
+	return state.Failures, state.NextRetry, nil
 }
 
 func (r *DataSourceRepository) RecordQuarantine(
@@ -177,7 +198,8 @@ func (r *DataSourceRepository) RecordQuarantine(
 ) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE data_sources
-		SET last_run_at=NOW(), last_error=$2, updated_at=NOW()
+		SET last_run_at=NOW(), last_error=$2, next_retry_at=NULL,
+			updated_at=NOW()
 		WHERE id=$1`, id, message)
 	if err != nil {
 		return fmt.Errorf("record data source quarantine %s: %w", id, err)

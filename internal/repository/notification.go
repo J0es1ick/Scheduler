@@ -11,9 +11,6 @@ import (
 
 const maxNotificationAttempts = 5
 
-// NotificationRepository stores schedule change events and their per-user
-// deliveries. Deliveries are claimed with SKIP LOCKED so several bot replicas
-// can safely process the same PostgreSQL queue.
 type NotificationRepository struct {
 	db *sqlx.DB
 }
@@ -52,8 +49,6 @@ func (r *NotificationRepository) EnqueueAdminAlert(
 	return nil
 }
 
-// ClaimPending atomically leases due deliveries for two minutes. A crashed
-// worker therefore cannot leave a notification permanently stuck.
 func (r *NotificationRepository) ClaimPending(ctx context.Context, limit int) ([]domain.NotificationDelivery, error) {
 	if limit <= 0 {
 		return []domain.NotificationDelivery{}, nil
@@ -155,7 +150,13 @@ func (r *NotificationRepository) IsBotOutboxActive(ctx context.Context, id strin
 			FROM bot_outbox o
 			JOIN users u ON u.id=o.user_id
 			WHERE o.id=$1 AND o.status='pending'
-				AND (o.kind NOT IN ('support_request', 'admin_alert') OR u.is_admin)
+				AND CASE
+					WHEN o.kind IN ('support_request', 'admin_alert') THEN u.is_admin
+					WHEN o.kind='lesson_reminder' THEN
+						u.reminder_enabled
+						AND u.default_group_id=o.group_id
+					ELSE TRUE
+				END
 		)`, id)
 	if err != nil {
 		return false, fmt.Errorf("check bot outbox %s eligibility: %w", id, err)

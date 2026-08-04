@@ -35,6 +35,7 @@ func (r *UserRepository) GetUserByID(ctx context.Context, id string) (*domain.Us
 	err := r.db.GetContext(ctx, &user,
 		`SELECT id, COALESCE(username, '') AS username, is_admin,
 			COALESCE(default_group_id, '') AS default_group_id, notifications_enabled,
+			reminder_enabled, reminder_minutes,
 			created_at, updated_at
 		 FROM users WHERE id = $1`, id)
 	if err != nil {
@@ -51,6 +52,7 @@ func (r *UserRepository) GetUserByUsername(ctx context.Context, username string)
 	err := r.db.GetContext(ctx, &user,
 		`SELECT id, COALESCE(username, '') AS username, is_admin,
 			COALESCE(default_group_id, '') AS default_group_id, notifications_enabled,
+			reminder_enabled, reminder_minutes,
 			created_at, updated_at
 		 FROM users WHERE username = $1`, username)
 	if err != nil {
@@ -67,6 +69,7 @@ func (r *UserRepository) GetAllUsers(ctx context.Context) ([]domain.User, error)
 	err := r.db.SelectContext(ctx, &users,
 		`SELECT id, COALESCE(username, '') AS username, is_admin,
 			COALESCE(default_group_id, '') AS default_group_id, notifications_enabled,
+			reminder_enabled, reminder_minutes,
 			created_at, updated_at FROM users`)
 	if err != nil {
 		return nil, fmt.Errorf("get all users: %w", err)
@@ -128,6 +131,45 @@ func (r *UserRepository) SetNotificationsEnabled(ctx context.Context, userID str
 	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("set notifications for user %s: commit: %w", userID, err)
+	}
+	return nil
+}
+
+func (r *UserRepository) SetLessonReminder(
+	ctx context.Context,
+	userID string,
+	enabled bool,
+	minutes int,
+) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("set lesson reminder for user %s: begin: %w", userID, err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `
+		UPDATE users
+		SET reminder_enabled=$1, reminder_minutes=$2, updated_at=NOW()
+		WHERE id=$3`,
+		enabled, minutes, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("set lesson reminder for user %s: %w", userID, err)
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		return sql.ErrNoRows
+	}
+	if !enabled {
+		if _, err = tx.ExecContext(ctx, `
+			UPDATE bot_outbox
+			SET status='cancelled', updated_at=NOW()
+			WHERE user_id=$1 AND kind='lesson_reminder' AND status='pending'`,
+			userID,
+		); err != nil {
+			return fmt.Errorf("cancel lesson reminders for user %s: %w", userID, err)
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("set lesson reminder for user %s: commit: %w", userID, err)
 	}
 	return nil
 }
