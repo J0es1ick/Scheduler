@@ -118,11 +118,16 @@ export const api = {
   dashboard: () => request<Dashboard>("/api/dashboard"),
   sources: async () =>
     (await request<{ items: SourceView[] }>("/api/sources")).items,
-  updateSource: (id: string, updateInterval: number) =>
+  updateSource: (
+    id: string,
+    settings: { update_interval?: number; is_enabled?: boolean },
+  ) =>
     request(`/api/sources/${encodeURIComponent(id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ update_interval: updateInterval }),
+      body: JSON.stringify(settings),
     }),
+  deleteSource: (id: string) =>
+    request(`/api/sources/${encodeURIComponent(id)}`, { method: "DELETE" }),
   syncSource: (id: string) =>
     request(`/api/sources/${encodeURIComponent(id)}/sync`, { method: "POST" }),
   rollbackSource: (id: string) =>

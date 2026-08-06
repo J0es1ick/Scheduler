@@ -3,9 +3,12 @@ import {
   Check,
   Eye,
   ExternalLink,
+  Power,
+  PowerOff,
   RefreshCw,
   RotateCcw,
   ShieldAlert,
+  Trash2,
   X,
 } from "lucide-react";
 import { api } from "../api";
@@ -23,7 +26,7 @@ import {
 } from "../components";
 import { SnapshotReviewDialog } from "../features/snapshot-review/SnapshotReviewDialog";
 import { useRemote } from "../hooks";
-import type { ParserSnapshot } from "../types";
+import type { ParserSnapshot, SourceView } from "../types";
 
 export function SourcesPage({
   notify,
@@ -45,6 +48,7 @@ export function SourcesPage({
     snapshot: ParserSnapshot;
     sourceName: string;
   } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SourceView | null>(null);
 
   async function sync(id: string) {
     setBusy(id);
@@ -67,7 +71,7 @@ export function SourcesPage({
   async function updateInterval(id: string, seconds: number) {
     setBusy(id);
     try {
-      await api.updateSource(id, seconds);
+      await api.updateSource(id, { update_interval: seconds });
       notify(`Интервал изменён: ${intervalLabel(seconds)}`);
       await reload();
     } catch (caught) {
@@ -75,6 +79,46 @@ export function SourcesPage({
         caught instanceof Error
           ? caught.message
           : "Не удалось изменить интервал",
+        "error",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function toggleSource(source: SourceView) {
+    const nextState = !source.is_enabled;
+    setBusy(source.id);
+    try {
+      await api.updateSource(source.id, { is_enabled: nextState });
+      notify(
+        nextState
+          ? "Источник включён и будет обновлён ближайшим проходом воркера"
+          : "Источник отключён. Опубликованное расписание сохранено",
+      );
+      await reload();
+    } catch (caught) {
+      notify(
+        caught instanceof Error
+          ? caught.message
+          : "Не удалось изменить состояние источника",
+        "error",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function removeSource(source: SourceView) {
+    setBusy(source.id);
+    try {
+      await api.deleteSource(source.id);
+      setDeleteTarget(null);
+      notify(`Источник ${source.university_name} удалён`);
+      await reload();
+    } catch (caught) {
+      notify(
+        caught instanceof Error ? caught.message : "Не удалось удалить источник",
         "error",
       );
     } finally {
@@ -211,7 +255,10 @@ export function SourcesPage({
                 )
               : "—";
           return (
-            <article className="source-row" key={source.id}>
+            <article
+              className={`source-row ${source.is_enabled ? "" : "is-disabled"}`}
+              key={source.id}
+            >
               <div className="source-identity">
                 <SourceGlyph name={source.university_name} />
                 <div>
@@ -224,19 +271,25 @@ export function SourcesPage({
               <div className="source-row-stats">
                 <div>
                   <span>
-                    {source.last_error
+                    {!source.is_enabled
+                      ? "Автообновление"
+                      : source.last_error
                       ? "Следующая попытка"
                       : "Последний запуск"}
                   </span>
                   <strong>
-                    {formatDateTime(
-                      source.last_error
-                        ? source.next_retry_at
-                        : source.last_run_at,
-                    )}
+                    {!source.is_enabled
+                      ? "Отключено"
+                      : formatDateTime(
+                          source.last_error
+                            ? source.next_retry_at
+                            : source.last_run_at,
+                        )}
                   </strong>
                   <em>
-                    {source.last_error
+                    {!source.is_enabled
+                      ? "Данные в базе сохранены"
+                      : source.last_error
                       ? `${number.format(source.consecutive_failures)} ошибок подряд`
                       : relativeTime(source.last_run_at)}
                   </em>
@@ -295,7 +348,7 @@ export function SourcesPage({
                 </label>
                 <button
                   className="button button-primary"
-                  disabled={isBusy}
+                  disabled={isBusy || !source.is_enabled}
                   onClick={() => void sync(source.id)}
                 >
                   <RefreshCw size={16} className={isBusy ? "spin" : ""} />{" "}
@@ -308,9 +361,29 @@ export function SourcesPage({
                 >
                   <RotateCcw size={15} /> Откатить
                 </button>
-                <a href={source.schedule_url} target="_blank" rel="noreferrer">
-                  Сайт расписания <ExternalLink size={13} />
-                </a>
+                <button
+                  className="button button-ghost"
+                  disabled={isBusy}
+                  onClick={() => void toggleSource(source)}
+                >
+                  {source.is_enabled ? (
+                    <><PowerOff size={15} /> Отключить</>
+                  ) : (
+                    <><Power size={15} /> Включить</>
+                  )}
+                </button>
+                <button
+                  className="button button-danger-soft"
+                  disabled={isBusy}
+                  onClick={() => setDeleteTarget(source)}
+                >
+                  <Trash2 size={15} /> Удалить
+                </button>
+                {source.schedule_url && (
+                  <a href={source.schedule_url} target="_blank" rel="noreferrer">
+                    Сайт расписания <ExternalLink size={13} />
+                  </a>
+                )}
               </div>
 
               {source.last_error && (
@@ -447,6 +520,56 @@ export function SourcesPage({
           onReject={() => rejectSnapshot(reviewing.snapshot.id)}
         />
       )}
+      {deleteTarget && (
+        <DeleteSourceDialog
+          source={deleteTarget}
+          busy={busy === deleteTarget.id}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => void removeSource(deleteTarget)}
+        />
+      )}
+    </div>
+  );
+}
+
+function DeleteSourceDialog({
+  source,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  source: SourceView;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <section
+        className="confirm-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-source-title"
+      >
+        <span className="dialog-danger-icon"><Trash2 size={19} /></span>
+        <h2 id="delete-source-title">Удалить источник {source.university_name}?</h2>
+        <p>
+          Это удалит настройки подключения, историю запусков, диагностику и все
+          сохранённые снимки этого источника.
+        </p>
+        <p className="dialog-note">
+          Уже опубликованные группы и занятия останутся в базе, но перестанут
+          автоматически обновляться. Отменить удаление через интерфейс нельзя.
+        </p>
+        <div className="dialog-actions">
+          <button className="button button-ghost" disabled={busy} onClick={onCancel}>
+            Отмена
+          </button>
+          <button className="button button-danger" disabled={busy} onClick={onConfirm}>
+            <Trash2 size={15} /> {busy ? "Удаление…" : "Удалить источник"}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }

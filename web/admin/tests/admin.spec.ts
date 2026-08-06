@@ -29,6 +29,7 @@ const dashboard = {
     sources_stale: 0,
     sources_error: 0,
     sources_quarantined: 0,
+    sources_disabled: 0,
     pending_notifications: 0,
     failed_notifications: 0,
     pending_outbox: 0,
@@ -168,6 +169,7 @@ test("quarantined snapshot can be inspected group by group before publication", 
         university_full_name: "Ивановский государственный химико-технологический университет",
         schedule_url: "https://example.test/schedule",
         adapter_type: "isuct",
+        is_enabled: true,
         update_interval: 3600,
         last_run_at: "2026-08-03T14:02:00Z",
         last_success_at: "2026-08-03T12:00:00Z",
@@ -281,6 +283,77 @@ test("quarantined snapshot can be inspected group by group before publication", 
   await expect(page.getByText("Новое занятие")).toBeVisible();
   await expect(page.getByText("удалено")).toHaveCount(2);
   await expect(page.getByText("добавлено")).toBeVisible();
+});
+
+test("source can be disabled and deletion requires confirmation", async ({ page }) => {
+  await mockAuthenticated(page);
+  let enabled = true;
+  let deleted = false;
+  let deleteRequests = 0;
+
+  await page.route("**/api/sources", (route) =>
+    json(route, {
+      items: deleted
+        ? []
+        : [{
+            id: "isuct-main",
+            university_id: "isuct",
+            university_name: "ИГХТУ",
+            university_full_name: "Ивановский государственный химико-технологический университет",
+            schedule_url: "https://example.test/schedule",
+            adapter_type: "isuct",
+            is_enabled: enabled,
+            update_interval: 3600,
+            last_run_at: "2026-08-03T14:02:00Z",
+            last_success_at: "2026-08-03T14:02:00Z",
+            next_run_at: enabled ? "2026-08-03T15:02:00Z" : null,
+            last_error: "",
+            consecutive_failures: 0,
+            next_retry_at: null,
+            current_snapshot_id: "snapshot-current",
+            quarantined_count: 0,
+            latest_status: "success",
+            latest_started_at: "2026-08-03T14:00:00Z",
+            latest_finished_at: "2026-08-03T14:02:00Z",
+            latest_records: 3057,
+            group_count: 522,
+            lesson_count: 3057,
+            running: false,
+            health: enabled ? "healthy" : "disabled",
+          }],
+    }),
+  );
+  await page.route("**/api/parser-snapshots?**", (route) => json(route, { items: [] }));
+  await page.route("**/api/sources/isuct-main", async (route) => {
+    if (route.request().method() === "PATCH") {
+      const payload = route.request().postDataJSON() as { is_enabled?: boolean };
+      enabled = payload.is_enabled ?? enabled;
+      await json(route, { status: "updated" });
+      return;
+    }
+    if (route.request().method() === "DELETE") {
+      deleteRequests += 1;
+      deleted = true;
+      await json(route, { status: "deleted" });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.goto("/#/sources");
+  await page.getByRole("button", { name: "Отключить" }).click();
+  await expect(page.getByRole("button", { name: "Включить" })).toBeVisible();
+  await expect(page.getByText("Отключено", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Удалить", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Удалить источник ИГХТУ?" })).toBeVisible();
+  await page.getByRole("button", { name: "Отмена" }).click();
+  expect(deleteRequests).toBe(0);
+
+  await page.getByRole("button", { name: "Удалить", exact: true }).click();
+  await page.getByRole("button", { name: "Удалить источник" }).click();
+  await expect.poll(() => deleteRequests).toBe(1);
+  await expect(page.getByRole("heading", { name: "Удалить источник ИГХТУ?" })).toHaveCount(0);
 });
 
 test("backend outage is shown instead of a blank screen", async ({ page }) => {

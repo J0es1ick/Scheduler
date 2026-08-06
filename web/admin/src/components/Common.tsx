@@ -6,6 +6,7 @@ import {
   Check,
   Clock3,
   LoaderCircle,
+  PauseCircle,
   Search,
   X,
 } from "lucide-react";
@@ -118,6 +119,7 @@ export function StatusPill({
       error: "Ошибка",
       stale: "Данные устарели",
       quarantined: "Карантин",
+      disabled: "Отключён",
       success: "Успешно",
       failed: "Ошибка",
     }[health];
@@ -125,6 +127,8 @@ export function StatusPill({
     <span className={`status-pill status-${health}`}>
       {health === "running" ? (
         <LoaderCircle size={13} className="spin" />
+      ) : health === "disabled" ? (
+        <PauseCircle size={13} />
       ) : health === "healthy" || health === "success" ? (
         <Check size={13} />
       ) : health === "stale" || health === "quarantined" ? (
