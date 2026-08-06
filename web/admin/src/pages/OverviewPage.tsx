@@ -72,7 +72,8 @@ export function OverviewPage({
             <span>
               Источники: {data.operations.sources_stale} устарели,{" "}
               {data.operations.sources_error} с ошибкой,{" "}
-              {data.operations.sources_quarantined} в карантине. Очередь:{" "}
+              {data.operations.sources_quarantined} в карантине,{" "}
+              {data.operations.sources_disabled} отключено. Очередь:{" "}
               {data.operations.pending_notifications +
                 data.operations.pending_outbox}{" "}
               ожидают,{" "}

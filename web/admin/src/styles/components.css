@@ -161,6 +161,12 @@
   color: #7a4f36;
 }
 
+.status-disabled {
+  border-color: var(--line-strong);
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
 .status-error,
 .status-failed {
   border-color: #dfb5aa;
@@ -441,6 +447,15 @@
   border-bottom: 0;
 }
 
+.source-row.is-disabled {
+  background: color-mix(in srgb, var(--surface-muted) 55%, transparent);
+}
+
+.source-row.is-disabled .source-glyph {
+  filter: grayscale(0.7);
+  opacity: 0.72;
+}
+
 .source-identity {
   display: flex;
   gap: 13px;
@@ -710,5 +725,3 @@
   color: var(--muted);
   font-size: 9px;
 }
-
-

@@ -9,6 +9,8 @@ import {
   ShieldCheck,
   UserCog,
   MessagesSquare,
+  Power,
+  PowerOff,
 } from "lucide-react";
 import { api } from "../api";
 import {
@@ -28,6 +30,9 @@ const actionCopy: Record<string, { title: string; icon: typeof ShieldCheck }> =
     sync_completed: { title: "Обновление завершено", icon: RefreshCw },
     sync_failed: { title: "Ошибка обновления", icon: RefreshCw },
     update_interval: { title: "Изменён интервал", icon: Settings2 },
+    enable_source: { title: "Источник включён", icon: Power },
+    disable_source: { title: "Источник отключён", icon: PowerOff },
+    delete_source: { title: "Источник удалён", icon: Trash2 },
     update_admin_role: { title: "Изменена роль", icon: UserCog },
     create_lesson: { title: "Добавлено занятие", icon: CalendarPlus },
     update_lesson: { title: "Изменено занятие", icon: Pencil },

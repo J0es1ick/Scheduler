@@ -23,6 +23,7 @@
   .source-row-actions {
     grid-column: 1 / -1;
     display: flex;
+    flex-wrap: wrap;
     align-items: end;
   }
 
@@ -620,4 +621,3 @@
 .fatal-error button {
   margin-top: 20px;
 }
-

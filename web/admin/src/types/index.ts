@@ -19,7 +19,8 @@ export type SourceHealth =
   | "running"
   | "error"
   | "stale"
-  | "quarantined";
+  | "quarantined"
+  | "disabled";
 
 export interface SourceView {
   id: string;
@@ -28,6 +29,7 @@ export interface SourceView {
   university_full_name: string;
   schedule_url: string;
   adapter_type: string;
+  is_enabled: boolean;
   update_interval: number;
   last_run_at: string | null;
   last_success_at: string | null;
@@ -199,6 +201,7 @@ export interface OperationalHealth {
   sources_stale: number;
   sources_error: number;
   sources_quarantined: number;
+  sources_disabled: number;
   pending_notifications: number;
   failed_notifications: number;
   pending_outbox: number;
