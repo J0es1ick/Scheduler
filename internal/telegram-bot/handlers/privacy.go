@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -13,15 +14,17 @@ import (
 )
 
 func (h *Handler) HandlePrivacy(c tele.Context) error {
-	return c.Send(
-		"Какие данные хранит бот:\n\n" +
-			"• Telegram ID и имя пользователя — для профиля и доставки сообщений;\n" +
-			"• выбранные группы и настройку уведомлений;\n" +
-			"• обращения на горячую линию и их статус;\n" +
-			"• технические события доставки без содержимого личной переписки.\n\n" +
-			"Бот не получает номер телефона и не читает другие чаты. " +
-			"Получить копию данных: /my_data\nУдалить профиль: /delete_me",
-	)
+	return c.Send(privacyText())
+}
+
+func privacyText() string {
+	return "Какие данные хранит бот:\n\n" +
+		"• Telegram ID и имя пользователя — для профиля и доставки сообщений;\n" +
+		"• выбранные группы и настройку уведомлений;\n" +
+		"• обращения об источниках расписания и их статус;\n" +
+		"• технические события доставки без содержимого личной переписки.\n\n" +
+		"Бот не получает номер телефона и не читает другие чаты. " +
+		"Получить копию данных: /my_data\nУдалить профиль: /delete_me"
 }
 
 func (h *Handler) HandleMyData(c tele.Context) error {
@@ -84,10 +87,18 @@ func (h *Handler) HandleCancelDeleteProfile(c tele.Context) error {
 func (h *Handler) HandleSourcesInfo(c tele.Context) error {
 	ctx, cancel := reqCtx()
 	defer cancel()
-	universities, err := h.UniversityService.GetAll(ctx)
+	text, err := h.sourcesInfoText(ctx)
 	if err != nil {
 		slog.Error("load public schedule sources failed", "err", err)
 		return c.Send("Не удалось загрузить список источников. Попробуйте позже.")
+	}
+	return c.Send(text)
+}
+
+func (h *Handler) sourcesInfoText(ctx context.Context) (string, error) {
+	universities, err := h.UniversityService.GetAll(ctx)
+	if err != nil {
+		return "", err
 	}
 
 	var text strings.Builder
@@ -107,8 +118,8 @@ func (h *Handler) HandleSourcesInfo(c tele.Context) error {
 	text.WriteString(
 		"\nДанные проходят автоматическую проверку перед публикацией. " +
 			"Сомнительные обновления отправляются администратору на проверку.\n\n" +
-			"Предложить новый источник или исправление: /hotline\n" +
+			"Предложить новый источник или исправление: «Ещё» → «Сообщить о расписании» или /hotline\n" +
 			"Политика данных: /privacy",
 	)
-	return c.Send(text.String())
+	return text.String(), nil
 }

@@ -55,8 +55,8 @@ func NewDataSourceRepository(db *sqlx.DB) *DataSourceRepository {
 func (r *DataSourceRepository) CreateDataSource(ctx context.Context, id, universityID, adapterType, config string, updateInterval int) (string, error) {
 	now := time.Now()
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO data_sources (id, university_id, adapter_type, config, update_interval, last_run_at, last_error, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, NULL, '', $6, $7)`,
+		`INSERT INTO data_sources (id, university_id, adapter_type, config, is_enabled, update_interval, last_run_at, last_error, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, TRUE, $5, NULL, '', $6, $7)`,
 		id, universityID, adapterType, config, updateInterval, now, now)
 	if err != nil {
 		return "", fmt.Errorf("create data source: %w", err)
@@ -67,7 +67,7 @@ func (r *DataSourceRepository) CreateDataSource(ctx context.Context, id, univers
 func (r *DataSourceRepository) GetDataSourceByID(ctx context.Context, id string) (*domain.DataSource, error) {
 	var ds domain.DataSource
 	err := r.db.GetContext(ctx, &ds,
-		`SELECT id, university_id, adapter_type, config, update_interval,
+		`SELECT id, university_id, adapter_type, config, is_enabled, update_interval,
 		        COALESCE(last_run_at, '1970-01-01'::timestamp) AS last_run_at,
 		        last_success_at,
 		        COALESCE(last_error, '') AS last_error,
@@ -89,13 +89,13 @@ func (r *DataSourceRepository) UpdateDataSource(ctx context.Context, ds *domain.
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE data_sources
 		 SET university_id = $1, adapter_type = $2, config = $3,
-		     update_interval = $4, last_run_at = $5, last_success_at = $6,
-		     last_error = $7, consecutive_failures = $8,
-		     next_retry_at = $9,
-		     current_snapshot_id = NULLIF($10, ''), updated_at = $11
-		 WHERE id = $12`,
+		     is_enabled = $4, update_interval = $5, last_run_at = $6, last_success_at = $7,
+		     last_error = $8, consecutive_failures = $9,
+		     next_retry_at = $10,
+		     current_snapshot_id = NULLIF($11, ''), updated_at = $12
+		 WHERE id = $13`,
 		ds.UniversityID, ds.AdapterType, ds.Config,
-		ds.UpdateInterval, ds.LastRunAt, ds.LastSuccessAt,
+		ds.IsEnabled, ds.UpdateInterval, ds.LastRunAt, ds.LastSuccessAt,
 		ds.LastError, ds.ConsecutiveFailures, ds.NextRetryAt,
 		ds.CurrentSnapshotID, time.Now(), ds.ID)
 	if err != nil {
@@ -115,7 +115,7 @@ func (r *DataSourceRepository) DeleteDataSource(ctx context.Context, id string) 
 func (r *DataSourceRepository) ListActiveDataSources(ctx context.Context) ([]*domain.DataSource, error) {
 	var sources []*domain.DataSource
 	err := r.db.SelectContext(ctx, &sources,
-		`SELECT id, university_id, adapter_type, config, update_interval,
+		`SELECT id, university_id, adapter_type, config, is_enabled, update_interval,
 		        COALESCE(last_run_at, '1970-01-01'::timestamp) AS last_run_at,
 		        last_success_at,
 		        COALESCE(last_error, '') AS last_error,
@@ -124,7 +124,8 @@ func (r *DataSourceRepository) ListActiveDataSources(ctx context.Context) ([]*do
 		        COALESCE(current_snapshot_id, '') AS current_snapshot_id,
 		        created_at, updated_at
 		 FROM data_sources
-		 WHERE NOT EXISTS (
+		 WHERE is_enabled
+		 AND NOT EXISTS (
 			SELECT 1 FROM parser_snapshots ps
 			WHERE ps.data_source_id=data_sources.id AND ps.status='quarantined'
 		 )
@@ -150,7 +151,7 @@ func (r *DataSourceRepository) ListActiveDataSources(ctx context.Context) ([]*do
 func (r *DataSourceRepository) ListDataSourcesByUniversityID(ctx context.Context, universityID string) ([]*domain.DataSource, error) {
 	var sources []*domain.DataSource
 	err := r.db.SelectContext(ctx, &sources,
-		`SELECT id, university_id, adapter_type, config, update_interval,
+		`SELECT id, university_id, adapter_type, config, is_enabled, update_interval,
 		        COALESCE(last_run_at, '1970-01-01'::timestamp) AS last_run_at,
 		        last_success_at,
 		        COALESCE(last_error, '') AS last_error,

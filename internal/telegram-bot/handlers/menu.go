@@ -21,8 +21,7 @@ func (h *Handler) HandleChangeUniversity(c tele.Context) error {
 		slog.Error("load universities failed", "err", err)
 		return c.Send("Не удалось загрузить список вузов. Попробуйте ещё раз позже.")
 	}
-	remove := &tele.ReplyMarkup{RemoveKeyboard: true}
-	_ = c.Send("Выберите новый вуз. Текущие подписки сохранятся.", remove)
+	_ = c.Send("Выберите новый вуз. Текущие подписки сохранятся.")
 	return c.Send("Доступные вузы:", keyboards.UniversitySelector(universities))
 }
 

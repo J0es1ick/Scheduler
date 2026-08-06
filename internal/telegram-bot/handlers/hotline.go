@@ -19,20 +19,21 @@ func (h *Handler) HandleHotline(c tele.Context) error {
 	defer cancel()
 	if _, err := h.UserService.RegisterOrGetUser(ctx, fmt.Sprint(c.Sender().ID), c.Sender().Username); err != nil {
 		slog.Error("hotline register user failed", "user_id", c.Sender().ID, "err", err)
-		return c.Send("Не удалось открыть горячую линию. Попробуйте позже.")
+		return c.Send("Не удалось открыть форму обращения. Попробуйте позже.")
 	}
-	return c.Send(
-		"Горячая линия расписаний\n\nЗдесь можно сообщить об изменениях на уже подключённом сайте или предложить новое учебное заведение. Выберите тип обращения:",
-		keyboards.HotlineTypeSelector(),
-	)
+	text := "Сообщить о расписании\n\nЗдесь можно сообщить об изменениях на уже подключённом сайте или предложить новое учебное заведение. Выберите тип обращения:"
+	if c.Callback() != nil {
+		return editOrSend(c, text, keyboards.HotlineTypeSelector())
+	}
+	return c.Send(text, keyboards.HotlineTypeSelector())
 }
 
 func (h *Handler) HandleHotlineType(c tele.Context) error {
-	defer c.Respond()
-	args := c.Args()
+	args := callbackArguments(c)
 	if len(args) == 0 || (args[0] != domain.SupportRequestUpdateExisting && args[0] != domain.SupportRequestNewInstitution) {
-		return c.Send("Не удалось определить тип обращения.")
+		return respondStaleCallback(c)
 	}
+	_ = c.Respond()
 	ctx, cancel := reqCtx()
 	defer cancel()
 	state, _, err := h.restoreProfile(ctx, c.Sender().ID)
@@ -46,6 +47,7 @@ func (h *Handler) HandleHotlineType(c tele.Context) error {
 	state.HotlineType = args[0]
 	h.StateManager.Set(c.Sender().ID, state)
 	_ = c.Edit("Тип обращения выбран.")
+	_ = c.Send("Теперь отправьте заполненный шаблон одним сообщением.", &tele.ReplyMarkup{RemoveKeyboard: true})
 	return c.Send(hotlineTemplate(args[0]), hotlineCancelButton())
 }
 
@@ -53,21 +55,18 @@ func (h *Handler) HandleCancelHotline(c tele.Context) error {
 	defer c.Respond()
 	ctx, cancel := reqCtx()
 	defer cancel()
-	state, _, err := h.restoreProfile(ctx, c.Sender().ID)
+	_, _, err := h.restoreProfile(ctx, c.Sender().ID)
 	if err != nil {
 		return c.Send("Не удалось восстановить профиль.")
 	}
 	_ = c.Edit("Обращение отменено.")
-	if state != nil {
-		return c.Send("Главное меню:", keyboards.MainMenu())
-	}
-	return nil
+	return c.Send("Главное меню:", keyboards.MainMenu())
 }
 
 func (h *Handler) HandleHotlineSubmission(c tele.Context, input string) error {
 	state := h.StateManager.Get(c.Sender().ID)
 	if state == nil || state.Step != "awaiting_hotline_submission" {
-		return c.Send("Сначала откройте горячую линию: /hotline")
+		return c.Send("Сначала откройте форму «Сообщить о расписании»: /hotline")
 	}
 	details := strings.TrimSpace(input)
 	length := utf8.RuneCountInString(details)
@@ -119,6 +118,6 @@ func hotlineTemplate(requestType string) string {
 
 func hotlineCancelButton() *tele.ReplyMarkup {
 	menu := &tele.ReplyMarkup{}
-	menu.Inline(menu.Row(menu.Data("Отменить обращение", "cancel_hotline")))
+	menu.Inline(menu.Row(menu.Data("Отмена", "cancel_hotline")))
 	return menu
 }

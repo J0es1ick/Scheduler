@@ -28,10 +28,23 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            web/admin/package-lock.json
+            web/site/package-lock.json
+      - name: Build embedded web assets
+        run: |
+          npm ci --prefix web/admin
+          npm run build --prefix web/admin
+          npm ci --prefix web/site
+          npm run build --prefix web/site
       - name: Check Go formatting
-        run: test -z "$(gofmt -l .)"
-      - run: go test -race ./...
-      - run: go vet ./...
+        run: test -z "$(gofmt -l $(git ls-files '*.go'))"
+      - run: go test -race ./cmd/... ./internal/... ./migration/...
+      - run: go vet ./cmd/... ./internal/... ./migration/...
 
   web:
     name: Web ${{ matrix.app }}
@@ -83,6 +96,10 @@ jobs:
       ADMIN_COOKIE_SECURE: "false"
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
       - run: cp .env.example .env
       - run: docker compose config --quiet
       - run: docker compose up -d --build postgres admin site
@@ -102,6 +119,10 @@ jobs:
           expected=$(find migration -name '*.up.sql' | wc -l | tr -d ' ')
           actual=$(docker compose exec -T postgres psql -U postgres -d scheduler -tAc 'SELECT COUNT(*) FROM schema_migrations')
           test "$actual" = "$expected"
+      - name: Run PostgreSQL repository integration test
+        env:
+          TEST_DATABASE_URL: postgres://postgres:ci-database-password@127.0.0.1:55432/scheduler?sslmode=disable
+        run: go test -tags=integration ./internal/repository -run TestPostgresRepositoryFlow -count=1
       - name: Create and restore-verify a backup
         run: |
           docker compose up -d --build backup

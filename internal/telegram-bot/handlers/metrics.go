@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/J0es1ick/Scheduler/internal/domain"
 	tele "gopkg.in/telebot.v3"
 )
 
@@ -29,6 +30,10 @@ func (h *Handler) HandleMetrics(c tele.Context) error {
 		return c.Send("Не удалось загрузить метрики сервиса. Попробуйте позже.")
 	}
 
+	return c.Send(formatServiceMetrics(metrics))
+}
+
+func formatServiceMetrics(metrics *domain.ServiceMetrics) string {
 	sourceState := "все источники работают штатно"
 	if metrics.SourcesStale+metrics.SourcesError+metrics.SourcesQuarantined > 0 {
 		sourceState = "нужна проверка"
@@ -36,6 +41,25 @@ func (h *Handler) HandleMetrics(c tele.Context) error {
 	lastParse := "успешных запусков ещё не было"
 	if metrics.LastSuccessfulParseAt != nil {
 		lastParse = metrics.LastSuccessfulParseAt.In(time.Local).Format("02.01.2006 15:04")
+	}
+	reminderState := "ещё не запускался"
+	if metrics.ReminderWorker.LastFinishedAt != nil {
+		reminderState = fmt.Sprintf(
+			"%s · получателей: %d · ошибок: %d · %.1f сек.",
+			metrics.ReminderWorker.LastFinishedAt.In(time.Local).Format("02.01.2006 15:04:05"),
+			metrics.ReminderWorker.LastProcessed,
+			metrics.ReminderWorker.LastFailures,
+			float64(metrics.ReminderWorker.LastDurationMS)/1000,
+		)
+		if metrics.ReminderWorker.Cursor != "" {
+			reminderState += " · обход будет продолжен"
+		}
+	}
+	lastReminderCycle := "полный обход ещё не завершался"
+	if metrics.ReminderWorker.LastFullCycleAt != nil {
+		lastReminderCycle = metrics.ReminderWorker.LastFullCycleAt.
+			In(time.Local).
+			Format("02.01.2006 15:04:05")
 	}
 
 	lines := []string{
@@ -48,13 +72,14 @@ func (h *Handler) HandleMetrics(c tele.Context) error {
 		fmt.Sprintf("Занятия: %d", metrics.Lessons),
 		"",
 		fmt.Sprintf(
-			"Источники: %d всего, %d в норме, %d обновляются, %d устарели, %d с ошибкой, %d в карантине — %s",
+			"Источники: %d всего, %d в норме, %d обновляются, %d устарели, %d с ошибкой, %d в карантине, %d отключено — %s",
 			metrics.SourcesTotal,
 			metrics.SourcesHealthy,
 			metrics.SourcesRunning,
 			metrics.SourcesStale,
 			metrics.SourcesError,
 			metrics.SourcesQuarantined,
+			metrics.SourcesDisabled,
 			sourceState,
 		),
 		fmt.Sprintf(
@@ -68,6 +93,11 @@ func (h *Handler) HandleMetrics(c tele.Context) error {
 			metrics.FailedOutbox,
 		),
 		"Последний успешный парсинг: " + lastParse,
+		"Worker напоминаний: " + reminderState,
+		"Последний полный обход напоминаний: " + lastReminderCycle,
 	}
-	return c.Send(strings.Join(lines, "\n"))
+	if metrics.ReminderWorker.LastError != "" {
+		lines = append(lines, "Последняя ошибка напоминаний: "+metrics.ReminderWorker.LastError)
+	}
+	return strings.Join(lines, "\n")
 }

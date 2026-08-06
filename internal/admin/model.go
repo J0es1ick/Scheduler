@@ -3,6 +3,8 @@ package admin
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/J0es1ick/Scheduler/internal/domain"
 )
 
 type AdminIdentity struct {
@@ -37,6 +39,7 @@ type SourceView struct {
 	UniversityFullName        string     `json:"university_full_name" db:"university_full_name"`
 	ScheduleURL               string     `json:"schedule_url" db:"schedule_url"`
 	AdapterType               string     `json:"adapter_type" db:"adapter_type"`
+	IsEnabled                 bool       `json:"is_enabled" db:"is_enabled"`
 	UpdateInterval            int        `json:"update_interval" db:"update_interval"`
 	LastRunAt                 *time.Time `json:"last_run_at" db:"last_run_at"`
 	LastSuccessAt             *time.Time `json:"last_success_at" db:"last_success_at"`
@@ -68,21 +71,23 @@ type SourceView struct {
 }
 
 type OperationalHealth struct {
-	Status                string     `json:"status"`
-	Database              bool       `json:"database"`
-	SourcesTotal          int        `json:"sources_total"`
-	SourcesHealthy        int        `json:"sources_healthy"`
-	SourcesRunning        int        `json:"sources_running"`
-	SourcesStale          int        `json:"sources_stale"`
-	SourcesError          int        `json:"sources_error"`
-	SourcesQuarantined    int        `json:"sources_quarantined"`
-	PendingNotifications  int        `json:"pending_notifications" db:"pending_notifications"`
-	FailedNotifications   int        `json:"failed_notifications" db:"failed_notifications"`
-	PendingOutbox         int        `json:"pending_outbox" db:"pending_outbox"`
-	FailedOutbox          int        `json:"failed_outbox" db:"failed_outbox"`
-	OldestPendingSeconds  int64      `json:"oldest_pending_seconds" db:"oldest_pending_seconds"`
-	LastSuccessfulParseAt *time.Time `json:"last_successful_parse_at" db:"last_successful_parse_at"`
-	CheckedAt             time.Time  `json:"checked_at"`
+	Status                string              `json:"status"`
+	Database              bool                `json:"database"`
+	SourcesTotal          int                 `json:"sources_total"`
+	SourcesHealthy        int                 `json:"sources_healthy"`
+	SourcesRunning        int                 `json:"sources_running"`
+	SourcesStale          int                 `json:"sources_stale"`
+	SourcesError          int                 `json:"sources_error"`
+	SourcesQuarantined    int                 `json:"sources_quarantined"`
+	SourcesDisabled       int                 `json:"sources_disabled"`
+	PendingNotifications  int                 `json:"pending_notifications" db:"pending_notifications"`
+	FailedNotifications   int                 `json:"failed_notifications" db:"failed_notifications"`
+	PendingOutbox         int                 `json:"pending_outbox" db:"pending_outbox"`
+	FailedOutbox          int                 `json:"failed_outbox" db:"failed_outbox"`
+	OldestPendingSeconds  int64               `json:"oldest_pending_seconds" db:"oldest_pending_seconds"`
+	LastSuccessfulParseAt *time.Time          `json:"last_successful_parse_at" db:"last_successful_parse_at"`
+	ReminderWorker        domain.WorkerStatus `json:"reminder_worker"`
+	CheckedAt             time.Time           `json:"checked_at"`
 }
 
 type ParseLogView struct {

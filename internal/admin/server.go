@@ -89,6 +89,7 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService, o
 	server.protected(mux, "GET /api/dashboard", server.handleDashboard)
 	server.protected(mux, "GET /api/sources", server.handleSources)
 	server.protected(mux, "PATCH /api/sources/{id}", server.handleUpdateSource)
+	server.protected(mux, "DELETE /api/sources/{id}", server.handleDeleteSource)
 	server.protected(mux, "POST /api/sources/{id}/sync", server.handleSyncSource)
 	server.protected(mux, "POST /api/sources/{id}/rollback", server.handleRollbackSource)
 	server.protected(mux, "GET /api/parser-snapshots", server.handleParserSnapshots)
@@ -204,6 +205,10 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if operations.Status != "healthy" {
 		status = 0
 	}
+	reminderCursorPending := 0
+	if operations.ReminderWorker.Cursor != "" {
+		reminderCursorPending = 1
+	}
 	_, _ = fmt.Fprintf(w, `# HELP scheduler_health Overall scheduler health (1 healthy, 0 degraded).
 # TYPE scheduler_health gauge
 scheduler_health %d
@@ -213,6 +218,7 @@ scheduler_sources{state="running"} %d
 scheduler_sources{state="stale"} %d
 scheduler_sources{state="error"} %d
 scheduler_sources{state="quarantined"} %d
+scheduler_sources{state="disabled"} %d
 # TYPE scheduler_notification_queue gauge
 scheduler_notification_queue{queue="schedule",status="pending"} %d
 scheduler_notification_queue{queue="schedule",status="failed"} %d
@@ -220,6 +226,18 @@ scheduler_notification_queue{queue="outbox",status="pending"} %d
 scheduler_notification_queue{queue="outbox",status="failed"} %d
 # TYPE scheduler_oldest_pending_seconds gauge
 scheduler_oldest_pending_seconds %d
+# TYPE scheduler_reminder_worker_last_run_timestamp_seconds gauge
+scheduler_reminder_worker_last_run_timestamp_seconds %d
+# TYPE scheduler_reminder_worker_last_full_cycle_timestamp_seconds gauge
+scheduler_reminder_worker_last_full_cycle_timestamp_seconds %d
+# TYPE scheduler_reminder_worker_last_duration_seconds gauge
+scheduler_reminder_worker_last_duration_seconds %.3f
+# TYPE scheduler_reminder_worker_last_processed gauge
+scheduler_reminder_worker_last_processed %d
+# TYPE scheduler_reminder_worker_last_failures gauge
+scheduler_reminder_worker_last_failures %d
+# TYPE scheduler_reminder_worker_cursor_pending gauge
+scheduler_reminder_worker_cursor_pending %d
 `,
 		status,
 		operations.SourcesHealthy,
@@ -227,12 +245,26 @@ scheduler_oldest_pending_seconds %d
 		operations.SourcesStale,
 		operations.SourcesError,
 		operations.SourcesQuarantined,
+		operations.SourcesDisabled,
 		operations.PendingNotifications,
 		operations.FailedNotifications,
 		operations.PendingOutbox,
 		operations.FailedOutbox,
 		operations.OldestPendingSeconds,
+		unixTimestamp(operations.ReminderWorker.LastFinishedAt),
+		unixTimestamp(operations.ReminderWorker.LastFullCycleAt),
+		float64(operations.ReminderWorker.LastDurationMS)/1000,
+		operations.ReminderWorker.LastProcessed,
+		operations.ReminderWorker.LastFailures,
+		reminderCursorPending,
 	)
+}
+
+func unixTimestamp(value *time.Time) int64 {
+	if value == nil {
+		return 0
+	}
+	return value.Unix()
 }
 
 func bearerToken(r *http.Request) string {
@@ -541,13 +573,24 @@ func (s *Server) handleRollbackSource(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
 	sourceID := r.PathValue("id")
 	var request struct {
-		UpdateInterval int `json:"update_interval"`
+		UpdateInterval *int  `json:"update_interval"`
+		IsEnabled      *bool `json:"is_enabled"`
 	}
-	if err := decodeJSON(w, r, &request); err != nil || request.UpdateInterval < 300 || request.UpdateInterval > 604800 {
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "Некорректный запрос")
+		return
+	}
+	if request.UpdateInterval == nil && request.IsEnabled == nil {
+		writeAPIError(w, http.StatusBadRequest, "Не указаны настройки источника")
+		return
+	}
+	if request.UpdateInterval != nil && (*request.UpdateInterval < 300 || *request.UpdateInterval > 604800) {
 		writeAPIError(w, http.StatusBadRequest, "Интервал должен быть от 5 минут до 7 дней")
 		return
 	}
-	if err := s.store.UpdateSourceInterval(r.Context(), sourceID, request.UpdateInterval); err != nil {
+	if err := s.store.UpdateSourceSettings(
+		r.Context(), sourceID, request.UpdateInterval, request.IsEnabled,
+	); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			writeAPIError(w, http.StatusNotFound, "Источник не найден")
 			return
@@ -556,15 +599,64 @@ func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity := identityFromContext(r.Context())
-	s.writeAudit(r.Context(), identity, "update_interval", "data_source", sourceID,
-		map[string]any{"update_interval": request.UpdateInterval}, s.requestIP(r))
+	details := map[string]any{}
+	action := "update_interval"
+	if request.UpdateInterval != nil {
+		details["update_interval"] = *request.UpdateInterval
+	}
+	if request.IsEnabled != nil {
+		details["is_enabled"] = *request.IsEnabled
+		if *request.IsEnabled {
+			action = "enable_source"
+		} else {
+			action = "disable_source"
+		}
+	}
+	s.writeAudit(r.Context(), identity, action, "data_source", sourceID, details, s.requestIP(r))
 	writeJSON(w, http.StatusOK, map[string]any{"status": "updated"})
+}
+
+func (s *Server) handleDeleteSource(w http.ResponseWriter, r *http.Request) {
+	sourceID := strings.TrimSpace(r.PathValue("id"))
+	if sourceID == "" {
+		writeAPIError(w, http.StatusBadRequest, "Источник не указан")
+		return
+	}
+	if err := s.store.DeleteSource(r.Context(), sourceID); err != nil {
+		switch {
+		case errors.Is(err, ErrNotFound):
+			writeAPIError(w, http.StatusNotFound, "Источник не найден")
+		case errors.Is(err, ErrSourceBusy):
+			writeAPIError(w, http.StatusConflict, "Источник сейчас обновляется")
+		default:
+			slog.Error("admin delete source failed", "source", sourceID, "err", err)
+			writeAPIError(w, http.StatusInternalServerError, "Не удалось удалить источник")
+		}
+		return
+	}
+	identity := identityFromContext(r.Context())
+	s.writeAudit(r.Context(), identity, "delete_source", "data_source", sourceID,
+		map[string]any{"published_schedule_preserved": true}, s.requestIP(r))
+	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
 }
 
 func (s *Server) handleSyncSource(w http.ResponseWriter, r *http.Request) {
 	sourceID := r.PathValue("id")
 	if sourceID == "" {
 		writeAPIError(w, http.StatusBadRequest, "Источник не указан")
+		return
+	}
+	enabled, err := s.store.SourceEnabled(r.Context(), sourceID)
+	if errors.Is(err, ErrNotFound) {
+		writeAPIError(w, http.StatusNotFound, "Источник не найден")
+		return
+	}
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "Не удалось проверить источник")
+		return
+	}
+	if !enabled {
+		writeAPIError(w, http.StatusConflict, "Источник отключён")
 		return
 	}
 	if !s.beginSync(sourceID) {

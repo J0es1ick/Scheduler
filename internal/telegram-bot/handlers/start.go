@@ -48,7 +48,7 @@ func (h *Handler) HandleStart(c tele.Context) error {
 	}
 	if state != nil {
 		return c.Send(fmt.Sprintf(
-			"%s\n\nОсновная группа: %s · %s\nУправление подписками: /settings",
+			"%s\n\nОсновная группа: %s · %s\nУправление подписками: кнопка «Мои группы»",
 			greeting,
 			state.University,
 			state.Query,

@@ -19,13 +19,31 @@ import (
 const (
 	reminderLookaheadDays = 1
 	reminderBatchSize     = 250
+	reminderRunTimeout    = 45 * time.Second
+	workerStatusTimeout   = 3 * time.Second
 )
 
+type reminderRecipientRepository interface {
+	ActiveRecipientsPage(context.Context, string, int) ([]domain.ReminderRecipient, error)
+	Enqueue(context.Context, string, string, string, string) error
+}
+
+type reminderScheduleProvider interface {
+	GetScheduleForGroup(context.Context, string, time.Time) ([]domain.Lesson, error)
+}
+
+type workerStatusRepository interface {
+	Get(context.Context, string) (*domain.WorkerStatus, error)
+	RecordRun(context.Context, domain.WorkerRunResult) error
+}
+
 type ReminderWorker struct {
-	repository      *repository.ReminderRepository
-	scheduleService *service.ScheduleService
-	interval        time.Duration
-	now             func() time.Time
+	repository       reminderRecipientRepository
+	statusRepository workerStatusRepository
+	scheduleService  reminderScheduleProvider
+	interval         time.Duration
+	runTimeout       time.Duration
+	now              func() time.Time
 }
 
 type reminderSlot struct {
@@ -38,14 +56,17 @@ type reminderScheduleCache map[string]map[string][]domain.Lesson
 
 func NewReminderWorker(
 	repository *repository.ReminderRepository,
+	statusRepository *repository.WorkerStatusRepository,
 	scheduleService *service.ScheduleService,
 	interval time.Duration,
 ) *ReminderWorker {
 	return &ReminderWorker{
-		repository:      repository,
-		scheduleService: scheduleService,
-		interval:        interval,
-		now:             time.Now,
+		repository:       repository,
+		statusRepository: statusRepository,
+		scheduleService:  scheduleService,
+		interval:         interval,
+		runTimeout:       reminderRunTimeout,
+		now:              time.Now,
 	}
 }
 
@@ -70,36 +91,106 @@ func (w *ReminderWorker) run(ctx context.Context) {
 }
 
 func (w *ReminderWorker) tick(parent context.Context) {
-	ctx, cancel := context.WithTimeout(parent, 45*time.Second)
+	startedAt := w.now()
+	ctx, cancel := context.WithTimeout(parent, w.runTimeout)
 	defer cancel()
 
-	now := w.now().In(time.Local)
+	status, err := w.statusRepository.Get(ctx, domain.LessonReminderWorker)
+	if err != nil {
+		slog.Error("lesson reminder worker: load cursor failed", "err", err)
+		return
+	}
+
+	now := startedAt.In(time.Local)
 	schedules := make(reminderScheduleCache)
-	afterUserID := ""
+	afterUserID := status.Cursor
+	processed := 0
+	failures := 0
+	fullCycle := false
+	var runErr error
+
+scan:
 	for {
-		recipients, err := w.repository.ActiveRecipientsPage(
+		recipients, pageErr := w.repository.ActiveRecipientsPage(
 			ctx,
 			afterUserID,
 			reminderBatchSize,
 		)
-		if err != nil {
-			slog.Error("lesson reminder worker: load recipients failed", "err", err)
-			return
+		if pageErr != nil {
+			runErr = fmt.Errorf("load recipients after %q: %w", afterUserID, pageErr)
+			break
 		}
 		if len(recipients) == 0 {
-			return
+			afterUserID = ""
+			fullCycle = true
+			break
 		}
 		for _, recipient := range recipients {
 			if ctx.Err() != nil {
-				return
+				runErr = ctx.Err()
+				break scan
 			}
-			w.enqueueRecipientReminders(ctx, recipient, now, schedules)
+			recipientErr := w.enqueueRecipientReminders(ctx, recipient, now, schedules)
+			if ctx.Err() != nil {
+				runErr = ctx.Err()
+				break scan
+			}
+			processed++
+			afterUserID = recipient.UserID
+			if recipientErr != nil {
+				failures++
+				if runErr == nil {
+					runErr = recipientErr
+				}
+			}
 		}
-		afterUserID = recipients[len(recipients)-1].UserID
 		if len(recipients) < reminderBatchSize {
-			return
+			afterUserID = ""
+			fullCycle = true
+			break
 		}
 	}
+
+	if runErr != nil && failures == 0 {
+		failures = 1
+	}
+	finishedAt := w.now()
+	w.recordRun(parent, domain.WorkerRunResult{
+		Name:            domain.LessonReminderWorker,
+		Cursor:          afterUserID,
+		StartedAt:       startedAt,
+		FinishedAt:      finishedAt,
+		LastFullCycleAt: fullCycleTimestamp(fullCycle, finishedAt),
+		Processed:       processed,
+		Failures:        failures,
+		LastError:       compactWorkerError(runErr),
+	})
+}
+
+func (w *ReminderWorker) recordRun(parent context.Context, result domain.WorkerRunResult) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), workerStatusTimeout)
+	defer cancel()
+	if err := w.statusRepository.RecordRun(ctx, result); err != nil {
+		slog.Error("lesson reminder worker: record run failed", "err", err)
+	}
+}
+
+func fullCycleTimestamp(completed bool, finishedAt time.Time) *time.Time {
+	if !completed {
+		return nil
+	}
+	return &finishedAt
+}
+
+func compactWorkerError(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := strings.Join(strings.Fields(err.Error()), " ")
+	if len(message) > 500 {
+		message = message[:500]
+	}
+	return message
 }
 
 func (w *ReminderWorker) enqueueRecipientReminders(
@@ -107,7 +198,8 @@ func (w *ReminderWorker) enqueueRecipientReminders(
 	recipient domain.ReminderRecipient,
 	now time.Time,
 	schedules reminderScheduleCache,
-) {
+) error {
+	var firstErr error
 	for offset := 0; offset <= reminderLookaheadDays; offset++ {
 		date := dateOnly(now).AddDate(0, 0, offset)
 		dateKey := date.Format("2006-01-02")
@@ -128,6 +220,9 @@ func (w *ReminderWorker) enqueueRecipientReminders(
 					"date", dateKey,
 					"err", err,
 				)
+				if firstErr == nil {
+					firstErr = err
+				}
 				groupSchedules[dateKey] = []domain.Lesson{}
 				continue
 			}
@@ -135,9 +230,12 @@ func (w *ReminderWorker) enqueueRecipientReminders(
 		}
 
 		for _, slot := range reminderSlots(lessons) {
-			w.enqueueReminderSlot(ctx, recipient, date, now, slot)
+			if err := w.enqueueReminderSlot(ctx, recipient, date, now, slot); err != nil && firstErr == nil {
+				firstErr = err
+			}
 		}
 	}
+	return firstErr
 }
 
 func (w *ReminderWorker) enqueueReminderSlot(
@@ -146,7 +244,7 @@ func (w *ReminderWorker) enqueueReminderSlot(
 	date time.Time,
 	now time.Time,
 	slot reminderSlot,
-) {
+) error {
 	startsAt, err := lessonStart(date, slot.TimeStart)
 	if err != nil {
 		slog.Warn(
@@ -155,11 +253,11 @@ func (w *ReminderWorker) enqueueReminderSlot(
 			"time_start", slot.TimeStart,
 			"err", err,
 		)
-		return
+		return err
 	}
 	until := startsAt.Sub(now)
 	if until <= 0 || until > time.Duration(recipient.ReminderMinutes)*time.Minute {
-		return
+		return nil
 	}
 
 	id := reminderID(
@@ -183,7 +281,9 @@ func (w *ReminderWorker) enqueueReminderSlot(
 			"group_id", recipient.GroupID,
 			"err", err,
 		)
+		return err
 	}
+	return nil
 }
 
 func dateOnly(value time.Time) time.Time {

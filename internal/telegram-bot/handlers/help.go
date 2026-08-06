@@ -33,6 +33,7 @@ func (h *Handler) HandleHelp(c tgbotapi.Context) error {
 func helpText(isAdmin bool) string {
 	text := "Личное расписание:\n\n" +
 		"/start — запустить бота\n" +
+		"/menu — открыть компактное меню\n" +
 		"/today — расписание на сегодня\n" +
 		"/tomorrow — расписание на завтра\n" +
 		"/date — выбрать произвольную дату\n" +

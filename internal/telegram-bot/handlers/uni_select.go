@@ -8,7 +8,7 @@ import (
 )
 
 func (h *Handler) HandleUniversitySelect(c tgbotapi.Context) error {
-	args := c.Args()
+	args := callbackArguments(c)
 	if len(args) == 0 {
 		return c.Respond(&tgbotapi.CallbackResponse{Text: "Некорректный запрос"})
 	}

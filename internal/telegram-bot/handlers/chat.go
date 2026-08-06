@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	tele "gopkg.in/telebot.v3"
 )
 
@@ -48,20 +49,84 @@ func (h *Handler) HandleChatSettings(c tele.Context) error {
 		slog.Error("load chat schedule profile failed", "chat_id", c.Chat().ID, "err", err)
 		return c.Send("Не удалось загрузить настройки этого чата.")
 	}
-	if profile == nil {
-		return c.Send(
-			"Группа расписания для этого чата ещё не выбрана.\n\n" +
-				"Администратор чата может настроить её командой:\n" +
-				"/set_chat_group isuct 3/147\n" +
-				"или /set_chat_group ispu 1-40",
-		)
+	isAdmin, adminErr := chatAdministrator(c)
+	if adminErr != nil {
+		slog.Debug("check chat administrator for settings panel failed", "chat_id", c.Chat().ID, "err", adminErr)
 	}
-	return c.Send(fmt.Sprintf(
+	if profile == nil {
+		text := "Группа расписания для этого чата ещё не выбрана.\n\n" +
+			"Администратор чата может настроить её командой:\n" +
+			"/set_chat_group isuct 3/147\n" +
+			"или /set_chat_group ispu 1-40"
+		if c.Callback() != nil {
+			return editOrSend(c, text, keyboards.EmptyChatSettings(isAdmin))
+		}
+		return c.Send(text, keyboards.EmptyChatSettings(isAdmin))
+	}
+	text := fmt.Sprintf(
 		"Расписание группового чата\n\nВуз: %s\nГруппа: %s\n\n"+
 			"Доступны /today, /tomorrow, /week, /twoweeks и /date.",
 		profile.UniversityName,
 		profile.GroupName,
-	))
+	)
+	if c.Callback() != nil {
+		return editOrSend(c, text, keyboards.ChatSettings(profile.GroupName, isAdmin))
+	}
+	return c.Send(text, keyboards.ChatSettings(profile.GroupName, isAdmin))
+}
+
+func (h *Handler) HandleChatChangeGroup(c tele.Context) error {
+	if !isGroupChat(c) {
+		return respondStaleCallback(c)
+	}
+	isAdmin, err := chatAdministrator(c)
+	if err != nil || !isAdmin {
+		return c.Respond(&tele.CallbackResponse{Text: "Изменять группу может только администратор чата", ShowAlert: true})
+	}
+	_ = c.Respond()
+	return c.Send(
+		"Отправьте команду с вузом и группой:\n" +
+			"/set_chat_group isuct 3/147\n" +
+			"или /set_chat_group ispu 1-40",
+	)
+}
+
+func (h *Handler) HandleRequestUnsetChatGroup(c tele.Context) error {
+	if !isGroupChat(c) {
+		return respondStaleCallback(c)
+	}
+	isAdmin, err := chatAdministrator(c)
+	if err != nil || !isAdmin {
+		return c.Respond(&tele.CallbackResponse{Text: "Удалить привязку может только администратор чата", ShowAlert: true})
+	}
+	_ = c.Respond()
+	return editOrSend(
+		c,
+		"Удалить привязку расписания к этому чату?",
+		keyboards.UnsetChatConfirmation(),
+	)
+}
+
+func (h *Handler) HandleConfirmUnsetChatGroup(c tele.Context) error {
+	if !isGroupChat(c) {
+		return respondStaleCallback(c)
+	}
+	isAdmin, err := chatAdministrator(c)
+	if err != nil || !isAdmin {
+		return c.Respond(&tele.CallbackResponse{Text: "Недостаточно прав", ShowAlert: true})
+	}
+	_ = c.Respond()
+	ctx, cancel := reqCtx()
+	defer cancel()
+	err = h.ChatProfileService.Delete(ctx, strconv.FormatInt(c.Chat().ID, 10))
+	if errors.Is(err, sql.ErrNoRows) {
+		return editOrSend(c, "Привязка уже удалена.", keyboards.EmptyChatSettings(true))
+	}
+	if err != nil {
+		slog.Error("delete chat schedule profile failed", "chat_id", c.Chat().ID, "err", err)
+		return c.Send("Не удалось удалить настройку чата.")
+	}
+	return editOrSend(c, "Привязка расписания удалена.", keyboards.EmptyChatSettings(true))
 }
 
 func (h *Handler) HandleSetChatGroup(c tele.Context) error {

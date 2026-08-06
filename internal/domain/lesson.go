@@ -27,7 +27,7 @@ type Lesson struct {
 	UniversityID string     `db:"university_id"`
 	SemesterID   string     `db:"semester_id"`  // к какому семестру относится
 	DayOfWeek    int        `db:"day_of_week"`  // 1=пн, 2=вт, ..., 6=сб
-	SpecialDate  *time.Time `db:"special_date"` // для одноразового расписания (week_type = date) Это поле может быть NULL, если урок повторяющийся, возможно будет мозгоёбкой в будущем
+	SpecialDate  *time.Time `db:"special_date"` // задана только для одноразового расписания с week_type=date
 	TimeStart    string     `db:"time_start"`   // "09:00" — только время
 	TimeEnd      string     `db:"time_end"`     // "10:30"
 	WeekType     WeekType   `db:"week_type"`    // every / odd / even

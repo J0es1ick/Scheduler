@@ -50,9 +50,10 @@ type ParserSnapshot struct {
 }
 
 type SnapshotBaseline struct {
-	GroupCount       int            `db:"group_count"`
-	LessonCount      int            `db:"lesson_count"`
-	LessonsByGroup   map[string]int `db:"-"`
-	CurrentSnapshot  string         `db:"current_snapshot"`
-	HasExistingState bool           `db:"-"`
+	GroupCount       int               `db:"group_count"`
+	LessonCount      int               `db:"lesson_count"`
+	LessonsByGroup   map[string]int    `db:"-"`
+	CurrentSnapshot  string            `db:"current_snapshot"`
+	TrustedSnapshot  *ScheduleSnapshot `db:"-"`
+	HasExistingState bool              `db:"-"`
 }
