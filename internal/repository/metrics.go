@@ -14,6 +14,7 @@ type MetricsRepository struct {
 }
 
 type sourceMetricsRow struct {
+	IsEnabled        bool       `db:"is_enabled"`
 	UpdateInterval   int        `db:"update_interval"`
 	LastSuccessAt    *time.Time `db:"last_success_at"`
 	LastError        string     `db:"last_error"`
@@ -52,6 +53,7 @@ func (r *MetricsRepository) Get(ctx context.Context) (*domain.ServiceMetrics, er
 	var sources []sourceMetricsRow
 	if err := r.db.SelectContext(ctx, &sources, `
 		SELECT
+			ds.is_enabled,
 			ds.update_interval,
 			ds.last_success_at,
 			COALESCE(ds.last_error, '') AS last_error,
@@ -75,6 +77,8 @@ func (r *MetricsRepository) Get(ctx context.Context) (*domain.ServiceMetrics, er
 	result.SourcesTotal = len(sources)
 	for _, source := range sources {
 		switch {
+		case !source.IsEnabled:
+			result.SourcesDisabled++
 		case source.LatestStatus == "running" &&
 			source.LatestStartedAt != nil &&
 			result.CheckedAt.Sub(*source.LatestStartedAt) < 2*time.Hour:
@@ -91,5 +95,10 @@ func (r *MetricsRepository) Get(ctx context.Context) (*domain.ServiceMetrics, er
 			result.SourcesHealthy++
 		}
 	}
+	workerStatus, err := NewWorkerStatusRepository(r.db).Get(ctx, domain.LessonReminderWorker)
+	if err != nil {
+		return nil, fmt.Errorf("load reminder worker metrics: %w", err)
+	}
+	result.ReminderWorker = *workerStatus
 	return result, nil
 }

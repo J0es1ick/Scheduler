@@ -69,8 +69,23 @@ func lessonTypeLabel(lessonType domain.LessonType) string {
 // sendDays форматирует расписание и отправляет его, разбивая на части
 // если текст превышает лимит Telegram.
 func (h *Handler) sendDays(c tgbotapi.Context, days []dto.DaySchedule, universityID string) error {
+	return h.sendDaysWithMarkup(c, days, universityID, nil)
+}
+
+func (h *Handler) sendDaysWithMarkup(
+	c tgbotapi.Context,
+	days []dto.DaySchedule,
+	universityID string,
+	markup *tgbotapi.ReplyMarkup,
+) error {
 	if len(days) == 0 {
-		return c.Send("Занятий нет.")
+		if c.Callback() != nil && markup != nil {
+			return editOrSend(c, "Занятий нет.", markup)
+		}
+		if markup != nil {
+			return sendScheduleMessage(c, "Занятий нет.", markup)
+		}
+		return c.Send("Занятий нет.", markup)
 	}
 
 	var full strings.Builder
@@ -80,8 +95,18 @@ func (h *Handler) sendDays(c tgbotapi.Context, days []dto.DaySchedule, universit
 	}
 	full.WriteString(h.sourceFreshnessText(universityID))
 
-	for _, part := range service.SplitMessage(full.String(), tgMaxLen) {
-		if err := c.Send(part); err != nil {
+	parts := service.SplitMessage(full.String(), tgMaxLen)
+	if len(parts) == 1 && c.Callback() != nil && markup != nil {
+		return editOrSend(c, parts[0], markup)
+	}
+	for index, part := range parts {
+		var err error
+		if index == len(parts)-1 && markup != nil {
+			err = sendScheduleMessage(c, part, markup)
+		} else {
+			err = c.Send(part)
+		}
+		if err != nil {
 			return err
 		}
 	}
@@ -102,8 +127,52 @@ func (h *Handler) sourceFreshnessText(universityID string) string {
 	return result + "\nОбновлено: " + freshness.LastSuccess.In(time.Local).Format("02.01.2006 15:04 MST")
 }
 
-func (h *Handler) sendSingleDay(c tgbotapi.Context, day dto.DaySchedule, universityID string) error {
-	return c.Send(formatDaySchedule(day) + h.sourceFreshnessText(universityID))
+func (h *Handler) sendSingleDayForTarget(
+	c tgbotapi.Context,
+	day dto.DaySchedule,
+	target *scheduleTarget,
+) error {
+	text := formatDaySchedule(day) + h.sourceFreshnessText(target.UniversityID)
+	markup := keyboards.ScheduleDayNavigation(day.Date, target.GroupName, isGroupChat(c))
+	if c.Callback() != nil {
+		return editOrSend(c, text, markup)
+	}
+	return sendScheduleMessage(c, text, markup)
+}
+
+func sendScheduleMessage(
+	c tgbotapi.Context,
+	text string,
+	markup *tgbotapi.ReplyMarkup,
+) error {
+	if isGroupChat(c) {
+		return c.Send(text, markup)
+	}
+
+	// Telegram does not allow ReplyKeyboardRemove and InlineKeyboardMarkup in
+	// the same reply_markup. It also rejects adding an inline keyboard to a
+	// message that was sent with ReplyKeyboardRemove. Use a short disposable
+	// message to hide the persistent keyboard, then send the schedule once with
+	// its final inline navigation. This also prevents Telebot from processing
+	// the same callback data twice after a failed edit.
+	keyboardNotice, err := c.Bot().Send(
+		c.Recipient(),
+		"Открываю расписание…",
+		&tgbotapi.ReplyMarkup{RemoveKeyboard: true},
+	)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := c.Bot().Delete(keyboardNotice); err != nil {
+			slog.Debug("delete keyboard notice failed", "err", err)
+		}
+	}()
+
+	if _, err = c.Bot().Send(c.Recipient(), text, markup); err != nil {
+		return err
+	}
+	return nil
 }
 
 // getScheduleForTarget загружает расписание группы за диапазон дат.
@@ -142,9 +211,9 @@ func (h *Handler) HandleToday(c tgbotapi.Context) error {
 	now := time.Now()
 	days := h.getScheduleForTarget(ctx, target, now, now)
 	if len(days) == 0 {
-		return c.Send("На сегодня занятий нет.")
+		return h.sendEmptyTargetDate(c, target, now)
 	}
-	return h.sendSingleDay(c, days[0], target.UniversityID)
+	return h.sendSingleDayForTarget(c, days[0], target)
 }
 
 func (h *Handler) HandleTomorrow(c tgbotapi.Context) error {
@@ -158,9 +227,9 @@ func (h *Handler) HandleTomorrow(c tgbotapi.Context) error {
 	tomorrow := time.Now().AddDate(0, 0, 1)
 	days := h.getScheduleForTarget(ctx, target, tomorrow, tomorrow)
 	if len(days) == 0 {
-		return c.Send("На завтра занятий нет.")
+		return h.sendEmptyTargetDate(c, target, tomorrow)
 	}
-	return h.sendSingleDay(c, days[0], target.UniversityID)
+	return h.sendSingleDayForTarget(c, days[0], target)
 }
 
 func (h *Handler) HandleWeek(c tgbotapi.Context) error {
@@ -171,12 +240,7 @@ func (h *Handler) HandleWeek(c tgbotapi.Context) error {
 		return nil
 	}
 
-	now := time.Now()
-	return h.sendDays(
-		c,
-		h.getScheduleForTarget(ctx, target, now, now.AddDate(0, 0, 6)),
-		target.UniversityID,
-	)
+	return h.sendTargetWeek(ctx, c, target, time.Now(), 7)
 }
 
 func (h *Handler) HandleTwoWeeks(c tgbotapi.Context) error {
@@ -187,30 +251,58 @@ func (h *Handler) HandleTwoWeeks(c tgbotapi.Context) error {
 		return nil
 	}
 
-	now := time.Now()
-	return h.sendDays(
+	return h.sendTargetWeek(ctx, c, target, time.Now(), 14)
+}
+
+func (h *Handler) HandleScheduleWeekSelect(c tgbotapi.Context) error {
+	value, ok := callbackArgument(c)
+	if !ok {
+		return respondStaleCallback(c)
+	}
+	from, err := parseScheduleDate(value, time.Local)
+	if err != nil {
+		return respondStaleCallback(c)
+	}
+	_ = c.Respond()
+	ctx, cancel := reqCtx()
+	defer cancel()
+	target := h.scheduleTarget(ctx, c)
+	if target == nil {
+		return nil
+	}
+	return h.sendTargetWeek(ctx, c, target, from, 7)
+}
+
+func (h *Handler) sendTargetWeek(
+	ctx context.Context,
+	c tgbotapi.Context,
+	target *scheduleTarget,
+	from time.Time,
+	daysCount int,
+) error {
+	markup := keyboards.ScheduleWeekNavigation(from, target.GroupName, isGroupChat(c))
+	return h.sendDaysWithMarkup(
 		c,
-		h.getScheduleForTarget(ctx, target, now, now.AddDate(0, 0, 13)),
+		h.getScheduleForTarget(ctx, target, from, from.AddDate(0, 0, daysCount-1)),
 		target.UniversityID,
+		markup,
 	)
 }
 
 func (h *Handler) HandleWeekDay(c tgbotapi.Context) error {
-	return c.Send("Выберите день недели:", keyboards.WeekDaySelector())
+	return c.Send("Выберите день недели:", keyboards.WeekDaySelector(time.Now()))
 }
 
 func (h *Handler) HandleWeekDaySelect(c tgbotapi.Context) error {
-	args := c.Args()
+	args := callbackArguments(c)
 	if len(args) == 0 {
-		_ = c.Respond()
-		return c.Send("Некорректный запрос.")
+		return respondStaleCallback(c)
 	}
 
 	var weekdayNum int
 	fmt.Sscanf(args[0], "%d", &weekdayNum)
 	if weekdayNum < 1 || weekdayNum > 7 {
-		_ = c.Respond()
-		return c.Send("Неверный день недели.")
+		return respondStaleCallback(c)
 	}
 	_ = c.Respond()
 
@@ -221,16 +313,19 @@ func (h *Handler) HandleWeekDaySelect(c tgbotapi.Context) error {
 		return nil
 	}
 
-	now := time.Now()
-	days := h.getScheduleForTarget(ctx, target, now, now.AddDate(0, 0, 6))
-	for _, day := range days {
-		wd := int(day.Date.Weekday())
-		if wd == 0 {
-			wd = 7
-		}
-		if wd == weekdayNum {
-			return h.sendSingleDay(c, day, target.UniversityID)
+	from := time.Now()
+	if len(args) > 1 {
+		parsed, err := parseScheduleDate(args[1], time.Local)
+		if err == nil {
+			from = parsed
 		}
 	}
-	return c.Send("В выбранный день занятий нет.")
+	selectedDate := dateAtLocation(from, time.Local)
+	for offset := 0; offset < 7; offset++ {
+		candidate := selectedDate.AddDate(0, 0, offset)
+		if weekdayNumber(candidate) == weekdayNum {
+			return h.sendTargetDate(ctx, c, target, candidate)
+		}
+	}
+	return respondStaleCallback(c)
 }

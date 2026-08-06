@@ -25,6 +25,7 @@ const parserDiagnosticRetention = 30 * 24 * time.Hour
 
 var (
 	ErrDataSourceBusy     = errors.New("parser: data source is already running")
+	ErrDataSourceDisabled = errors.New("parser: data source is disabled")
 	ErrSnapshotQuarantine = errors.New("parser: candidate snapshot quarantined")
 )
 
@@ -95,6 +96,9 @@ func (s *ParserService) RunDataSource(ctx context.Context, dataSourceID string) 
 	}
 	if ds == nil {
 		return 0, fmt.Errorf("parser: data source %s not found", dataSourceID)
+	}
+	if !ds.IsEnabled {
+		return 0, fmt.Errorf("%w: %s", ErrDataSourceDisabled, dataSourceID)
 	}
 	adapter, ok := s.adapters[ds.AdapterType]
 	if !ok {
@@ -434,6 +438,11 @@ func evaluateSnapshot(
 			}
 			lessonIDs[lesson.ID] = struct{}{}
 		}
+	}
+
+	if baseline.TrustedSnapshot != nil &&
+		scheduleSnapshotsEquivalent(payload, *baseline.TrustedSnapshot) {
+		return uniqueAnomalies(anomalies), publishable
 	}
 
 	if lessonCount == 0 {

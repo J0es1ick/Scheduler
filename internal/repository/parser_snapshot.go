@@ -132,16 +132,57 @@ func (r *ParserSnapshotRepository) Baseline(
 	universityID, sourceID string,
 ) (*domain.SnapshotBaseline, error) {
 	result := &domain.SnapshotBaseline{LessonsByGroup: make(map[string]int)}
+	if err := r.db.GetContext(
+		ctx,
+		&result.CurrentSnapshot,
+		`SELECT COALESCE(current_snapshot_id, '') FROM data_sources WHERE id=$1`,
+		sourceID,
+	); err != nil {
+		return nil, fmt.Errorf("load snapshot baseline: %w", err)
+	}
+
+	if result.CurrentSnapshot != "" {
+		var payloadRaw []byte
+		if err := r.db.GetContext(ctx, &payloadRaw, `
+			SELECT payload
+			FROM parser_snapshots
+			WHERE id=$1 AND data_source_id=$2 AND status='published'`,
+			result.CurrentSnapshot, sourceID,
+		); err != nil {
+			return nil, fmt.Errorf("load trusted snapshot %s: %w", result.CurrentSnapshot, err)
+		}
+		var payload domain.ScheduleSnapshot
+		if err := json.Unmarshal(payloadRaw, &payload); err != nil {
+			return nil, fmt.Errorf("decode trusted snapshot %s: %w", result.CurrentSnapshot, err)
+		}
+		if payload.UniversityID != universityID {
+			return nil, fmt.Errorf(
+				"trusted snapshot %s belongs to university %s, expected %s",
+				result.CurrentSnapshot,
+				payload.UniversityID,
+				universityID,
+			)
+		}
+		result.TrustedSnapshot = &payload
+		result.GroupCount = len(payload.Groups)
+		for _, group := range payload.Groups {
+			result.LessonsByGroup[group.ID] = len(group.Lessons)
+			result.LessonCount += len(group.Lessons)
+		}
+		result.HasExistingState = true
+		return result, nil
+	}
+
 	if err := r.db.GetContext(ctx, result, `
 		SELECT
 			(SELECT COUNT(*)::int FROM groups
 			 WHERE university_id=$1 AND is_active) AS group_count,
 			(SELECT COUNT(*)::int FROM lessons
 			 WHERE university_id=$1) AS lesson_count,
-			COALESCE((SELECT current_snapshot_id FROM data_sources WHERE id=$2), '') AS current_snapshot`,
-		universityID, sourceID,
+			'' AS current_snapshot`,
+		universityID,
 	); err != nil {
-		return nil, fmt.Errorf("load snapshot baseline: %w", err)
+		return nil, fmt.Errorf("load legacy schedule baseline: %w", err)
 	}
 	var counts []struct {
 		GroupID string `db:"group_id"`

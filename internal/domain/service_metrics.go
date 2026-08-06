@@ -14,10 +14,12 @@ type ServiceMetrics struct {
 	SourcesStale          int
 	SourcesError          int
 	SourcesQuarantined    int
+	SourcesDisabled       int
 	PendingNotifications  int        `db:"pending_notifications"`
 	FailedNotifications   int        `db:"failed_notifications"`
 	PendingOutbox         int        `db:"pending_outbox"`
 	FailedOutbox          int        `db:"failed_outbox"`
 	LastSuccessfulParseAt *time.Time `db:"last_successful_parse_at"`
+	ReminderWorker        WorkerStatus
 	CheckedAt             time.Time
 }

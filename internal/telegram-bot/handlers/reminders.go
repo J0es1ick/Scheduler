@@ -49,21 +49,21 @@ func (h *Handler) HandleReminders(c tele.Context) error {
 	}
 	return c.Send(
 		reminderSettingsText(user.ReminderEnabled, user.ReminderMinutes),
-		keyboards.ReminderSettings(user.ReminderEnabled, user.ReminderMinutes),
+		keyboards.ReminderSettings(user.ReminderEnabled, user.ReminderMinutes, 0),
 	)
 }
 
 func (h *Handler) HandleShowReminderSettings(c tele.Context) error {
 	defer c.Respond()
-	return h.editReminderSettings(c)
+	return h.editReminderSettings(c, callbackPage(c, 0))
 }
 
 func (h *Handler) HandleSetReminder(c tele.Context) error {
-	defer c.Respond()
-	args := c.Args()
+	args := callbackArguments(c)
 	if len(args) == 0 {
-		return c.Send("Некорректная настройка.")
+		return respondStaleCallback(c)
 	}
+	_ = c.Respond()
 	ctx, cancel := reqCtx()
 	defer cancel()
 	userID := fmt.Sprint(c.Sender().ID)
@@ -90,16 +90,16 @@ func (h *Handler) HandleSetReminder(c tele.Context) error {
 	return editOrSend(
 		c,
 		reminderSettingsText(enabled, minutes),
-		keyboards.ReminderSettings(enabled, minutes),
+		keyboards.ReminderSettings(enabled, minutes, callbackPage(c, 1)),
 	)
 }
 
 func (h *Handler) HandleBackSubscriptionSettings(c tele.Context) error {
 	defer c.Respond()
-	return h.showSubscriptionSettings(c, true)
+	return h.showSubscriptionSettingsPage(c, true, callbackPage(c, 0))
 }
 
-func (h *Handler) editReminderSettings(c tele.Context) error {
+func (h *Handler) editReminderSettings(c tele.Context, page int) error {
 	ctx, cancel := reqCtx()
 	defer cancel()
 	user, err := h.UserService.GetUser(ctx, fmt.Sprint(c.Sender().ID))
@@ -109,7 +109,7 @@ func (h *Handler) editReminderSettings(c tele.Context) error {
 	return editOrSend(
 		c,
 		reminderSettingsText(user.ReminderEnabled, user.ReminderMinutes),
-		keyboards.ReminderSettings(user.ReminderEnabled, user.ReminderMinutes),
+		keyboards.ReminderSettings(user.ReminderEnabled, user.ReminderMinutes, page),
 	)
 }
 

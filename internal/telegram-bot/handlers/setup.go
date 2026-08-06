@@ -13,7 +13,7 @@ import (
 func (h *Handler) HandleSearchTypeSelect(c tgbotapi.Context) error {
 	userID := c.Sender().ID
 
-	args := c.Args()
+	args := callbackArguments(c)
 	if len(args) == 0 {
 		return c.Respond(&tgbotapi.CallbackResponse{Text: "Некорректный запрос"})
 	}

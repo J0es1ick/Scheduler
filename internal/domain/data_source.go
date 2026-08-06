@@ -7,6 +7,7 @@ type DataSource struct {
 	UniversityID        string     `db:"university_id"`
 	AdapterType         string     `db:"adapter_type"`
 	Config              string     `db:"config"`
+	IsEnabled           bool       `db:"is_enabled"`
 	UpdateInterval      int        `db:"update_interval"` // В секундах
 	LastRunAt           time.Time  `db:"last_run_at"`
 	LastSuccessAt       *time.Time `db:"last_success_at"`

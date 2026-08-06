@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
@@ -13,14 +14,84 @@ import (
 )
 
 func (h *Handler) HandleSettings(c tele.Context) error {
-	return h.showSubscriptionSettings(c, false)
+	return h.showSubscriptionSettingsPage(c, false, 0)
+}
+
+func (h *Handler) HandleSubscriptionPage(c tele.Context) error {
+	defer c.Respond()
+	page := 0
+	if value, ok := callbackArgument(c); ok {
+		page, _ = strconv.Atoi(value)
+	}
+	return h.showSubscriptionSettingsPage(c, true, page)
+}
+
+func (h *Handler) HandleOpenSubscription(c tele.Context) error {
+	groupID, ok := callbackArgument(c)
+	if !ok {
+		return respondStaleCallback(c)
+	}
+	ctx, cancel := reqCtx()
+	defer cancel()
+	items, err := h.SubscriptionService.GetGroupSubscriptions(ctx, fmt.Sprint(c.Sender().ID))
+	if err != nil {
+		return h.settingsError(c, "load subscriptions", err)
+	}
+	item, ok := findGroupSubscription(items, groupID)
+	if !ok {
+		return c.Respond(&tele.CallbackResponse{Text: "Подписка уже удалена"})
+	}
+	_ = c.Respond()
+	page := callbackPage(c, 1)
+	status := "Дополнительная группа"
+	if item.IsDefault {
+		status = "Основная группа"
+	}
+	return editOrSend(
+		c,
+		fmt.Sprintf("%s · %s\n\n%s", item.UniversityName, item.GroupName, status),
+		keyboards.SubscriptionActions(item, page),
+	)
+}
+
+func (h *Handler) HandleRequestDeleteSubscription(c tele.Context) error {
+	groupID, ok := callbackArgument(c)
+	if !ok {
+		return respondStaleCallback(c)
+	}
+	ctx, cancel := reqCtx()
+	defer cancel()
+	items, err := h.SubscriptionService.GetGroupSubscriptions(ctx, fmt.Sprint(c.Sender().ID))
+	if err != nil {
+		return h.settingsError(c, "load subscriptions", err)
+	}
+	item, ok := findGroupSubscription(items, groupID)
+	if !ok {
+		return c.Respond(&tele.CallbackResponse{Text: "Подписка уже удалена"})
+	}
+	_ = c.Respond()
+	page := callbackPage(c, 1)
+	warning := ""
+	if item.IsDefault {
+		warning = "\n\nПосле удаления основной станет следующая группа из списка."
+	}
+	return editOrSend(
+		c,
+		fmt.Sprintf("Удалить подписку на %s · %s?%s", item.UniversityName, item.GroupName, warning),
+		keyboards.DeleteSubscriptionConfirmation(groupID, page),
+	)
+}
+
+// HandleDeleteSubscription keeps old callback messages safe by showing the
+// confirmation instead of performing an immediate deletion.
+func (h *Handler) HandleDeleteSubscription(c tele.Context) error {
+	return h.HandleRequestDeleteSubscription(c)
 }
 
 func (h *Handler) HandleSetDefaultSubscription(c tele.Context) error {
-	defer c.Respond()
 	groupID, ok := callbackArgument(c)
 	if !ok {
-		return c.Send("Не удалось определить группу.")
+		return respondStaleCallback(c)
 	}
 	ctx, cancel := reqCtx()
 	defer cancel()
@@ -31,23 +102,24 @@ func (h *Handler) HandleSetDefaultSubscription(c tele.Context) error {
 		return h.settingsError(c, "check subscription", err)
 	}
 	if !subscribed {
-		return c.Send("Этой подписки уже нет. Обновите настройки.")
+		return c.Respond(&tele.CallbackResponse{Text: "Подписка уже удалена"})
 	}
+	_ = c.Respond()
 	if err = h.UserService.SetDefaultGroup(ctx, userID, groupID); err != nil {
 		return h.settingsError(c, "set default group", err)
 	}
 	if _, _, err = h.restoreProfile(ctx, c.Sender().ID); err != nil {
 		return h.settingsError(c, "restore profile", err)
 	}
-	return h.showSubscriptionSettings(c, true)
+	return h.showSubscriptionSettingsPage(c, true, callbackPage(c, 1))
 }
 
-func (h *Handler) HandleDeleteSubscription(c tele.Context) error {
-	defer c.Respond()
+func (h *Handler) HandleConfirmDeleteSubscription(c tele.Context) error {
 	groupID, ok := callbackArgument(c)
 	if !ok {
-		return c.Send("Не удалось определить группу.")
+		return respondStaleCallback(c)
 	}
+	_ = c.Respond()
 	ctx, cancel := reqCtx()
 	defer cancel()
 	userID := fmt.Sprint(c.Sender().ID)
@@ -80,7 +152,7 @@ func (h *Handler) HandleDeleteSubscription(c tele.Context) error {
 			return h.settingsError(c, "restore profile", err)
 		}
 	}
-	return h.showSubscriptionSettings(c, true)
+	return h.showSubscriptionSettingsPage(c, true, callbackPage(c, 1))
 }
 
 func (h *Handler) HandleToggleNotifications(c tele.Context) error {
@@ -96,10 +168,10 @@ func (h *Handler) HandleToggleNotifications(c tele.Context) error {
 	if err = h.UserService.SetNotificationsEnabled(ctx, userID, !user.NotificationsEnabled); err != nil {
 		return h.settingsError(c, "toggle notifications", err)
 	}
-	return h.showSubscriptionSettings(c, true)
+	return h.showSubscriptionSettingsPage(c, true, callbackPage(c, 0))
 }
 
-func (h *Handler) showSubscriptionSettings(c tele.Context, edit bool) error {
+func (h *Handler) showSubscriptionSettingsPage(c tele.Context, edit bool, page int) error {
 	ctx, cancel := reqCtx()
 	defer cancel()
 	userID := fmt.Sprint(c.Sender().ID)
@@ -126,6 +198,7 @@ func (h *Handler) showSubscriptionSettings(c tele.Context, edit bool) error {
 		user.NotificationsEnabled,
 		user.ReminderEnabled,
 		user.ReminderMinutes,
+		page,
 	)
 	if edit {
 		if err = c.Edit(text, markup); err == nil || strings.Contains(err.Error(), "message is not modified") {
@@ -134,6 +207,18 @@ func (h *Handler) showSubscriptionSettings(c tele.Context, edit bool) error {
 		slog.Debug("edit subscription settings failed; sending new message", "user_id", userID, "err", err)
 	}
 	return c.Send(text, markup)
+}
+
+func findGroupSubscription(
+	items []domain.GroupSubscription,
+	groupID string,
+) (domain.GroupSubscription, bool) {
+	for _, item := range items {
+		if item.GroupID == groupID {
+			return item, true
+		}
+	}
+	return domain.GroupSubscription{}, false
 }
 
 func subscriptionSettingsText(
@@ -156,25 +241,60 @@ func subscriptionSettingsText(
 	}
 	fmt.Fprintf(
 		&builder,
-		"Настройки\n\nУведомления: %s\nНапоминания: %s\nПодписок: %d\n",
+		"Мои группы\n\nУведомления: %s\nНапоминания: %s\nПодписок: %d\n",
 		status,
 		reminderStatus,
 		len(items),
 	)
 	if len(items) == 0 {
-		builder.WriteString("\nНет выбранных групп. Используйте /change_group, чтобы добавить основную группу.")
+		builder.WriteString("\nНет выбранных групп. Нажмите «Добавить группу» ниже.")
 		return builder.String()
 	}
-	builder.WriteString("\n● — основная группа для команд расписания. Нажмите на другую группу, чтобы сделать её основной.")
+	builder.WriteString("\n● — основная группа для команд расписания. Нажмите на группу, чтобы открыть её настройки.")
 	return builder.String()
 }
 
 func callbackArgument(c tele.Context) (string, bool) {
-	args := c.Args()
+	args := callbackArguments(c)
 	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
 		return "", false
 	}
 	return args[0], true
+}
+
+func callbackPage(c tele.Context, position int) int {
+	args := callbackArguments(c)
+	if position < 0 || position >= len(args) {
+		return 0
+	}
+	page, err := strconv.Atoi(args[position])
+	if err != nil || page < 0 {
+		return 0
+	}
+	return page
+}
+
+func callbackArguments(c tele.Context) []string {
+	args := c.Args()
+	if c.Callback() == nil {
+		return args
+	}
+	return normalizeCallbackArguments(args)
+}
+
+func normalizeCallbackArguments(args []string) []string {
+	// Compatibility with schedule buttons sent by the short-lived version
+	// that retried an already processed Telebot markup. After Telebot removes
+	// the outer endpoint, such callbacks start with another form-feed endpoint
+	// followed by the real arguments.
+	if len(args) > 0 && strings.HasPrefix(args[0], "\f") {
+		return args[1:]
+	}
+	return args
+}
+
+func respondStaleCallback(c tele.Context) error {
+	return c.Respond(&tele.CallbackResponse{Text: "Меню устарело, откройте его снова"})
 }
 
 func (h *Handler) settingsError(c tele.Context, operation string, err error) error {

@@ -19,6 +19,8 @@ type Store struct {
 	db *sqlx.DB
 }
 
+var ErrSourceBusy = errors.New("data source is currently running")
+
 func NewStore(db *sqlx.DB) *Store { return &Store{db: db} }
 
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
@@ -81,7 +83,7 @@ func (s *Store) Sources(ctx context.Context) ([]SourceView, error) {
 		SELECT ds.id, ds.university_id, u.name AS university_name,
 			COALESCE(u.full_name, '') AS university_full_name,
 			COALESCE(u.schedule_url, '') AS schedule_url,
-			ds.adapter_type, ds.update_interval, ds.last_run_at, ds.last_success_at,
+			ds.adapter_type, ds.is_enabled, ds.update_interval, ds.last_run_at, ds.last_success_at,
 			COALESCE(ds.last_error, '') AS last_error,
 			ds.consecutive_failures, ds.next_retry_at,
 			COALESCE(ds.current_snapshot_id, '') AS current_snapshot_id,
@@ -128,7 +130,9 @@ func (s *Store) Sources(ctx context.Context) ([]SourceView, error) {
 	for i := range sources {
 		source := &sources[i]
 		source.LastError = compactParserError(source.LastError)
-		if source.LastError != "" && source.NextRetryAt != nil {
+		if !source.IsEnabled {
+			source.NextRunAt = nil
+		} else if source.LastError != "" && source.NextRetryAt != nil {
 			source.NextRunAt = source.NextRetryAt
 		} else if source.LastRunAt != nil {
 			next := source.LastRunAt.Add(time.Duration(source.UpdateInterval) * time.Second)
@@ -136,6 +140,8 @@ func (s *Store) Sources(ctx context.Context) ([]SourceView, error) {
 		}
 		source.Running = source.LatestStatus == "running" && source.LatestStartedAt != nil && now.Sub(*source.LatestStartedAt) < 2*time.Hour
 		switch {
+		case !source.IsEnabled:
+			source.Health = "disabled"
 		case source.Running:
 			source.Health = "running"
 		case source.QuarantinedCount > 0:
@@ -169,6 +175,8 @@ func (s *Store) OperationalHealth(ctx context.Context) (*OperationalHealth, erro
 			result.SourcesStale++
 		case "quarantined":
 			result.SourcesQuarantined++
+		case "disabled":
+			result.SourcesDisabled++
 		default:
 			result.SourcesError++
 		}
@@ -191,10 +199,21 @@ func (s *Store) OperationalHealth(ctx context.Context) (*OperationalHealth, erro
 	); err != nil {
 		return nil, fmt.Errorf("load operational health: %w", err)
 	}
+	workerStatus, err := repository.NewWorkerStatusRepository(s.db).Get(
+		ctx,
+		domain.LessonReminderWorker,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("load reminder worker health: %w", err)
+	}
+	result.ReminderWorker = *workerStatus
 	result.Status = "healthy"
 	if result.SourcesStale > 0 || result.SourcesError > 0 ||
 		result.SourcesQuarantined > 0 || result.FailedNotifications > 0 ||
-		result.FailedOutbox > 0 || result.OldestPendingSeconds > 300 {
+		result.FailedOutbox > 0 || result.OldestPendingSeconds > 300 ||
+		result.ReminderWorker.LastError != "" ||
+		result.ReminderWorker.LastFinishedAt == nil ||
+		result.CheckedAt.Sub(*result.ReminderWorker.LastFinishedAt) > 3*time.Minute {
 		result.Status = "degraded"
 	}
 	return result, nil
@@ -393,15 +412,77 @@ func (s *Store) Users(ctx context.Context, queryText string, limit int) ([]UserV
 	return users, nil
 }
 
-func (s *Store) UpdateSourceInterval(ctx context.Context, sourceID string, interval int) error {
+func (s *Store) UpdateSourceSettings(
+	ctx context.Context,
+	sourceID string,
+	interval *int,
+	isEnabled *bool,
+) error {
 	result, err := s.db.ExecContext(ctx,
-		`UPDATE data_sources SET update_interval=$1, updated_at=NOW() WHERE id=$2`, interval, sourceID)
+		`UPDATE data_sources
+		 SET update_interval=COALESCE($1::int, update_interval),
+		     last_run_at=CASE
+		       WHEN $2::boolean IS TRUE AND NOT is_enabled THEN NULL
+		       ELSE last_run_at
+		     END,
+		     next_retry_at=CASE
+		       WHEN $2::boolean IS TRUE AND NOT is_enabled THEN NULL
+		       ELSE next_retry_at
+		     END,
+		     is_enabled=COALESCE($2::boolean, is_enabled),
+		     updated_at=NOW()
+		 WHERE id=$3`, interval, isEnabled, sourceID)
 	if err != nil {
-		return fmt.Errorf("admin update source interval: %w", err)
+		return fmt.Errorf("admin update source settings: %w", err)
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) SourceEnabled(ctx context.Context, sourceID string) (bool, error) {
+	var enabled bool
+	if err := s.db.GetContext(ctx, &enabled,
+		`SELECT is_enabled FROM data_sources WHERE id=$1`, sourceID,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, ErrNotFound
+		}
+		return false, fmt.Errorf("admin get source state: %w", err)
+	}
+	return enabled, nil
+}
+
+func (s *Store) DeleteSource(ctx context.Context, sourceID string) error {
+	tx, err := s.db.BeginTxx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("admin delete source: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var acquired bool
+	if err = tx.GetContext(ctx, &acquired,
+		`SELECT pg_try_advisory_xact_lock(hashtext('scheduler-parser'), hashtext($1))`,
+		sourceID,
+	); err != nil {
+		return fmt.Errorf("admin delete source: acquire lock: %w", err)
+	}
+	if !acquired {
+		return ErrSourceBusy
+	}
+
+	result, err := tx.ExecContext(ctx, `DELETE FROM data_sources WHERE id=$1`, sourceID)
+	if err != nil {
+		return fmt.Errorf("admin delete source: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("admin delete source: commit: %w", err)
 	}
 	return nil
 }

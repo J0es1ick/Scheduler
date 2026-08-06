@@ -90,6 +90,7 @@ func main() {
 	metricsRepo := repository.NewMetricsRepository(db.DB)
 	chatProfileRepo := repository.NewChatProfileRepository(db.DB)
 	reminderRepo := repository.NewReminderRepository(db.DB)
+	workerStatusRepo := repository.NewWorkerStatusRepository(db.DB)
 	dataSourceRepo := repository.NewDataSourceRepository(db.DB)
 	parseLogRepo := repository.NewParseLogRepository(db.DB)
 	notificationRepo := repository.NewNotificationRepository(db.DB)
@@ -165,7 +166,12 @@ func main() {
 	// Останавливается вместе с ctx при получении сигнала.
 	parserWorker := worker.NewParserWorker(parserService, parserTickInterval)
 	parserWorker.Start(ctx)
-	reminderWorker := worker.NewReminderWorker(reminderRepo, scheduleService, 30*time.Second)
+	reminderWorker := worker.NewReminderWorker(
+		reminderRepo,
+		workerStatusRepo,
+		scheduleService,
+		30*time.Second,
+	)
 	reminderWorker.Start(ctx)
 	notificationWorker := worker.NewNotificationWorker(notificationRepo, bot, 15*time.Second)
 	notificationWorker.Start(ctx)
