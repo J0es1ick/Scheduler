@@ -323,6 +323,7 @@ func MoreMenu() *tgbotapi.ReplyMarkup {
 	menu := &tgbotapi.ReplyMarkup{}
 	menu.Inline(
 		menu.Row(menu.Data("Источники расписания", "show_sources")),
+		menu.Row(menu.Data("Подключить своё расписание", "show_connector")),
 		menu.Row(menu.Data("Сообщить о расписании", "open_hotline")),
 		menu.Row(menu.Data("Конфиденциальность и данные", "show_privacy")),
 		menu.Row(menu.Data("Помощь", "show_help")),

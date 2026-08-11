@@ -40,14 +40,26 @@ func NewNotificationWorker(
 	}
 }
 
-func (w *NotificationWorker) Start(ctx context.Context) {
-	go w.run(ctx)
+func (w *NotificationWorker) Start(ctx context.Context, monitors ...*Monitor) <-chan struct{} {
+	done := make(chan struct{})
+	var monitor *Monitor
+	if len(monitors) > 0 {
+		monitor = monitors[0]
+	}
+	go func() {
+		defer close(done)
+		monitor.Started(NotificationWorkerName)
+		defer monitor.Stopped(NotificationWorkerName)
+		w.run(ctx, monitor)
+	}()
+	return done
 }
 
-func (w *NotificationWorker) run(ctx context.Context) {
+func (w *NotificationWorker) run(ctx context.Context, monitor *Monitor) {
 	slog.Info("notification worker started", "interval", w.interval)
 	w.prune(ctx)
 	w.tick(ctx)
+	monitor.Heartbeat(NotificationWorkerName)
 
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
@@ -60,8 +72,10 @@ func (w *NotificationWorker) run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			w.tick(ctx)
+			monitor.Heartbeat(NotificationWorkerName)
 		case <-pruneTicker.C:
 			w.prune(ctx)
+			monitor.Heartbeat(NotificationWorkerName)
 		}
 	}
 }
@@ -124,19 +138,30 @@ func (w *NotificationWorker) deliverScheduleBatch(ctx context.Context, items []d
 			return
 		}
 		group := byUser[userID]
+		batches := notificationDigestBatches(group)
 		telegramID, err := strconv.ParseInt(userID, 10, 64)
-		if err == nil {
-			if err = w.waitForTelegram(ctx, userID); err == nil {
-				_, err = w.bot.Send(&tele.User{ID: telegramID}, notificationDigest(group))
-			}
-		}
-		for _, item := range group {
+		for batchIndex, batch := range batches {
 			if err == nil {
-				if markErr := w.repository.MarkDelivered(ctx, item.ID); markErr != nil {
-					slog.Error("notification worker: mark delivered failed", "delivery_id", item.ID, "err", markErr)
+				if err = w.waitForTelegram(ctx, userID); err == nil {
+					_, err = w.bot.Send(&tele.User{ID: telegramID}, batch.Text)
 				}
-			} else {
-				w.recordFailure(ctx, item, err)
+			}
+			for _, item := range batch.Items {
+				if err == nil {
+					if markErr := w.repository.MarkDelivered(ctx, item.ID); markErr != nil {
+						slog.Error("notification worker: mark delivered failed", "delivery_id", item.ID, "err", markErr)
+					}
+				} else {
+					w.recordFailure(ctx, item, err)
+				}
+			}
+			if err != nil {
+				for _, unsent := range batches[batchIndex+1:] {
+					for _, item := range unsent.Items {
+						w.recordFailure(ctx, item, err)
+					}
+				}
+				break
 			}
 		}
 	}
@@ -216,26 +241,57 @@ func (w *NotificationWorker) recordFailure(ctx context.Context, item domain.Noti
 	)
 }
 
-func notificationDigest(items []domain.NotificationDelivery) string {
-	var text strings.Builder
-	text.WriteString("🔔 Изменение расписания\n")
+type notificationMessage struct {
+	Text  string
+	Items []domain.NotificationDelivery
+}
+
+const notificationTelegramLimit = 4000
+
+func notificationDigestBatches(items []domain.NotificationDelivery) []notificationMessage {
+	if len(items) == 0 {
+		return nil
+	}
+	const header = "🔔 Изменение расписания\n"
+	const footer = "\nОткройте /week, чтобы посмотреть актуальное расписание."
+	batches := make([]notificationMessage, 0, 1)
+	currentSections := make([]string, 0, len(items))
+	currentItems := make([]domain.NotificationDelivery, 0, len(items))
+	currentLength := len([]rune(header)) + len([]rune(footer))
+
+	flush := func() {
+		if len(currentItems) == 0 {
+			return
+		}
+		batches = append(batches, notificationMessage{
+			Text:  header + strings.Join(currentSections, "") + footer,
+			Items: append([]domain.NotificationDelivery(nil), currentItems...),
+		})
+		currentSections = currentSections[:0]
+		currentItems = currentItems[:0]
+		currentLength = len([]rune(header)) + len([]rune(footer))
+	}
+
 	for _, item := range items {
 		summaryRunes := []rune(item.Summary)
 		if len(summaryRunes) > 600 {
 			summaryRunes = append(summaryRunes[:600], '…')
 		}
-		_, _ = fmt.Fprintf(&text, "\n%s · %s\n%s\n", item.UniversityName, item.GroupName, string(summaryRunes))
+		section := fmt.Sprintf("\n%s · %s\n%s\n", item.UniversityName, item.GroupName, string(summaryRunes))
+		sectionLength := len([]rune(section))
+		if len(currentItems) > 0 && currentLength+sectionLength > notificationTelegramLimit {
+			flush()
+		}
+		currentSections = append(currentSections, section)
+		currentItems = append(currentItems, item)
+		currentLength += sectionLength
 	}
-	text.WriteString("\nОткройте /week, чтобы посмотреть актуальное расписание.")
-	result := []rune(text.String())
-	if len(result) > 4000 {
-		return string(result[:3950]) + "\n\nОткройте /week для подробностей."
-	}
-	return string(result)
+	flush()
+	return batches
 }
 
 func notificationText(item domain.NotificationDelivery) string {
-	return notificationDigest([]domain.NotificationDelivery{item})
+	return notificationDigestBatches([]domain.NotificationDelivery{item})[0].Text
 }
 
 func notificationRetryDelay(attempt int) time.Duration {

@@ -12,8 +12,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/J0es1ick/Scheduler/integrations/ivgpu"
+	"github.com/J0es1ick/Scheduler/internal/buildinfo"
 	"github.com/J0es1ick/Scheduler/internal/config"
 	"github.com/J0es1ick/Scheduler/internal/database"
+	"github.com/J0es1ick/Scheduler/internal/declarative"
+	"github.com/J0es1ick/Scheduler/internal/logging"
+	"github.com/J0es1ick/Scheduler/internal/managedparser"
 	"github.com/J0es1ick/Scheduler/internal/miniapp"
 	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/J0es1ick/Scheduler/internal/scraper/ispu"
@@ -36,13 +41,21 @@ func main() {
 		Level: slog.LevelInfo,
 	})))
 
-	slog.Info("starting scheduler bot")
+	slog.Info("starting scheduler bot", "build", buildinfo.Values())
 
 	cfg, err := config.InitConfig()
 	if err != nil {
 		slog.Error("config init failed", "err", err)
 		os.Exit(1)
 	}
+	slog.SetDefault(logging.NewJSONLogger(
+		os.Stdout,
+		slog.LevelInfo,
+		cfg.BotToken,
+		cfg.Database.Password,
+		cfg.Admin.AccessToken,
+		cfg.Admin.MetricsToken,
+	))
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
@@ -51,10 +64,13 @@ func main() {
 		slog.Error("database connect failed", "err", err)
 		os.Exit(1)
 	}
-	if err := database.ApplyMigrations(context.Background(), db.DB); err != nil {
+	migrationCtx, migrationCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := database.ApplyMigrations(migrationCtx, db.DB); err != nil {
+		migrationCancel()
 		slog.Error("database migrations failed", "err", err)
 		os.Exit(1)
 	}
+	migrationCancel()
 	defer func() {
 		if err := db.Close(); err != nil {
 			slog.Error("db close failed", "err", err)
@@ -64,6 +80,7 @@ func main() {
 	bot, err := tgbotapi.NewBot(tgbotapi.Settings{
 		Token:   cfg.BotToken,
 		Offline: true,
+		OnError: botpkg.HandleError,
 		Client: &http.Client{
 			Timeout: 25 * time.Second,
 		},
@@ -120,22 +137,32 @@ func main() {
 	ispuAdapter := ispu.New("")
 	parserService.RegisterAdapter(ispu.UniversityID, ispuAdapter)
 	slog.Info("adapter registered", "type", ispu.UniversityID)
+	parserService.RegisterAdapterFactory("managed:"+ivgpu.ParserID, managedparser.Factory(ivgpu.New))
+	parserService.RegisterAdapterFactory(declarative.AdapterType, declarative.AdapterFactory)
+	slog.Info("managed parser registered", "type", ivgpu.ParserID, "contract", ivgpu.Manifest().ContractVersion)
 
 	// --- Telegram ---
 	stateManager := state.NewManagerWithTTL(time.Duration(cfg.BotStateTTLMinutes) * time.Minute)
+	stateCleanupDone := stateManager.StartCleanup(ctx, time.Minute)
 	handler := handlers.NewHandler(
 		scheduleService, userService, groupService,
 		universityService, stateManager, subscriptionService, supportRequestService,
-		metricsService, chatProfileService, cfg.Admin.PublicURL,
+		metricsService, chatProfileService, cfg.Admin.PublicURL, cfg.ProjectURL,
 	)
+	handlerTracker := botpkg.NewHandlerTracker()
 	bot.Use(
 		botpkg.RecoverPanics(),
+		handlerTracker.Middleware(),
 		botpkg.SerializeBySender(cfg.BotMaxPendingPerSender),
 		botpkg.LimitConcurrent(cfg.BotMaxConcurrentHandlers),
 	)
 	commandsReady := botpkg.Register(ctx, bot, handler)
 
-	health := botpkg.NewHealth(db.DB)
+	workerMonitor := worker.NewMonitor()
+	workerMonitor.Register(worker.ParserWorkerName, 35*time.Minute)
+	workerMonitor.Register(worker.ReminderWorkerName, 2*time.Minute)
+	workerMonitor.Register(worker.NotificationWorkerName, 2*time.Minute)
+	health := botpkg.NewHealth(db.DB, workerMonitor)
 	healthListener, err := net.Listen("tcp", ":"+cfg.BotHealthPort)
 	if err != nil {
 		slog.Error("bot health listener failed", "port", cfg.BotHealthPort, "err", err)
@@ -165,16 +192,16 @@ func main() {
 	// Запускается после регистрации адаптеров, до старта бота.
 	// Останавливается вместе с ctx при получении сигнала.
 	parserWorker := worker.NewParserWorker(parserService, parserTickInterval)
-	parserWorker.Start(ctx)
+	parserDone := parserWorker.Start(ctx, workerMonitor)
 	reminderWorker := worker.NewReminderWorker(
 		reminderRepo,
 		workerStatusRepo,
 		scheduleService,
 		30*time.Second,
 	)
-	reminderWorker.Start(ctx)
+	reminderDone := reminderWorker.Start(ctx, workerMonitor)
 	notificationWorker := worker.NewNotificationWorker(notificationRepo, bot, 15*time.Second)
-	notificationWorker.Start(ctx)
+	notificationDone := notificationWorker.Start(ctx, workerMonitor)
 	go keepAdminMenusConfigured(ctx, bot, userRepo, cfg.Admin.PublicURL)
 
 	// --- Бот ---
@@ -197,13 +224,34 @@ func main() {
 	}
 	slog.Info("shutdown signal received, stopping...")
 	health.SetPolling(false)
+	handlerTracker.StopAccepting()
 	bot.Stop()
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer shutdownCancel()
+	if err := handlerTracker.Wait(shutdownCtx); err != nil {
+		slog.Warn("Telegram handlers did not stop before deadline", "err", err)
+	}
+	if err := waitForBackgroundTasks(shutdownCtx, parserDone, reminderDone, notificationDone, stateCleanupDone); err != nil {
+		slog.Warn("background tasks did not stop before deadline", "err", err)
+	}
 	if err := healthServer.Shutdown(shutdownCtx); err != nil {
 		slog.Error("bot health server shutdown failed", "err", err)
 	}
-	shutdownCancel()
 	slog.Info("bot stopped")
+}
+
+func waitForBackgroundTasks(ctx context.Context, tasks ...<-chan struct{}) error {
+	for _, done := range tasks {
+		if done == nil {
+			continue
+		}
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 func keepAdminMenusConfigured(
@@ -212,6 +260,10 @@ func keepAdminMenusConfigured(
 	users *repository.UserRepository,
 	publicURL string,
 ) {
+	if _, err := miniapp.EditorURL(publicURL); err != nil {
+		slog.Warn("Mini App menu is disabled until ADMIN_PUBLIC_URL is a public HTTPS URL")
+		return
+	}
 	for {
 		if configureAdminMenus(ctx, bot, users, publicURL) {
 			slog.Info("Mini App menu configured for administrators")
@@ -232,28 +284,70 @@ func configureAdminMenus(
 	users *repository.UserRepository,
 	publicURL string,
 ) bool {
-	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
-	defer cancel()
-	items, err := users.GetAllUsers(ctx)
-	if err != nil {
-		slog.Warn("load users for Mini App menu failed", "err", err)
-		return false
-	}
+	const pageSize = 200
+	const requestInterval = 50 * time.Millisecond
+	afterID := ""
 	configured := true
-	for _, user := range items {
-		telegramID, parseErr := strconv.ParseInt(user.ID, 10, 64)
-		if parseErr != nil {
-			continue
+	lastRequest := time.Time{}
+	for {
+		pageCtx, cancel := context.WithTimeout(parent, 5*time.Second)
+		items, err := users.GetUsersPage(pageCtx, afterID, pageSize)
+		cancel()
+		if err != nil {
+			slog.Warn("load users page for Mini App menu failed", "after_user_id", afterID, "err", err)
+			return false
 		}
-		if configureErr := miniapp.ConfigureMenu(
-			bot,
-			&tgbotapi.User{ID: telegramID},
-			publicURL,
-			user.IsAdmin,
-		); configureErr != nil {
-			configured = false
-			slog.Debug("Mini App menu configuration failed", "user_id", user.ID, "err", configureErr)
+		for _, user := range items {
+			telegramID, parseErr := strconv.ParseInt(user.ID, 10, 64)
+			if parseErr != nil {
+				continue
+			}
+			if err = waitUntil(parent, lastRequest.Add(requestInterval)); err != nil {
+				return false
+			}
+			lastRequest = time.Now()
+			configureErr := miniapp.ConfigureMenu(
+				bot,
+				&tgbotapi.User{ID: telegramID},
+				publicURL,
+				user.IsAdmin,
+			)
+			var flood tgbotapi.FloodError
+			if errors.As(configureErr, &flood) {
+				if err = waitUntil(parent, time.Now().Add(time.Duration(flood.RetryAfter+1)*time.Second)); err != nil {
+					return false
+				}
+				lastRequest = time.Now()
+				configureErr = miniapp.ConfigureMenu(
+					bot,
+					&tgbotapi.User{ID: telegramID},
+					publicURL,
+					user.IsAdmin,
+				)
+			}
+			if configureErr != nil {
+				configured = false
+				slog.Debug("Mini App menu configuration failed", "user_id", user.ID, "err", configureErr)
+			}
 		}
+		if len(items) < pageSize {
+			return configured
+		}
+		afterID = items[len(items)-1].ID
 	}
-	return configured
+}
+
+func waitUntil(ctx context.Context, deadline time.Time) error {
+	delay := time.Until(deadline)
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

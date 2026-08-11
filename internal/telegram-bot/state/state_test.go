@@ -35,3 +35,19 @@ func TestManagerExpiresAbandonedDialogue(t *testing.T) {
 		t.Fatalf("expired state = %+v, want nil", state)
 	}
 }
+
+func TestManagerPrunesExpiredDialogueWithoutGet(t *testing.T) {
+	manager := NewManagerWithTTL(time.Minute)
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	manager.now = func() time.Time { return now }
+	manager.Set(42, &dto.UserState{Step: "awaiting_query"})
+	manager.Set(43, &dto.UserState{Step: "awaiting_group"})
+
+	now = now.Add(time.Minute)
+	if removed := manager.PruneExpired(); removed != 2 {
+		t.Fatalf("removed = %d, want 2", removed)
+	}
+	if len(manager.userStates) != 0 {
+		t.Fatalf("states left after prune = %d", len(manager.userStates))
+	}
+}

@@ -81,6 +81,19 @@ func (emptyScheduleProvider) GetScheduleForGroup(
 	return []domain.Lesson{}, nil
 }
 
+type recordingScheduleProvider struct {
+	dates []time.Time
+}
+
+func (p *recordingScheduleProvider) GetScheduleForGroup(
+	_ context.Context,
+	_ string,
+	date time.Time,
+) ([]domain.Lesson, error) {
+	p.dates = append(p.dates, date)
+	return []domain.Lesson{}, nil
+}
+
 func TestReminderSlotsCombineConcurrentSubgroups(t *testing.T) {
 	lessons := []domain.Lesson{
 		{TimeStart: "09:50", TimeEnd: "11:25", Subject: "Математика", Subgroup: 1},
@@ -102,6 +115,29 @@ func TestReminderIDIsStableForSameTimeslot(t *testing.T) {
 	second := reminderID("42", "group", date, "09:50", "11:25")
 	if first != second {
 		t.Fatalf("reminder ids differ: %q and %q", first, second)
+	}
+}
+
+func TestReminderWorkerUsesUniversityTimezone(t *testing.T) {
+	provider := &recordingScheduleProvider{}
+	worker := &ReminderWorker{
+		repository:      &fakeReminderRepository{},
+		scheduleService: provider,
+	}
+	recipient := domain.ReminderRecipient{
+		UserID: "42", GroupID: "group", Timezone: "Asia/Yekaterinburg",
+	}
+	nowUTC := time.Date(2026, time.January, 1, 20, 30, 0, 0, time.UTC)
+	if err := worker.enqueueRecipientReminders(
+		context.Background(), recipient, nowUTC, make(reminderScheduleCache),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.dates) == 0 || provider.dates[0].Format("2006-01-02") != "2026-01-02" {
+		t.Fatalf("first local date = %v, want 2026-01-02", provider.dates)
+	}
+	if provider.dates[0].Location().String() != "Asia/Yekaterinburg" {
+		t.Fatalf("location = %s", provider.dates[0].Location())
 	}
 }
 
@@ -137,7 +173,7 @@ func TestReminderTextIncludesEveryConcurrentLesson(t *testing.T) {
 
 func TestReminderWorkerResumesFromStoredCursor(t *testing.T) {
 	recipients := &fakeReminderRepository{
-		recipients: []domain.ReminderRecipient{{UserID: "200", GroupID: "group"}},
+		recipients: []domain.ReminderRecipient{{UserID: "200", GroupID: "group", Timezone: "Europe/Moscow"}},
 	}
 	statuses := &fakeWorkerStatusRepository{
 		status: domain.WorkerStatus{Cursor: "100"},
@@ -168,8 +204,9 @@ func TestReminderWorkerContinuesAfterTimedOutPage(t *testing.T) {
 	items := make([]domain.ReminderRecipient, 0, reminderBatchSize)
 	for index := 0; index < reminderBatchSize; index++ {
 		items = append(items, domain.ReminderRecipient{
-			UserID:  fmt.Sprintf("%03d", index),
-			GroupID: "group",
+			UserID:   fmt.Sprintf("%03d", index),
+			GroupID:  "group",
+			Timezone: "Europe/Moscow",
 		})
 	}
 	recipients := &fakeReminderRepository{recipients: items, blockOnce: true}

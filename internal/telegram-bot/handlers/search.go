@@ -46,7 +46,7 @@ func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) e
 	ctx, cancel := reqCtx()
 	defer cancel()
 
-	now := time.Now()
+	now := time.Now().In(h.universityLocation(ctx, state.UniversityID))
 	to := now.AddDate(0, 0, 6)
 
 	var days []dto.DaySchedule

@@ -44,15 +44,26 @@ func NewParserWorker(parserSvc *service.ParserService, tickInterval time.Duratio
 
 // Start запускает воркер в отдельной горутине и возвращает управление немедленно.
 // Горутина завершается при отмене ctx.
-func (w *ParserWorker) Start(ctx context.Context) {
-	go w.run(ctx)
+func (w *ParserWorker) Start(ctx context.Context, monitors ...*Monitor) <-chan struct{} {
+	done := make(chan struct{})
+	var monitor *Monitor
+	if len(monitors) > 0 {
+		monitor = monitors[0]
+	}
+	go func() {
+		defer close(done)
+		monitor.Started(ParserWorkerName)
+		defer monitor.Stopped(ParserWorkerName)
+		w.run(ctx, monitor)
+	}()
+	return done
 }
 
-func (w *ParserWorker) run(ctx context.Context) {
+func (w *ParserWorker) run(ctx context.Context, monitor *Monitor) {
 	slog.Info("parser worker started", "tick_interval", w.tickInterval)
 
 	// Первый запуск — сразу при старте, не ждать первого тика.
-	w.tick(ctx)
+	w.tick(ctx, monitor)
 
 	ticker := time.NewTicker(w.tickInterval)
 	defer ticker.Stop()
@@ -63,13 +74,15 @@ func (w *ParserWorker) run(ctx context.Context) {
 			slog.Info("parser worker stopped")
 			return
 		case <-ticker.C:
-			w.tick(ctx)
+			w.tick(ctx, monitor)
 		}
 	}
 }
 
 // tick — один проход: находим источники, которым пришло время обновиться, и запускаем.
-func (w *ParserWorker) tick(ctx context.Context) {
+func (w *ParserWorker) tick(ctx context.Context, monitor *Monitor) {
+	monitor.Heartbeat(ParserWorkerName)
+	defer monitor.Heartbeat(ParserWorkerName)
 	// Используем отдельный timeout для одного прохода, чтобы зависший HTTP-запрос
 	// не удерживал воркер вечно. Таймаут должен быть больше httpTimeout адаптера.
 	runCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)

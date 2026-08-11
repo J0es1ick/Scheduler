@@ -36,14 +36,15 @@ func (h *Handler) HandleDate(c tele.Context) error {
 	}
 
 	input := strings.TrimSpace(strings.Join(c.Args(), " "))
+	location := h.universityLocation(ctx, target.UniversityID)
 	if input == "" {
-		now := time.Now()
+		now := time.Now().In(location)
 		return c.Send(
 			calendarTitle(now),
 			keyboards.ScheduleCalendar(now),
 		)
 	}
-	date, err := parseScheduleDate(input, time.Local)
+	date, err := parseScheduleDate(input, location)
 	if err != nil {
 		return c.Send(
 			"Не удалось распознать дату. Используйте формат ДД.ММ.ГГГГ, " +
@@ -102,16 +103,16 @@ func (h *Handler) HandleScheduleDateSelect(c tele.Context) error {
 	if len(args) == 0 {
 		return respondStaleCallback(c)
 	}
-	date, err := parseScheduleDate(args[0], time.Local)
-	if err != nil {
-		return respondStaleCallback(c)
-	}
 	_ = c.Respond()
 	ctx, cancel := reqCtx()
 	defer cancel()
 	target := h.scheduleTarget(ctx, c)
 	if target == nil {
 		return nil
+	}
+	date, err := parseScheduleDate(args[0], h.universityLocation(ctx, target.UniversityID))
+	if err != nil {
+		return respondStaleCallback(c)
 	}
 	return h.sendTargetDate(ctx, c, target, date)
 }
@@ -126,7 +127,10 @@ func (h *Handler) sendTargetDate(
 	target *scheduleTarget,
 	date time.Time,
 ) error {
-	days := h.getScheduleForTarget(ctx, target, date, date)
+	days, err := h.getScheduleForTarget(ctx, target, date, date)
+	if err != nil {
+		return sendScheduleLoadError(c, err)
+	}
 	if len(days) == 0 || len(days[0].Lessons) == 0 {
 		return h.sendEmptyTargetDate(c, target, date)
 	}

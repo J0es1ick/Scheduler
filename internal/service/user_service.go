@@ -84,6 +84,10 @@ func (s *UserService) SetLessonReminder(
 	return s.userRepo.SetLessonReminder(ctx, userID, enabled, minutes)
 }
 
+func (s *UserService) SetQuietHours(ctx context.Context, userID string, enabled bool, start, end string) error {
+	return s.userRepo.SetQuietHours(ctx, userID, enabled, start, end)
+}
+
 func (s *UserService) ExportData(ctx context.Context, userID string) (*domain.UserDataExport, error) {
 	return s.userRepo.ExportUserData(ctx, userID)
 }
