@@ -40,7 +40,7 @@ jobs:
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
             BUILD_TIME=${{ github.event.head_commit.timestamp }}
-      - uses: actions/attest-build-provenance@v3
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-name: ghcr.io/${{ github.repository_owner }}/scheduler
           subject-digest: ${{ steps.build.outputs.digest }}
