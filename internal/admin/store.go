@@ -39,7 +39,7 @@ func (s *Store) Dashboard(ctx context.Context) (*Dashboard, error) {
 		return nil, fmt.Errorf("admin dashboard stats: %w", err)
 	}
 	var err error
-	if result.Sources, err = s.Sources(ctx); err != nil {
+	if result.Sources, err = s.Sources(ctx, false); err != nil {
 		return nil, err
 	}
 	if result.RecentLogs, err = s.Logs(ctx, 8, "", ""); err != nil {
@@ -77,13 +77,15 @@ func (s *Store) Dashboard(ctx context.Context) (*Dashboard, error) {
 	return &result, nil
 }
 
-func (s *Store) Sources(ctx context.Context) ([]SourceView, error) {
+func (s *Store) Sources(ctx context.Context, includeArchived bool) ([]SourceView, error) {
 	var sources []SourceView
 	err := s.db.SelectContext(ctx, &sources, `
 		SELECT ds.id, ds.university_id, u.name AS university_name,
 			COALESCE(u.full_name, '') AS university_full_name,
 			COALESCE(u.schedule_url, '') AS schedule_url,
-			ds.adapter_type, ds.is_enabled, ds.update_interval, ds.last_run_at, ds.last_success_at,
+			ds.adapter_type, ds.lifecycle_status, ds.archived_at, ds.is_enabled, ds.update_interval, ds.last_run_at, ds.last_success_at,
+			COALESCE((ds.quality_policy->>'allow_empty')::boolean, FALSE) AS allow_empty,
+			(COALESCE(u.schedule_url, '') LIKE 'http://%') AS insecure_transport,
 			COALESCE(ds.last_error, '') AS last_error,
 			ds.consecutive_failures, ds.next_retry_at,
 			COALESCE(ds.current_snapshot_id, '') AS current_snapshot_id,
@@ -122,7 +124,8 @@ func (s *Store) Sources(ctx context.Context) ([]SourceView, error) {
 			ORDER BY created_at DESC
 			LIMIT 1
 		) diagnostic ON TRUE
-		ORDER BY u.name`)
+		WHERE $1 OR ds.lifecycle_status<>'archived'
+		ORDER BY ds.lifecycle_status='archived', u.name`, includeArchived)
 	if err != nil {
 		return nil, fmt.Errorf("admin list sources: %w", err)
 	}
@@ -148,6 +151,8 @@ func (s *Store) Sources(ctx context.Context) ([]SourceView, error) {
 			source.Health = "quarantined"
 		case source.LastError != "":
 			source.Health = "error"
+		case source.LessonCount == 0 && !source.AllowEmpty:
+			source.Health = "empty"
 		case source.LastSuccessAt == nil ||
 			now.Sub(*source.LastSuccessAt) > 2*time.Duration(source.UpdateInterval)*time.Second+5*time.Minute:
 			source.Health = "stale"
@@ -160,7 +165,7 @@ func (s *Store) Sources(ctx context.Context) ([]SourceView, error) {
 
 func (s *Store) OperationalHealth(ctx context.Context) (*OperationalHealth, error) {
 	result := &OperationalHealth{Database: true, CheckedAt: time.Now()}
-	sources, err := s.Sources(ctx)
+	sources, err := s.Sources(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -187,6 +192,8 @@ func (s *Store) OperationalHealth(ctx context.Context) (*OperationalHealth, erro
 			(SELECT COUNT(*)::int FROM notification_deliveries WHERE status='failed') AS failed_notifications,
 			(SELECT COUNT(*)::int FROM bot_outbox WHERE status='pending') AS pending_outbox,
 			(SELECT COUNT(*)::int FROM bot_outbox WHERE status='failed') AS failed_outbox,
+			(SELECT COUNT(*)::int FROM connector_ingestion_runs WHERE status IN ('received','processing')) AS pending_connector_runs,
+			(SELECT COUNT(*)::int FROM connector_ingestion_runs WHERE status='failed') AS failed_connector_runs,
 			COALESCE((
 				SELECT EXTRACT(EPOCH FROM (NOW()-MIN(created_at)))::bigint
 				FROM (
@@ -210,7 +217,7 @@ func (s *Store) OperationalHealth(ctx context.Context) (*OperationalHealth, erro
 	result.Status = "healthy"
 	if result.SourcesStale > 0 || result.SourcesError > 0 ||
 		result.SourcesQuarantined > 0 || result.FailedNotifications > 0 ||
-		result.FailedOutbox > 0 || result.OldestPendingSeconds > 300 ||
+		result.FailedOutbox > 0 || result.FailedConnectorRuns > 0 || result.OldestPendingSeconds > 300 ||
 		result.ReminderWorker.LastError != "" ||
 		result.ReminderWorker.LastFinishedAt == nil ||
 		result.CheckedAt.Sub(*result.ReminderWorker.LastFinishedAt) > 3*time.Minute {
@@ -393,7 +400,7 @@ func (s *Store) Users(ctx context.Context, queryText string, limit int) ([]UserV
 	}
 	args = append(args, limit)
 	query := fmt.Sprintf(`
-		SELECT u.id, COALESCE(u.username, '') AS username, u.is_admin,
+		SELECT u.id, COALESCE(u.username, '') AS username, u.is_admin, u.admin_role,
 			COUNT(s.id)::int AS subscriptions,
 			COALESCE(u.default_group_id, '') AS default_group_id,
 			COALESCE(dg.name, '') AS default_group_name,
@@ -402,7 +409,7 @@ func (s *Store) Users(ctx context.Context, queryText string, limit int) ([]UserV
 		LEFT JOIN subscriptions s ON s.user_id=u.id
 		LEFT JOIN groups dg ON dg.id=u.default_group_id
 		WHERE %s
-		GROUP BY u.id, u.username, u.is_admin, u.default_group_id,
+		GROUP BY u.id, u.username, u.is_admin, u.admin_role, u.default_group_id,
 			dg.name, u.notifications_enabled, u.created_at, u.updated_at
 		ORDER BY u.is_admin DESC, u.updated_at DESC LIMIT $%d`, where, len(args))
 	var users []UserView
@@ -473,7 +480,11 @@ func (s *Store) DeleteSource(ctx context.Context, sourceID string) error {
 		return ErrSourceBusy
 	}
 
-	result, err := tx.ExecContext(ctx, `DELETE FROM data_sources WHERE id=$1`, sourceID)
+	result, err := tx.ExecContext(ctx, `
+		UPDATE data_sources
+		SET lifecycle_status='archived', is_enabled=FALSE,
+			archived_at=NOW(), updated_at=NOW()
+		WHERE id=$1 AND lifecycle_status<>'archived'`, sourceID)
 	if err != nil {
 		return fmt.Errorf("admin delete source: %w", err)
 	}
@@ -481,15 +492,99 @@ func (s *Store) DeleteSource(ctx context.Context, sourceID string) error {
 	if rows == 0 {
 		return ErrNotFound
 	}
+	if _, err = tx.ExecContext(ctx, `
+		UPDATE connector_clients
+		SET status='archived', updated_at=NOW()
+		WHERE data_source_id=$1 AND status<>'archived'`, sourceID); err != nil {
+		return fmt.Errorf("admin delete source: archive connector: %w", err)
+	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("admin delete source: commit: %w", err)
 	}
 	return nil
 }
 
+func (s *Store) RestoreSource(ctx context.Context, sourceID string) (string, error) {
+	tx, err := s.db.BeginTxx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return "", fmt.Errorf("admin restore source: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var acquired bool
+	if err = tx.GetContext(ctx, &acquired,
+		`SELECT pg_try_advisory_xact_lock(hashtext('scheduler-parser'), hashtext($1))`,
+		sourceID,
+	); err != nil {
+		return "", fmt.Errorf("admin restore source: acquire lock: %w", err)
+	}
+	if !acquired {
+		return "", ErrSourceBusy
+	}
+
+	var hasConnector bool
+	if err = tx.GetContext(ctx, &hasConnector,
+		`SELECT EXISTS(SELECT 1 FROM connector_clients WHERE data_source_id=$1)`, sourceID,
+	); err != nil {
+		return "", fmt.Errorf("admin restore source: detect connector: %w", err)
+	}
+	lifecycle := domain.ConnectorStatusActive
+	if hasConnector {
+		lifecycle = domain.ConnectorStatusDraft
+		if _, err = tx.ExecContext(ctx, `
+			UPDATE connector_clients SET status='draft', updated_at=NOW()
+			WHERE data_source_id=$1`, sourceID); err != nil {
+			return "", fmt.Errorf("admin restore source: restore connector: %w", err)
+		}
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE data_sources
+		SET lifecycle_status=$2, is_enabled=FALSE, archived_at=NULL, updated_at=NOW()
+		WHERE id=$1 AND lifecycle_status='archived'`, sourceID, lifecycle)
+	if err != nil {
+		return "", fmt.Errorf("admin restore source: %w", err)
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		return "", ErrNotFound
+	}
+	if err = tx.Commit(); err != nil {
+		return "", fmt.Errorf("admin restore source: commit: %w", err)
+	}
+	return lifecycle, nil
+}
+
 func (s *Store) UpdateUserAdmin(ctx context.Context, userID string, isAdmin bool) error {
-	result, err := s.db.ExecContext(ctx,
-		`UPDATE users SET is_admin=$1, updated_at=NOW() WHERE id=$2`, isAdmin, userID)
+	role := "none"
+	if isAdmin {
+		role = "owner"
+	}
+	return s.UpdateUserAdminRole(ctx, userID, role)
+}
+
+func (s *Store) UpdateUserAdminRole(ctx context.Context, userID, role string) error {
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("admin update user role: begin: %w", err)
+	}
+	defer tx.Rollback()
+	var previous string
+	if err = tx.GetContext(ctx, &previous, `SELECT admin_role FROM users WHERE id=$1 FOR UPDATE`, userID); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return fmt.Errorf("admin load user role: %w", err)
+	}
+	if previous == "owner" && role != "owner" {
+		var owners int
+		if err = tx.GetContext(ctx, &owners, `SELECT COUNT(*)::int FROM users WHERE admin_role='owner'`); err != nil {
+			return err
+		}
+		if owners <= 1 {
+			return ErrConflict
+		}
+	}
+	isAdmin := role != "none"
+	result, err := tx.ExecContext(ctx,
+		`UPDATE users SET is_admin=$1, admin_role=$2, updated_at=NOW() WHERE id=$3`, isAdmin, role, userID)
 	if err != nil {
 		return fmt.Errorf("admin update user role: %w", err)
 	}
@@ -497,13 +592,13 @@ func (s *Store) UpdateUserAdmin(ctx context.Context, userID string, isAdmin bool
 	if rows == 0 {
 		return ErrNotFound
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *Store) TelegramAdmin(ctx context.Context, userID string) (*UserView, error) {
 	var user UserView
 	err := s.db.GetContext(ctx, &user, `
-		SELECT u.id, COALESCE(u.username, '') AS username, u.is_admin,
+		SELECT u.id, COALESCE(u.username, '') AS username, u.is_admin, u.admin_role,
 			0 AS subscriptions,
 			COALESCE(u.default_group_id, '') AS default_group_id,
 			COALESCE(g.name, '') AS default_group_name,
