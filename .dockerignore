@@ -4,6 +4,9 @@
 .gocache-*
 .cache
 .runtime
+__pycache__
+*.py[cod]
+*.egg-info
 web/admin/node_modules
 web/site/node_modules
 bot.zip

@@ -1,5 +1,10 @@
 x-app-image: &app-image
-  build: .
+  build:
+    context: .
+    args:
+      VERSION: ${APP_VERSION:-dev}
+      COMMIT: ${APP_COMMIT:-local}
+      BUILD_TIME: ${APP_BUILD_TIME:-unknown}
   image: scheduler-app:local
   read_only: true
   cap_drop:
