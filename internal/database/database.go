@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/url"
@@ -16,14 +17,15 @@ type Database struct {
 
 func NewDatabase(cfg *config.Config) (*Database, error) {
 	dsn := connectionString(cfg.Database)
-
-	db, err := sqlx.Connect("pgx", dsn)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Database.ConnectTimeoutSeconds)*time.Second)
+	defer cancel()
+	db, err := sqlx.ConnectContext(ctx, "pgx", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("database: connect: %w", err)
 	}
 
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
+	db.SetMaxOpenConns(cfg.Database.MaxOpenConnections)
+	db.SetMaxIdleConns(cfg.Database.MaxIdleConnections)
 	db.SetConnMaxLifetime(5 * time.Minute)
 	db.SetConnMaxIdleTime(2 * time.Minute)
 
@@ -39,6 +41,9 @@ func connectionString(cfg config.DatabaseConfig) string {
 	}
 	query := dsn.Query()
 	query.Set("sslmode", cfg.SSLMode)
+	query.Set("connect_timeout", fmt.Sprintf("%d", cfg.ConnectTimeoutSeconds))
+	query.Set("statement_timeout", fmt.Sprintf("%d", cfg.StatementTimeoutSeconds*1000))
+	query.Set("application_name", "scheduler")
 	dsn.RawQuery = query.Encode()
 	return dsn.String()
 }

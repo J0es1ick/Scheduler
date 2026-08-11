@@ -23,11 +23,17 @@ func ApplyMigrations(ctx context.Context, db *sqlx.DB) error {
 		return fmt.Errorf("acquire migration lock: %w", err)
 	}
 	defer func() {
-		_, _ = lockConn.ExecContext(context.Background(),
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = lockConn.ExecContext(unlockCtx,
 			`SELECT pg_advisory_unlock(hashtext('scheduler_schema_migrations'))`)
 	}()
 
-	if _, err := db.ExecContext(ctx, `
+	// Keep every migration statement on the same dedicated connection that
+	// owns the session-level advisory lock. Besides making the lock effective,
+	// this also prevents a deadlock when the pool is intentionally limited to
+	// a single connection.
+	if _, err := lockConn.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			name TEXT PRIMARY KEY,
 			applied_at TIMESTAMP NOT NULL DEFAULT NOW()
@@ -42,7 +48,7 @@ func ApplyMigrations(ctx context.Context, db *sqlx.DB) error {
 	sort.Strings(entries)
 	for _, name := range entries {
 		var applied bool
-		if err = db.GetContext(ctx, &applied,
+		if err = lockConn.GetContext(ctx, &applied,
 			`SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE name = $1)`, name,
 		); err != nil {
 			return fmt.Errorf("check migration %s: %w", name, err)
@@ -53,11 +59,11 @@ func ApplyMigrations(ctx context.Context, db *sqlx.DB) error {
 
 		if name == "001_init.up.sql" {
 			var initialized bool
-			if err = db.GetContext(ctx, &initialized, `SELECT to_regclass('public.universities') IS NOT NULL`); err != nil {
+			if err = lockConn.GetContext(ctx, &initialized, `SELECT to_regclass('public.universities') IS NOT NULL`); err != nil {
 				return fmt.Errorf("detect existing schema: %w", err)
 			}
 			if initialized {
-				if _, err = db.ExecContext(ctx,
+				if _, err = lockConn.ExecContext(ctx,
 					`INSERT INTO schema_migrations (name, applied_at) VALUES ($1, $2)`, name, time.Now(),
 				); err != nil {
 					return fmt.Errorf("baseline migration %s: %w", name, err)
@@ -70,7 +76,7 @@ func ApplyMigrations(ctx context.Context, db *sqlx.DB) error {
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
-		tx, err := db.BeginTxx(ctx, nil)
+		tx, err := lockConn.BeginTxx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("begin migration %s: %w", name, err)
 		}
