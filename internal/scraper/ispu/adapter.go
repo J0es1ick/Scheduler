@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
@@ -24,9 +25,12 @@ import (
 const (
 	UniversityID = "ispu"
 
-	defaultBaseURL  = "http://schedule.ispu.ru"
-	httpTimeout     = 45 * time.Second
-	maxHTTPAttempts = 3
+	defaultBaseURL     = "http://schedule.ispu.ru"
+	httpTimeout        = 45 * time.Second
+	maxHTTPAttempts    = 3
+	maxRequestsPerRun  = 12000
+	maxSchedulesPerRun = 250
+	maxGroupsPerRun    = 10000
 
 	scheduleControl = "ctl00$ContentPlaceHolder1$ddlSchedule"
 	facultyControl  = "ctl00$ContentPlaceHolder1$ddlSubDivision"
@@ -49,9 +53,10 @@ type Adapter struct {
 	client      *http.Client
 	scheduleURL string
 
-	mu         sync.RWMutex
-	semesterID string
-	groups     map[string]groupDescriptor
+	mu           sync.RWMutex
+	semesterID   string
+	groups       map[string]groupDescriptor
+	requestCount atomic.Int64
 }
 
 type groupDescriptor struct {
@@ -108,6 +113,7 @@ func (a *Adapter) SetSemesterID(id string) {
 }
 
 func (a *Adapter) FetchGroups(ctx context.Context) ([]domain.Group, error) {
+	a.requestCount.Store(0)
 	root, err := a.getPage(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ispu FetchGroups: open schedule: %w", err)
@@ -116,6 +122,9 @@ func (a *Adapter) FetchGroups(ctx context.Context) ([]domain.Group, error) {
 	schedules := selectOptions(root.doc, scheduleControl)
 	if len(schedules) == 0 {
 		return nil, errors.New("ispu FetchGroups: schedule options not found")
+	}
+	if len(schedules) > maxSchedulesPerRun {
+		return nil, fmt.Errorf("ispu FetchGroups: schedule budget exceeded (%d)", maxSchedulesPerRun)
 	}
 
 	discovered := make(map[string]groupDescriptor, 256)
@@ -178,6 +187,9 @@ func (a *Adapter) FetchGroups(ctx context.Context) ([]domain.Group, error) {
 
 	if len(discovered) == 0 {
 		return nil, errors.New("ispu FetchGroups: no groups found in published schedules")
+	}
+	if len(discovered) > maxGroupsPerRun {
+		return nil, fmt.Errorf("ispu FetchGroups: group budget exceeded (%d)", maxGroupsPerRun)
 	}
 	makeGroupNamesUnique(discovered)
 
@@ -397,7 +409,28 @@ func radioOptions(doc *goquery.Document, control string) []option {
 func parseScheduleTable(doc *goquery.Document, gid, semesterID, scheduleLabel string) ([]domain.Lesson, error) {
 	table := doc.Find("table#sheduleTable").First()
 	if table.Length() == 0 {
-		return nil, nil
+		pageText := normalizeText(doc.Text())
+		lowerText := strings.ToLower(pageText)
+		for _, marker := range []string{
+			"расписание отсутствует", "расписание не найдено", "занятий нет", "нет расписания",
+		} {
+			if strings.Contains(lowerText, marker) {
+				return []domain.Lesson{}, nil
+			}
+		}
+		digest := sha256.Sum256([]byte(pageText))
+		preview := []rune(pageText)
+		if len(preview) > 500 {
+			preview = preview[:500]
+		}
+		return nil, scraper.NewDiagnosticError(
+			fmt.Errorf("ispu schedule table #sheduleTable not found for group %s", gid),
+			scraper.ResponseDiagnostic{
+				Category: "markup_changed", Summary: "На странице ИГЭУ отсутствует ожидаемая таблица расписания",
+				ResponseSize: len(pageText), ResponseSHA256: fmt.Sprintf("%x", digest[:]),
+				ResponsePreview: string(preview), Retryable: false, StopBatch: true,
+			},
+		)
 	}
 
 	rangeStart, rangeEnd := parseScheduleRange(doc.Text())
@@ -798,6 +831,15 @@ func isSelected(selection *goquery.Selection) bool {
 func (a *Adapter) do(ctx context.Context, method string, form url.Values) ([]byte, error) {
 	var lastErr error
 	for attempt := 1; attempt <= maxHTTPAttempts; attempt++ {
+		if a.requestCount.Add(1) > maxRequestsPerRun {
+			return nil, scraper.NewDiagnosticError(
+				fmt.Errorf("ispu HTTP request budget exceeded (%d)", maxRequestsPerRun),
+				scraper.ResponseDiagnostic{
+					Category: "request_budget_exceeded", Summary: "Превышен безопасный лимит HTTP-запросов ИГЭУ",
+					Retryable: false, StopBatch: true,
+				},
+			)
+		}
 		var requestBody io.Reader
 		if form != nil {
 			requestBody = strings.NewReader(form.Encode())

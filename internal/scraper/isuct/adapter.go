@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
@@ -32,6 +33,10 @@ const (
 	autocompleteConcurrency = 4
 	maxHTTPAttempts         = 3
 	maxScheduleAttempts     = 3
+	maxAutocompleteDepth    = 8
+	maxAutocompletePrefixes = 5000
+	maxGroupsPerRun         = 10000
+	maxRequestsPerRun       = 12000
 )
 
 var (
@@ -62,10 +67,11 @@ type Adapter struct {
 	autocompleteURL string
 	ajaxURL         string
 
-	mu          sync.RWMutex
-	semesterID  string
-	groupNames  map[string]string
-	formBuildID string
+	mu           sync.RWMutex
+	semesterID   string
+	groupNames   map[string]string
+	formBuildID  string
+	requestCount atomic.Int64
 }
 
 var _ scraper.SourceAdapter = (*Adapter)(nil)
@@ -103,6 +109,7 @@ func (a *Adapter) Name() string         { return "ИГХТУ" }
 func (a *Adapter) UniversityID() string { return UniversityID }
 
 func (a *Adapter) FetchGroups(ctx context.Context) ([]domain.Group, error) {
+	a.requestCount.Store(0)
 	frontier := make([]string, 10)
 	for i := range frontier {
 		frontier[i] = fmt.Sprint(i)
@@ -114,6 +121,9 @@ func (a *Adapter) FetchGroups(ctx context.Context) ([]domain.Group, error) {
 
 	discovered := make(map[string]autocompleteItem, 256)
 	for len(frontier) > 0 {
+		if len(seenPrefixes) > maxAutocompletePrefixes {
+			return nil, fmt.Errorf("isuct FetchGroups: autocomplete request budget exceeded (%d prefixes)", maxAutocompletePrefixes)
+		}
 		results := a.fetchPrefixBatch(ctx, frontier)
 		next := make([]string, 0)
 		for _, result := range results {
@@ -128,6 +138,9 @@ func (a *Adapter) FetchGroups(ctx context.Context) ([]domain.Group, error) {
 			if len(result.items) < autocompleteLimit {
 				continue
 			}
+			if len([]rune(result.prefix)) >= maxAutocompleteDepth {
+				return nil, fmt.Errorf("isuct FetchGroups: autocomplete remained truncated at maximum prefix depth %d", maxAutocompleteDepth)
+			}
 			for _, suffix := range "0123456789/" {
 				child := result.prefix + string(suffix)
 				if !seenPrefixes[child] {
@@ -137,6 +150,9 @@ func (a *Adapter) FetchGroups(ctx context.Context) ([]domain.Group, error) {
 			}
 		}
 		frontier = next
+		if len(discovered) > maxGroupsPerRun {
+			return nil, fmt.Errorf("isuct FetchGroups: discovered group budget exceeded (%d)", maxGroupsPerRun)
+		}
 	}
 
 	if len(discovered) == 0 {
@@ -618,6 +634,15 @@ func (a *Adapter) doResponse(
 	var lastErr error
 	var lastResponse httpResponse
 	for attempt := 1; attempt <= maxHTTPAttempts; attempt++ {
+		if a.requestCount.Add(1) > maxRequestsPerRun {
+			return lastResponse, scraper.NewDiagnosticError(
+				fmt.Errorf("isuct HTTP request budget exceeded (%d)", maxRequestsPerRun),
+				scraper.ResponseDiagnostic{
+					Category: "request_budget_exceeded", Summary: "Превышен безопасный лимит HTTP-запросов ИГХТУ",
+					Retryable: false, StopBatch: true,
+				},
+			)
+		}
 		var body io.Reader
 		if form != nil {
 			body = strings.NewReader(form.Encode())

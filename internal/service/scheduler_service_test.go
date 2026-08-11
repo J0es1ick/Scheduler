@@ -74,6 +74,17 @@ func TestCompareLessonSnapshotsIgnoresIDsOrderAndUpdatedAt(t *testing.T) {
 	}
 }
 
+func TestCompareLessonSnapshotsIgnoresSourceIdentity(t *testing.T) {
+	before := domain.Lesson{ID: "old", ExternalID: "source-old", SourceID: "source-a", Subject: "Math", TimeStart: "09:00", TimeEnd: "10:30"}
+	after := before
+	after.ID = "new"
+	after.ExternalID = "source-new"
+	after.SourceID = "source-b"
+	if diff := CompareLessonSnapshots([]domain.Lesson{before}, []domain.Lesson{after}); diff.Changed() {
+		t.Fatalf("source identity changed schedule: %+v", diff)
+	}
+}
+
 func TestCompareLessonSnapshotsCountsAddedAndRemoved(t *testing.T) {
 	base := domain.Lesson{
 		GroupID: "g1", UniversityID: "u1", SemesterID: "s1",

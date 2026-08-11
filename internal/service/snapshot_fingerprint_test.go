@@ -88,7 +88,7 @@ func TestEvaluateSnapshotTrustsRepeatedApprovedEmptySchedule(t *testing.T) {
 		HasExistingState: true,
 	}
 
-	anomalies, publishable := evaluateSnapshot(approved, 0, baseline)
+	anomalies, publishable := evaluateSnapshot(approved, 0, baseline, domain.DefaultSourceQualityPolicy())
 	if !publishable {
 		t.Fatal("approved equivalent snapshot must remain publishable")
 	}
@@ -99,7 +99,7 @@ func TestEvaluateSnapshotTrustsRepeatedApprovedEmptySchedule(t *testing.T) {
 	changed := approved
 	changed.Groups = append([]domain.SnapshotGroup(nil), approved.Groups...)
 	changed.Groups = changed.Groups[:1]
-	anomalies, _ = evaluateSnapshot(changed, 0, baseline)
+	anomalies, _ = evaluateSnapshot(changed, 0, baseline, domain.DefaultSourceQualityPolicy())
 	if len(anomalies) == 0 {
 		t.Fatal("changed empty snapshot must still be checked by quarantine rules")
 	}

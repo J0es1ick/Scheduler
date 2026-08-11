@@ -21,18 +21,20 @@ type snapshotFingerprintGroup struct {
 }
 
 type snapshotFingerprintLesson struct {
-	DayOfWeek   int               `json:"day_of_week"`
-	SpecialDate string            `json:"special_date"`
-	TimeStart   string            `json:"time_start"`
-	TimeEnd     string            `json:"time_end"`
-	WeekType    domain.WeekType   `json:"week_type"`
-	Subject     string            `json:"subject"`
-	Type        domain.LessonType `json:"type"`
-	Teacher     string            `json:"teacher"`
-	Room        string            `json:"room"`
-	Subgroup    int               `json:"subgroup"`
-	ValidFrom   string            `json:"valid_from"`
-	ValidTo     string            `json:"valid_to"`
+	DayOfWeek   int                   `json:"day_of_week"`
+	SpecialDate string                `json:"special_date"`
+	TimeStart   string                `json:"time_start"`
+	TimeEnd     string                `json:"time_end"`
+	WeekType    domain.WeekType       `json:"week_type"`
+	Subject     string                `json:"subject"`
+	Type        domain.LessonType     `json:"type"`
+	Teacher     string                `json:"teacher"`
+	Room        string                `json:"room"`
+	Subgroup    int                   `json:"subgroup"`
+	ValidFrom   string                `json:"valid_from"`
+	ValidTo     string                `json:"valid_to"`
+	Recurrence  domain.RecurrenceRule `json:"recurrence,omitempty"`
+	ExternalID  string                `json:"external_id,omitempty"`
 }
 
 func scheduleSnapshotsEquivalent(left, right domain.ScheduleSnapshot) bool {
@@ -62,6 +64,8 @@ func scheduleSnapshotFingerprint(snapshot domain.ScheduleSnapshot) string {
 				Subgroup:    lesson.Subgroup,
 				ValidFrom:   snapshotFingerprintDate(lesson.ValidFrom),
 				ValidTo:     snapshotFingerprintDate(lesson.ValidTo),
+				Recurrence:  lesson.Recurrence,
+				ExternalID:  strings.TrimSpace(lesson.ExternalID),
 			})
 			fingerprintGroup.Lessons = append(fingerprintGroup.Lessons, encoded)
 		}

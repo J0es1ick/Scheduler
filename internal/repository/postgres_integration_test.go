@@ -71,6 +71,13 @@ func TestPostgresRepositoryFlow(t *testing.T) {
 	dataSources := repository.NewDataSourceRepository(db)
 	parseLogs := repository.NewParseLogRepository(db)
 	snapshots := repository.NewParserSnapshotRepository(db)
+	notifications := repository.NewNotificationRepository(db)
+	if _, err = notifications.ClaimPending(ctx, 1); err != nil {
+		t.Fatalf("claim pending notifications: %v", err)
+	}
+	if _, err = notifications.ClaimBotOutbox(ctx, 1); err != nil {
+		t.Fatalf("claim bot outbox: %v", err)
+	}
 
 	if _, err = universities.CreateUniversity(
 		ctx,
