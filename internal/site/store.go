@@ -50,5 +50,25 @@ func (s *Store) PublicInfo(
 	if result.UniversityNames == nil {
 		result.UniversityNames = []string{}
 	}
+	if err := s.db.SelectContext(ctx, &result.Sources, `
+		SELECT u.name AS university_name, COALESCE(u.schedule_url, '') AS schedule_url,
+			(COALESCE(u.schedule_url, '') LIKE 'https://%') AS secure,
+			ds.last_success_at,
+			CASE
+				WHEN NOT ds.is_enabled THEN 'disabled'
+				WHEN COALESCE(ds.last_error, '')<>'' THEN 'error'
+				WHEN ds.last_success_at IS NULL OR
+					NOW()-ds.last_success_at > (ds.update_interval*2+300)*INTERVAL '1 second' THEN 'stale'
+				ELSE 'current'
+			END AS state
+		FROM data_sources ds
+		JOIN universities u ON u.id=ds.university_id
+		WHERE u.is_active AND ds.lifecycle_status='active'
+		ORDER BY u.name`); err != nil {
+		return nil, fmt.Errorf("load public source status: %w", err)
+	}
+	if result.Sources == nil {
+		result.Sources = []PublicSourceStatus{}
+	}
 	return result, nil
 }

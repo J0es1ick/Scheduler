@@ -59,6 +59,22 @@
     grid-template-columns: repeat(2, 1fr);
   }
 
+  .public-connector-steps {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .public-connector-steps article:nth-child(2) {
+    border-right: 0;
+  }
+
+  .public-connector-steps article:nth-child(-n + 2) {
+    border-bottom: 1px solid #c9beae;
+  }
+
+  .public-connector-kit {
+    grid-template-columns: 1fr;
+  }
+
   .public-final-card {
     grid-template-columns: 1fr;
     align-items: start;
@@ -88,6 +104,25 @@
 
   .public-actions {
     display: grid;
+  }
+
+  .public-connector-steps {
+    grid-template-columns: 1fr;
+  }
+
+  .public-connector-steps article,
+  .public-connector-steps article:nth-child(2) {
+    min-height: 205px;
+    border-right: 0;
+    border-bottom: 1px solid #c9beae;
+  }
+
+  .public-connector-steps article:last-child {
+    border-bottom: 0;
+  }
+
+  .public-connector-kit {
+    padding: 24px 20px;
   }
 
   .public-primary-button,
@@ -151,6 +186,14 @@
 
   .public-tech-grid {
     grid-template-columns: 1fr;
+  }
+
+  .public-status-list article {
+    grid-template-columns: 30px 1fr 24px;
+  }
+
+  .public-status-list time {
+    grid-column: 2 / -1;
   }
 
   .public-tech-card {

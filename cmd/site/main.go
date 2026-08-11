@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/J0es1ick/Scheduler/internal/buildinfo"
 	"github.com/J0es1ick/Scheduler/internal/config"
 	"github.com/J0es1ick/Scheduler/internal/database"
 	"github.com/J0es1ick/Scheduler/internal/site"
@@ -21,6 +22,7 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
+	logger.Info("starting scheduler site", "build", buildinfo.Values())
 
 	cfg, err := config.InitSiteConfig()
 	if err != nil {
@@ -33,6 +35,13 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
+	migrationContext, migrationCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err = database.ApplyMigrations(migrationContext, db.DB); err != nil {
+		migrationCancel()
+		logger.Error("site database migrations failed", "err", err)
+		os.Exit(1)
+	}
+	migrationCancel()
 
 	siteServer, err := site.NewServer(
 		site.NewStore(db.DB),

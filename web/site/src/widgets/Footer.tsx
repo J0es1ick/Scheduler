@@ -12,6 +12,7 @@ export function Footer({ botURL, projectURL }: FooterProps) {
         <ProjectMark />
         <p>Открытый сервис актуального расписания для учебных заведений.</p>
         <div>
+          <a href="#connectors">Connector SDK</a>
           <a href={projectURL} target="_blank" rel="noreferrer">
             GitHub
           </a>
