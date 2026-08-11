@@ -44,6 +44,7 @@ type ReminderWorker struct {
 	interval         time.Duration
 	runTimeout       time.Duration
 	now              func() time.Time
+	locations        map[string]*time.Location
 }
 
 type reminderSlot struct {
@@ -67,16 +68,29 @@ func NewReminderWorker(
 		interval:         interval,
 		runTimeout:       reminderRunTimeout,
 		now:              time.Now,
+		locations:        make(map[string]*time.Location),
 	}
 }
 
-func (w *ReminderWorker) Start(ctx context.Context) {
-	go w.run(ctx)
+func (w *ReminderWorker) Start(ctx context.Context, monitors ...*Monitor) <-chan struct{} {
+	done := make(chan struct{})
+	var monitor *Monitor
+	if len(monitors) > 0 {
+		monitor = monitors[0]
+	}
+	go func() {
+		defer close(done)
+		monitor.Started(ReminderWorkerName)
+		defer monitor.Stopped(ReminderWorkerName)
+		w.run(ctx, monitor)
+	}()
+	return done
 }
 
-func (w *ReminderWorker) run(ctx context.Context) {
+func (w *ReminderWorker) run(ctx context.Context, monitor *Monitor) {
 	slog.Info("lesson reminder worker started", "interval", w.interval)
 	w.tick(ctx)
+	monitor.Heartbeat(ReminderWorkerName)
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
 	for {
@@ -86,6 +100,7 @@ func (w *ReminderWorker) run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			w.tick(ctx)
+			monitor.Heartbeat(ReminderWorkerName)
 		}
 	}
 }
@@ -101,7 +116,6 @@ func (w *ReminderWorker) tick(parent context.Context) {
 		return
 	}
 
-	now := startedAt.In(time.Local)
 	schedules := make(reminderScheduleCache)
 	afterUserID := status.Cursor
 	processed := 0
@@ -130,7 +144,7 @@ scan:
 				runErr = ctx.Err()
 				break scan
 			}
-			recipientErr := w.enqueueRecipientReminders(ctx, recipient, now, schedules)
+			recipientErr := w.enqueueRecipientReminders(ctx, recipient, startedAt, schedules)
 			if ctx.Err() != nil {
 				runErr = ctx.Err()
 				break scan
@@ -199,6 +213,11 @@ func (w *ReminderWorker) enqueueRecipientReminders(
 	now time.Time,
 	schedules reminderScheduleCache,
 ) error {
+	location, err := w.recipientLocation(recipient.Timezone)
+	if err != nil {
+		return fmt.Errorf("load timezone %q for group %s: %w", recipient.Timezone, recipient.GroupID, err)
+	}
+	now = now.In(location)
 	var firstErr error
 	for offset := 0; offset <= reminderLookaheadDays; offset++ {
 		date := dateOnly(now).AddDate(0, 0, offset)
@@ -236,6 +255,21 @@ func (w *ReminderWorker) enqueueRecipientReminders(
 		}
 	}
 	return firstErr
+}
+
+func (w *ReminderWorker) recipientLocation(name string) (*time.Location, error) {
+	if location := w.locations[name]; location != nil {
+		return location, nil
+	}
+	location, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, err
+	}
+	if w.locations == nil {
+		w.locations = make(map[string]*time.Location)
+	}
+	w.locations[name] = location
+	return location, nil
 }
 
 func (w *ReminderWorker) enqueueReminderSlot(

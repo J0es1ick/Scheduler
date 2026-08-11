@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -124,7 +125,23 @@ func (h *Handler) sourceFreshnessText(universityID string) string {
 	if freshness.LastSuccess == nil {
 		return result + "\nПоследнее успешное обновление ещё не зафиксировано."
 	}
-	return result + "\nОбновлено: " + freshness.LastSuccess.In(time.Local).Format("02.01.2006 15:04 MST")
+	return result + "\nОбновлено: " + freshness.LastSuccess.In(h.universityLocation(ctx, universityID)).Format("02.01.2006 15:04 MST")
+}
+
+func (h *Handler) universityLocation(ctx context.Context, universityID string) *time.Location {
+	university, err := h.UniversityService.GetByID(ctx, universityID)
+	if err != nil || university == nil || university.Timezone == "" {
+		return time.Local
+	}
+	location, err := time.LoadLocation(university.Timezone)
+	if err != nil {
+		return time.Local
+	}
+	return location
+}
+
+func (h *Handler) targetNow(ctx context.Context, target *scheduleTarget) time.Time {
+	return time.Now().In(h.universityLocation(ctx, target.UniversityID))
 }
 
 func (h *Handler) sendSingleDayForTarget(
@@ -149,12 +166,6 @@ func sendScheduleMessage(
 		return c.Send(text, markup)
 	}
 
-	// Telegram does not allow ReplyKeyboardRemove and InlineKeyboardMarkup in
-	// the same reply_markup. It also rejects adding an inline keyboard to a
-	// message that was sent with ReplyKeyboardRemove. Use a short disposable
-	// message to hide the persistent keyboard, then send the schedule once with
-	// its final inline navigation. This also prevents Telebot from processing
-	// the same callback data twice after a failed edit.
 	keyboardNotice, err := c.Bot().Send(
 		c.Recipient(),
 		"Открываю расписание…",
@@ -182,7 +193,7 @@ func (h *Handler) getScheduleForTarget(
 	target *scheduleTarget,
 	from time.Time,
 	to time.Time,
-) []dto.DaySchedule {
+) ([]dto.DaySchedule, error) {
 	data, err := h.ScheduleService.GetScheduleForGroupRange(
 		ctx,
 		target.GroupID,
@@ -195,9 +206,24 @@ func (h *Handler) getScheduleForTarget(
 			"groupID", target.GroupID,
 			"err", err,
 		)
+		return nil, err
+	}
+	return mapToDaySchedule(data), nil
+}
+
+func sendScheduleLoadError(c tgbotapi.Context, err error) error {
+	slog.Error("schedule is temporarily unavailable", "err", err)
+	const message = "Не удалось загрузить расписание. Попробуйте ещё раз через несколько минут."
+	if c.Callback() != nil {
+		if respondErr := c.Respond(&tgbotapi.CallbackResponse{Text: message, ShowAlert: true}); respondErr != nil {
+			return errors.Join(err, respondErr)
+		}
 		return nil
 	}
-	return mapToDaySchedule(data)
+	if sendErr := c.Send(message); sendErr != nil {
+		return errors.Join(err, sendErr)
+	}
+	return nil
 }
 
 func (h *Handler) HandleToday(c tgbotapi.Context) error {
@@ -208,8 +234,11 @@ func (h *Handler) HandleToday(c tgbotapi.Context) error {
 		return nil
 	}
 
-	now := time.Now()
-	days := h.getScheduleForTarget(ctx, target, now, now)
+	now := h.targetNow(ctx, target)
+	days, err := h.getScheduleForTarget(ctx, target, now, now)
+	if err != nil {
+		return sendScheduleLoadError(c, err)
+	}
 	if len(days) == 0 {
 		return h.sendEmptyTargetDate(c, target, now)
 	}
@@ -224,8 +253,11 @@ func (h *Handler) HandleTomorrow(c tgbotapi.Context) error {
 		return nil
 	}
 
-	tomorrow := time.Now().AddDate(0, 0, 1)
-	days := h.getScheduleForTarget(ctx, target, tomorrow, tomorrow)
+	tomorrow := h.targetNow(ctx, target).AddDate(0, 0, 1)
+	days, err := h.getScheduleForTarget(ctx, target, tomorrow, tomorrow)
+	if err != nil {
+		return sendScheduleLoadError(c, err)
+	}
 	if len(days) == 0 {
 		return h.sendEmptyTargetDate(c, target, tomorrow)
 	}
@@ -240,7 +272,7 @@ func (h *Handler) HandleWeek(c tgbotapi.Context) error {
 		return nil
 	}
 
-	return h.sendTargetWeek(ctx, c, target, time.Now(), 7)
+	return h.sendTargetWeek(ctx, c, target, h.targetNow(ctx, target), 7)
 }
 
 func (h *Handler) HandleTwoWeeks(c tgbotapi.Context) error {
@@ -251,16 +283,12 @@ func (h *Handler) HandleTwoWeeks(c tgbotapi.Context) error {
 		return nil
 	}
 
-	return h.sendTargetWeek(ctx, c, target, time.Now(), 14)
+	return h.sendTargetWeek(ctx, c, target, h.targetNow(ctx, target), 14)
 }
 
 func (h *Handler) HandleScheduleWeekSelect(c tgbotapi.Context) error {
 	value, ok := callbackArgument(c)
 	if !ok {
-		return respondStaleCallback(c)
-	}
-	from, err := parseScheduleDate(value, time.Local)
-	if err != nil {
 		return respondStaleCallback(c)
 	}
 	_ = c.Respond()
@@ -269,6 +297,10 @@ func (h *Handler) HandleScheduleWeekSelect(c tgbotapi.Context) error {
 	target := h.scheduleTarget(ctx, c)
 	if target == nil {
 		return nil
+	}
+	from, err := parseScheduleDate(value, h.universityLocation(ctx, target.UniversityID))
+	if err != nil {
+		return respondStaleCallback(c)
 	}
 	return h.sendTargetWeek(ctx, c, target, from, 7)
 }
@@ -281,16 +313,26 @@ func (h *Handler) sendTargetWeek(
 	daysCount int,
 ) error {
 	markup := keyboards.ScheduleWeekNavigation(from, target.GroupName, isGroupChat(c))
+	days, err := h.getScheduleForTarget(ctx, target, from, from.AddDate(0, 0, daysCount-1))
+	if err != nil {
+		return sendScheduleLoadError(c, err)
+	}
 	return h.sendDaysWithMarkup(
 		c,
-		h.getScheduleForTarget(ctx, target, from, from.AddDate(0, 0, daysCount-1)),
+		days,
 		target.UniversityID,
 		markup,
 	)
 }
 
 func (h *Handler) HandleWeekDay(c tgbotapi.Context) error {
-	return c.Send("Выберите день недели:", keyboards.WeekDaySelector(time.Now()))
+	ctx, cancel := reqCtx()
+	defer cancel()
+	target := h.scheduleTarget(ctx, c)
+	if target == nil {
+		return nil
+	}
+	return c.Send("Выберите день недели:", keyboards.WeekDaySelector(h.targetNow(ctx, target)))
 }
 
 func (h *Handler) HandleWeekDaySelect(c tgbotapi.Context) error {
@@ -313,14 +355,15 @@ func (h *Handler) HandleWeekDaySelect(c tgbotapi.Context) error {
 		return nil
 	}
 
-	from := time.Now()
+	location := h.universityLocation(ctx, target.UniversityID)
+	from := time.Now().In(location)
 	if len(args) > 1 {
-		parsed, err := parseScheduleDate(args[1], time.Local)
+		parsed, err := parseScheduleDate(args[1], location)
 		if err == nil {
 			from = parsed
 		}
 	}
-	selectedDate := dateAtLocation(from, time.Local)
+	selectedDate := dateAtLocation(from, location)
 	for offset := 0; offset < 7; offset++ {
 		candidate := selectedDate.AddDate(0, 0, offset)
 		if weekdayNumber(candidate) == weekdayNum {

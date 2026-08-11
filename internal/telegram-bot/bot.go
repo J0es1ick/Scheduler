@@ -20,6 +20,7 @@ func privateCommands() []tele.Command {
 		{Text: "date", Description: "Выбрать дату"},
 		{Text: "search", Description: "Поиск занятий"},
 		{Text: "settings", Description: "Мои группы и уведомления"},
+		{Text: "quiet_hours", Description: "Тихие часы для уведомлений"},
 		{Text: "help", Description: "Помощь и остальные команды"},
 	}
 }
@@ -41,6 +42,7 @@ func groupCommands() []tele.Command {
 		{Text: "week", Description: "Расписание на неделю"},
 		{Text: "chat_settings", Description: "Группа расписания этого чата"},
 		{Text: "sources", Description: "Источники расписания"},
+		{Text: "connect_source", Description: "Подключить своё расписание"},
 	}
 }
 
@@ -70,16 +72,19 @@ func Register(ctx context.Context, bot *tele.Bot, handler *handlers.Handler) <-c
 	bot.Handle("/settings", handler.PrivateOnly(handler.HandleSettings))
 	bot.Handle("/subscriptions", handler.PrivateOnly(handler.HandleSettings))
 	bot.Handle("/reminders", handler.PrivateOnly(handler.HandleReminders))
+	bot.Handle("/quiet_hours", handler.PrivateOnly(handler.HandleQuietHours))
 	bot.Handle("/hotline", handler.PrivateOnly(handler.HandleHotline))
 	bot.Handle("/admin", handler.PrivateOnly(handler.HandleAdmin))
 	bot.Handle("/privacy", handler.HandlePrivacy)
 	bot.Handle("/my_data", handler.PrivateOnly(handler.HandleMyData))
 	bot.Handle("/delete_me", handler.PrivateOnly(handler.HandleDeleteMe))
 	bot.Handle("/sources", handler.HandleSourcesInfo)
+	bot.Handle("/connect_source", handler.HandleConnectorInfo)
 	bot.Handle("/metrics", handler.PrivateOnly(handler.HandleMetrics))
 	bot.Handle("/chat_settings", handler.HandleChatSettings)
 	bot.Handle("/set_chat_group", handler.HandleSetChatGroup)
 	bot.Handle("/unset_chat_group", handler.HandleUnsetChatGroup)
+	bot.Handle(tele.OnQuery, handler.HandleInlineQuery)
 
 	bot.Handle(&tele.Btn{Unique: "select_university"}, handler.HandleUniversitySelect)
 	bot.Handle(&tele.Btn{Unique: "select_search_type"}, handler.HandleSearchTypeSelect)
@@ -109,6 +114,7 @@ func Register(ctx context.Context, bot *tele.Bot, handler *handlers.Handler) <-c
 	bot.Handle(&tele.Btn{Unique: "select_hotline_type"}, handler.HandleHotlineType)
 	bot.Handle(&tele.Btn{Unique: "cancel_hotline"}, handler.HandleCancelHotline)
 	bot.Handle(&tele.Btn{Unique: "show_sources"}, handler.HandleShowSources)
+	bot.Handle(&tele.Btn{Unique: "show_connector"}, handler.HandleShowConnector)
 	bot.Handle(&tele.Btn{Unique: "open_hotline"}, handler.HandleOpenHotline)
 	bot.Handle(&tele.Btn{Unique: "show_privacy"}, handler.HandleShowPrivacy)
 	bot.Handle(&tele.Btn{Unique: "show_help"}, handler.HandleShowHelp)

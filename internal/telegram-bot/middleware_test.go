@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"context"
 	"errors"
 	"sync/atomic"
 	"testing"
@@ -28,11 +29,15 @@ func TestRecoverPanicsConvertsPanicToError(t *testing.T) {
 	}
 }
 
-func TestLimitConcurrentRejectsExcessWork(t *testing.T) {
+func TestLimitConcurrentRejectsWhenCapacityIsFull(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	handler := LimitConcurrent(1)(func(tele.Context) error {
-		close(entered)
+		select {
+		case <-entered:
+		default:
+			close(entered)
+		}
 		<-release
 		return nil
 	})
@@ -41,6 +46,7 @@ func TestLimitConcurrentRejectsExcessWork(t *testing.T) {
 	<-entered
 
 	if err := handler(nil); !errors.Is(err, ErrBotBusy) {
+		close(release)
 		t.Fatalf("second handler error = %v, want ErrBotBusy", err)
 	}
 	close(release)
@@ -88,7 +94,7 @@ func TestSenderQueueDoesNotConsumeGlobalCapacity(t *testing.T) {
 	}
 }
 
-func TestSerializeBySenderRejectsQueueOverflow(t *testing.T) {
+func TestSerializeBySenderRejectsAfterQueueCapacity(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	handler := SerializeBySender(1)(func(tele.Context) error {
@@ -116,5 +122,40 @@ func TestSerializeBySenderRejectsQueueOverflow(t *testing.T) {
 		if err := <-done; err != nil {
 			t.Fatalf("queued handler error = %v", err)
 		}
+	}
+}
+
+func TestHandlerTrackerWaitsForAcceptedHandlers(t *testing.T) {
+	tracker := NewHandlerTracker()
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	handler := tracker.Middleware()(func(tele.Context) error {
+		close(entered)
+		<-release
+		return nil
+	})
+	done := make(chan error, 1)
+	go func() { done <- handler(nil) }()
+	<-entered
+
+	tracker.StopAccepting()
+	if err := handler(nil); !errors.Is(err, ErrBotBusy) {
+		t.Fatalf("handler accepted during shutdown: %v", err)
+	}
+	waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- tracker.Wait(waitCtx) }()
+	select {
+	case err := <-waitDone:
+		t.Fatalf("tracker returned before handler completed: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("handler error = %v", err)
+	}
+	if err := <-waitDone; err != nil {
+		t.Fatalf("tracker wait error = %v", err)
 	}
 }

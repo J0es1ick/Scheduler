@@ -1,6 +1,7 @@
 package state
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -12,6 +13,41 @@ type Manager struct {
 	userStates map[int64]entry
 	ttl        time.Duration
 	now        func() time.Time
+}
+
+func (m *Manager) PruneExpired() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := m.now()
+	removed := 0
+	for userID, item := range m.userStates {
+		if !item.expiresAt.After(now) {
+			delete(m.userStates, userID)
+			removed++
+		}
+	}
+	return removed
+}
+
+func (m *Manager) StartCleanup(ctx context.Context, interval time.Duration) <-chan struct{} {
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				m.PruneExpired()
+			}
+		}
+	}()
+	return done
 }
 
 type entry struct {

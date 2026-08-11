@@ -56,11 +56,22 @@ func (r *NotificationRepository) ClaimPending(ctx context.Context, limit int) ([
 	var items []domain.NotificationDelivery
 	err := r.db.SelectContext(ctx, &items, `
 		WITH candidates AS (
-			SELECT id
-			FROM notification_deliveries
-			WHERE status = 'pending' AND next_attempt_at <= NOW()
-			ORDER BY created_at, id
-			FOR UPDATE SKIP LOCKED
+			SELECT d.id
+			FROM notification_deliveries d
+			JOIN schedule_change_events e ON e.id=d.event_id
+			JOIN groups g ON g.id=e.group_id
+			JOIN universities un ON un.id=g.university_id
+			JOIN users usr ON usr.id=d.user_id
+			WHERE d.status = 'pending' AND d.next_attempt_at <= NOW()
+			  AND NOT (usr.quiet_hours_enabled AND CASE
+				WHEN usr.quiet_hours_start < usr.quiet_hours_end THEN
+					(NOW() AT TIME ZONE un.timezone)::time >= usr.quiet_hours_start
+					AND (NOW() AT TIME ZONE un.timezone)::time < usr.quiet_hours_end
+				ELSE (NOW() AT TIME ZONE un.timezone)::time >= usr.quiet_hours_start
+					OR (NOW() AT TIME ZONE un.timezone)::time < usr.quiet_hours_end
+			  END)
+			ORDER BY d.created_at, d.id
+			FOR UPDATE OF d SKIP LOCKED
 			LIMIT $1
 		), claimed AS (
 			UPDATE notification_deliveries d
@@ -102,14 +113,39 @@ func (r *NotificationRepository) ClaimBotOutbox(ctx context.Context, limit int) 
 			AND o.status='pending' AND NOT u.is_admin`); err != nil {
 		return nil, fmt.Errorf("cancel admin messages for former admins: %w", err)
 	}
+	if _, err := r.db.ExecContext(ctx, `
+		UPDATE bot_outbox o
+		SET status='cancelled', updated_at=NOW()
+		FROM users usr, groups g, universities un
+		WHERE o.user_id=usr.id AND o.kind='lesson_reminder' AND o.status='pending'
+		  AND g.id=o.group_id AND un.id=g.university_id
+		  AND usr.quiet_hours_enabled AND CASE
+			WHEN usr.quiet_hours_start < usr.quiet_hours_end THEN
+				(NOW() AT TIME ZONE un.timezone)::time >= usr.quiet_hours_start
+				AND (NOW() AT TIME ZONE un.timezone)::time < usr.quiet_hours_end
+			ELSE (NOW() AT TIME ZONE un.timezone)::time >= usr.quiet_hours_start
+				OR (NOW() AT TIME ZONE un.timezone)::time < usr.quiet_hours_end
+		  END`); err != nil {
+		return nil, fmt.Errorf("cancel reminders during quiet hours: %w", err)
+	}
 	var items []domain.BotOutboxDelivery
 	err := r.db.SelectContext(ctx, &items, `
 		WITH candidates AS (
-			SELECT id
-			FROM bot_outbox
-			WHERE status='pending' AND next_attempt_at <= NOW()
-			ORDER BY created_at, id
-			FOR UPDATE SKIP LOCKED
+			SELECT o.id
+			FROM bot_outbox o
+			JOIN users usr ON usr.id=o.user_id
+			LEFT JOIN groups g ON g.id=o.group_id
+			LEFT JOIN universities un ON un.id=g.university_id
+			WHERE o.status='pending' AND o.next_attempt_at <= NOW()
+			  AND (o.kind<>'lesson_reminder' OR NOT (usr.quiet_hours_enabled AND CASE
+				WHEN usr.quiet_hours_start < usr.quiet_hours_end THEN
+					(NOW() AT TIME ZONE COALESCE(un.timezone, 'Europe/Moscow'))::time >= usr.quiet_hours_start
+					AND (NOW() AT TIME ZONE COALESCE(un.timezone, 'Europe/Moscow'))::time < usr.quiet_hours_end
+				ELSE (NOW() AT TIME ZONE COALESCE(un.timezone, 'Europe/Moscow'))::time >= usr.quiet_hours_start
+					OR (NOW() AT TIME ZONE COALESCE(un.timezone, 'Europe/Moscow'))::time < usr.quiet_hours_end
+			  END))
+			ORDER BY o.created_at, o.id
+			FOR UPDATE OF o SKIP LOCKED
 			LIMIT $1
 		), claimed AS (
 			UPDATE bot_outbox o

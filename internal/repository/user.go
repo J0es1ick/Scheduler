@@ -35,7 +35,9 @@ func (r *UserRepository) GetUserByID(ctx context.Context, id string) (*domain.Us
 	err := r.db.GetContext(ctx, &user,
 		`SELECT id, COALESCE(username, '') AS username, is_admin,
 			COALESCE(default_group_id, '') AS default_group_id, notifications_enabled,
-			reminder_enabled, reminder_minutes,
+			reminder_enabled, reminder_minutes, quiet_hours_enabled,
+			to_char(quiet_hours_start, 'HH24:MI') AS quiet_hours_start,
+			to_char(quiet_hours_end, 'HH24:MI') AS quiet_hours_end,
 			created_at, updated_at
 		 FROM users WHERE id = $1`, id)
 	if err != nil {
@@ -52,7 +54,9 @@ func (r *UserRepository) GetUserByUsername(ctx context.Context, username string)
 	err := r.db.GetContext(ctx, &user,
 		`SELECT id, COALESCE(username, '') AS username, is_admin,
 			COALESCE(default_group_id, '') AS default_group_id, notifications_enabled,
-			reminder_enabled, reminder_minutes,
+			reminder_enabled, reminder_minutes, quiet_hours_enabled,
+			to_char(quiet_hours_start, 'HH24:MI') AS quiet_hours_start,
+			to_char(quiet_hours_end, 'HH24:MI') AS quiet_hours_end,
 			created_at, updated_at
 		 FROM users WHERE username = $1`, username)
 	if err != nil {
@@ -69,10 +73,31 @@ func (r *UserRepository) GetAllUsers(ctx context.Context) ([]domain.User, error)
 	err := r.db.SelectContext(ctx, &users,
 		`SELECT id, COALESCE(username, '') AS username, is_admin,
 			COALESCE(default_group_id, '') AS default_group_id, notifications_enabled,
-			reminder_enabled, reminder_minutes,
+			reminder_enabled, reminder_minutes, quiet_hours_enabled,
+			to_char(quiet_hours_start, 'HH24:MI') AS quiet_hours_start,
+			to_char(quiet_hours_end, 'HH24:MI') AS quiet_hours_end,
 			created_at, updated_at FROM users`)
 	if err != nil {
 		return nil, fmt.Errorf("get all users: %w", err)
+	}
+	return users, nil
+}
+
+func (r *UserRepository) GetUsersPage(ctx context.Context, afterID string, limit int) ([]domain.User, error) {
+	if limit <= 0 {
+		return []domain.User{}, nil
+	}
+	var users []domain.User
+	if err := r.db.SelectContext(ctx, &users, `
+		SELECT id, COALESCE(username, '') AS username, is_admin
+		FROM users
+		WHERE ($1 = '' OR id > $1)
+		ORDER BY id
+		LIMIT $2`, afterID, limit); err != nil {
+		return nil, fmt.Errorf("get users page after %q: %w", afterID, err)
+	}
+	if users == nil {
+		users = []domain.User{}
 	}
 	return users, nil
 }
@@ -170,6 +195,27 @@ func (r *UserRepository) SetLessonReminder(
 	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("set lesson reminder for user %s: commit: %w", userID, err)
+	}
+	return nil
+}
+
+func (r *UserRepository) SetQuietHours(
+	ctx context.Context,
+	userID string,
+	enabled bool,
+	start string,
+	end string,
+) error {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE users
+		SET quiet_hours_enabled=$1, quiet_hours_start=$2::time,
+			quiet_hours_end=$3::time, updated_at=NOW()
+		WHERE id=$4`, enabled, start, end, userID)
+	if err != nil {
+		return fmt.Errorf("set quiet hours for user %s: %w", userID, err)
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		return sql.ErrNoRows
 	}
 	return nil
 }

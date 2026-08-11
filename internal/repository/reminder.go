@@ -28,6 +28,7 @@ func (r *ReminderRepository) ActiveRecipientsPage(
 	if err := r.db.SelectContext(ctx, &recipients, `
 		SELECT u.id AS user_id, u.default_group_id AS group_id,
 			g.name AS group_name, un.name AS university_name,
+			un.timezone,
 			u.reminder_minutes
 		FROM users u
 		JOIN groups g ON g.id=u.default_group_id AND g.is_active
