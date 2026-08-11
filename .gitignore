@@ -5,6 +5,10 @@
 .gocache-*/
 .cache/
 .runtime/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
 web/admin/node_modules/
 web/admin/*.tsbuildinfo
 web/admin/vite.config.js
