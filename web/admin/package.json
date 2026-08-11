@@ -4,9 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json && vite build",
-    "preview": "vite preview",
+    "dev": "vite --configLoader runner",
+    "build": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json && vite build --configLoader runner",
+    "preview": "vite preview --configLoader runner",
     "lint": "eslint . --max-warnings=0",
     "test:e2e": "playwright test"
   },

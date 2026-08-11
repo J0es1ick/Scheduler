@@ -1,0 +1,211 @@
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes surface-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes dialog-backdrop-enter {
+  from {
+    background: rgba(50, 47, 40, 0);
+  }
+}
+
+@keyframes dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes toast-enter {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes details-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes status-breathe {
+  0%,
+  100% {
+    opacity: 0.72;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+}
+
+.topbar-heading,
+.content-area > * {
+  animation: page-enter 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.page-stack > * {
+  animation: surface-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.page-stack > :nth-child(2) {
+  animation-delay: 35ms;
+}
+
+.page-stack > :nth-child(3) {
+  animation-delay: 70ms;
+}
+
+.page-stack > :nth-child(n + 4) {
+  animation-delay: 95ms;
+}
+
+.button,
+.icon-button,
+.topbar-audit,
+.dialog-close,
+.sidebar-user button,
+.desktop-nav button,
+.mobile-nav button,
+.lifecycle-tabs button,
+.card-surface,
+.source-row,
+.connector-card,
+.source-glyph,
+.status-pill {
+  transition:
+    color 160ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 180ms ease,
+    opacity 160ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.button:hover:not(:disabled),
+.icon-button:hover:not(:disabled),
+.topbar-audit:hover:not(:disabled),
+.dialog-close:hover:not(:disabled),
+.sidebar-user button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.button:active:not(:disabled),
+.icon-button:active:not(:disabled),
+.topbar-audit:active:not(:disabled),
+.dialog-close:active:not(:disabled),
+.sidebar-user button:active:not(:disabled),
+.desktop-nav button:active:not(:disabled),
+.lifecycle-tabs button:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+.desktop-nav button svg,
+.mobile-nav button svg {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.desktop-nav button:hover svg,
+.desktop-nav button.is-active svg,
+.mobile-nav button.is-active svg {
+  transform: translateX(2px);
+}
+
+.desktop-nav button.is-active::before {
+  animation: surface-enter 180ms ease-out both;
+}
+
+.source-row:hover,
+.connector-card:hover {
+  border-color: var(--line-strong);
+  background: color-mix(in srgb, var(--surface) 82%, var(--olive-soft));
+  box-shadow: 0 9px 24px rgba(70, 60, 45, 0.07);
+  transform: translateY(-1px);
+}
+
+.source-row:hover .source-glyph,
+.connector-card:hover .connector-icon {
+  transform: translateY(-1px) rotate(-1deg);
+}
+
+.dialog-backdrop {
+  animation: dialog-backdrop-enter 180ms ease-out both;
+}
+
+.dialog-backdrop > section {
+  animation: dialog-enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.toast {
+  animation: toast-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.connector-runs,
+.snapshot-review-content,
+.diagnostic-panel {
+  animation: details-enter 210ms ease-out both;
+}
+
+.wizard-progress i {
+  transform-origin: left center;
+  transition:
+    background-color 220ms ease,
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.wizard-progress i.active {
+  transform: scaleX(1.02);
+}
+
+.sidebar-status svg,
+.source-row.is-running .source-glyph i,
+.status-running::before {
+  animation: status-breathe 2.4s ease-in-out infinite;
+}
+
+.lifecycle-tabs button.is-active {
+  transform: translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

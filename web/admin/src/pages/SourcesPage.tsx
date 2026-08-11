@@ -1,8 +1,11 @@
 import { useState } from "react";
 import {
+  ArchiveRestore,
   Check,
   Eye,
   ExternalLink,
+  Info,
+  PlugZap,
   Power,
   PowerOff,
   RefreshCw,
@@ -13,6 +16,7 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import {
+  EmptyBlock,
   ErrorBlock,
   formatDateTime,
   formatDuration,
@@ -28,6 +32,14 @@ import { SnapshotReviewDialog } from "../features/snapshot-review/SnapshotReview
 import { useRemote } from "../hooks";
 import type { ParserSnapshot, SourceView } from "../types";
 
+const adapterLabels: Record<string, string> = {
+  isuct: "ISUCT",
+  ispu: "ISPU",
+  external_push: "Внешний коннектор",
+  "managed:ivgpu": "Управляемый парсер",
+  declarative_snapshot: "JSON по HTTPS",
+};
+
 export function SourcesPage({
   notify,
 }: {
@@ -36,7 +48,7 @@ export function SourcesPage({
   const { data, loading, error, reload } = useRemote(
     async () => ({
       sources: await api.sources(),
-      snapshots: await api.parserSnapshots("", "quarantined"),
+      snapshots: await api.parserSnapshots("", ""),
     }),
     [],
   );
@@ -49,6 +61,16 @@ export function SourcesPage({
     sourceName: string;
   } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SourceView | null>(null);
+  const [listView, setListView] = useState<"active" | "archived">("active");
+
+  const allSources = data?.sources ?? [];
+  const activeSources = allSources.filter(
+    (source) => source.lifecycle_status !== "archived",
+  );
+  const archivedSources = allSources.filter(
+    (source) => source.lifecycle_status === "archived",
+  );
+  const visibleSources = listView === "archived" ? archivedSources : activeSources;
 
   async function sync(id: string) {
     setBusy(id);
@@ -114,11 +136,31 @@ export function SourcesPage({
     try {
       await api.deleteSource(source.id);
       setDeleteTarget(null);
-      notify(`Источник ${source.university_name} удалён`);
+      notify(`Источник ${source.university_name} перенесён в архив`);
       await reload();
     } catch (caught) {
       notify(
-        caught instanceof Error ? caught.message : "Не удалось удалить источник",
+        caught instanceof Error ? caught.message : "Не удалось архивировать источник",
+        "error",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function restoreSource(source: SourceView) {
+    setBusy(source.id);
+    try {
+      await api.restoreSource(source.id);
+      notify(
+        `${source.university_name} возвращён из архива. Перед автоматическим обновлением проверьте настройки и включите источник.`,
+      );
+      await reload();
+    } catch (caught) {
+      notify(
+        caught instanceof Error
+          ? caught.message
+          : "Не удалось восстановить источник",
         "error",
       );
     } finally {
@@ -240,11 +282,43 @@ export function SourcesPage({
         </button>
       </div>
 
+      <nav className="lifecycle-tabs" aria-label="Состояние источников">
+        <button
+          className={listView === "active" ? "is-active" : ""}
+          type="button"
+          onClick={() => setListView("active")}
+        >
+          Рабочие <span>{activeSources.length}</span>
+        </button>
+        <button
+          className={listView === "archived" ? "is-active" : ""}
+          type="button"
+          onClick={() => setListView("archived")}
+        >
+          Архив <span>{archivedSources.length}</span>
+        </button>
+      </nav>
+
       <section className="source-list card-surface">
-        {(data?.sources ?? []).map((source) => {
-          const quarantined =
+        {!visibleSources.length && (
+          <EmptyBlock
+            title={listView === "archived" ? "Архив пуст" : "Рабочих источников нет"}
+            text={
+              listView === "archived"
+                ? "Архивированные источники появятся здесь и их можно будет восстановить."
+                : "Подключите источник или восстановите ранее архивированный."
+            }
+          />
+        )}
+        {visibleSources.map((source) => {
+          const archived = source.lifecycle_status === "archived";
+          const externalConnector = source.adapter_type === "external_push";
+          const reviewable =
             data?.snapshots.filter(
-              (snapshot) => snapshot.data_source_id === source.id,
+              (snapshot) =>
+                snapshot.data_source_id === source.id &&
+                (snapshot.status === "quarantined" ||
+                  snapshot.status === "staged"),
             ) ?? [];
           const isBusy = busy === source.id || source.running;
           const duration =
@@ -256,7 +330,7 @@ export function SourcesPage({
               : "—";
           return (
             <article
-              className={`source-row ${source.is_enabled ? "" : "is-disabled"}`}
+              className={`source-row ${source.is_enabled ? "" : "is-disabled"} ${source.running ? "is-running" : ""} ${archived ? "is-archived" : ""}`}
               key={source.id}
             >
               <div className="source-identity">
@@ -264,7 +338,14 @@ export function SourcesPage({
                 <div>
                   <h3>{source.university_name}</h3>
                   <p>{source.university_full_name}</p>
-                  <span>{source.adapter_type}</span>
+                  {source.insecure_transport && (
+                    <span className="source-transport-warning">
+                      <Info size={13} /> Официальный сайт использует HTTP
+                    </span>
+                  )}
+                  <span className="source-adapter-label">
+                    {adapterLabels[source.adapter_type] ?? source.adapter_type}
+                  </span>
                 </div>
               </div>
 
@@ -309,76 +390,130 @@ export function SourcesPage({
               </div>
 
               <div className="source-row-actions">
-                <StatusPill health={source.health} />
-                <label>
-                  <span>Интервал, мин</span>
-                  <input
-                    type="number"
-                    min={5}
-                    max={10_080}
-                    step={1}
-                    inputMode="numeric"
-                    value={
-                      intervalDrafts[source.id] ??
-                      String(source.update_interval / 60)
-                    }
-                    disabled={busy === source.id}
-                    aria-label={`Интервал обновления ${source.university_name} в минутах`}
-                    onChange={(event) =>
-                      setIntervalDrafts((current) => ({
-                        ...current,
-                        [source.id]: event.target.value,
-                      }))
-                    }
-                    onBlur={() =>
-                      void commitInterval(source.id, source.update_interval)
-                    }
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") event.currentTarget.blur();
-                      if (event.key === "Escape") {
-                        setIntervalDrafts((current) => {
-                          const next = { ...current };
-                          delete next[source.id];
-                          return next;
-                        });
-                        event.currentTarget.blur();
-                      }
-                    }}
-                  />
-                </label>
-                <button
-                  className="button button-primary"
-                  disabled={isBusy || !source.is_enabled}
-                  onClick={() => void sync(source.id)}
-                >
-                  <RefreshCw size={16} className={isBusy ? "spin" : ""} />{" "}
-                  {source.running ? "Обновляется" : "Запустить"}
-                </button>
-                <button
-                  className="button button-ghost"
-                  disabled={isBusy || !source.current_snapshot_id}
-                  onClick={() => void rollback(source.id)}
-                >
-                  <RotateCcw size={15} /> Откатить
-                </button>
-                <button
-                  className="button button-ghost"
-                  disabled={isBusy}
-                  onClick={() => void toggleSource(source)}
-                >
-                  {source.is_enabled ? (
-                    <><PowerOff size={15} /> Отключить</>
-                  ) : (
-                    <><Power size={15} /> Включить</>
-                  )}
-                </button>
-                <button
-                  className="button button-danger-soft"
-                  disabled={isBusy}
-                  onClick={() => setDeleteTarget(source)}
-                >
-                  <Trash2 size={15} /> Удалить
-                </button>
+                {archived ? (
+                  <>
+                    <span className="source-archive-status">
+                      Архивирован {formatDateTime(source.archived_at)}
+                    </span>
+                    <button
+                      className="button button-primary"
+                      disabled={busy === source.id}
+                      onClick={() => void restoreSource(source)}
+                    >
+                      <ArchiveRestore size={15} /> Восстановить
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <StatusPill health={source.health} />
+                    {externalConnector ? (
+                      <>
+                        <div className="source-external-control">
+                          <span>Обновление</span>
+                          <strong>Управляется внешним коннектором</strong>
+                        </div>
+                        <button
+                          className="button button-ghost"
+                          disabled={isBusy || !source.current_snapshot_id}
+                          onClick={() => void rollback(source.id)}
+                        >
+                          <RotateCcw size={15} /> Откатить снимок
+                        </button>
+                        <button
+                          className="button button-primary"
+                          onClick={() => {
+                            window.location.hash = "/connectors";
+                          }}
+                        >
+                          <PlugZap size={15} /> Открыть коннектор
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <label>
+                          <span>Интервал, мин</span>
+                          <input
+                            type="number"
+                            min={5}
+                            max={10_080}
+                            step={1}
+                            inputMode="numeric"
+                            value={
+                              intervalDrafts[source.id] ??
+                              String(source.update_interval / 60)
+                            }
+                            disabled={busy === source.id}
+                            aria-label={`Интервал обновления ${source.university_name} в минутах`}
+                            onChange={(event) =>
+                              setIntervalDrafts((current) => ({
+                                ...current,
+                                [source.id]: event.target.value,
+                              }))
+                            }
+                            onBlur={() =>
+                              void commitInterval(
+                                source.id,
+                                source.update_interval,
+                              )
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter")
+                                event.currentTarget.blur();
+                              if (event.key === "Escape") {
+                                setIntervalDrafts((current) => {
+                                  const next = { ...current };
+                                  delete next[source.id];
+                                  return next;
+                                });
+                                event.currentTarget.blur();
+                              }
+                            }}
+                          />
+                        </label>
+                        <button
+                          className="button button-primary"
+                          disabled={isBusy || !source.is_enabled}
+                          onClick={() => void sync(source.id)}
+                        >
+                          <RefreshCw
+                            size={16}
+                            className={isBusy ? "spin" : ""}
+                          />{" "}
+                          {source.running ? "Обновляется" : "Запустить"}
+                        </button>
+                        <button
+                          className="button button-ghost"
+                          disabled={isBusy || !source.current_snapshot_id}
+                          onClick={() => void rollback(source.id)}
+                        >
+                          <RotateCcw size={15} /> Откатить
+                        </button>
+                        <button
+                          className="button button-ghost"
+                          disabled={isBusy}
+                          onClick={() => void toggleSource(source)}
+                        >
+                          {source.is_enabled ? (
+                            <>
+                              <PowerOff size={15} /> Отключить
+                            </>
+                          ) : (
+                            <>
+                              <Power size={15} /> Включить
+                            </>
+                          )}
+                        </button>
+                        <button
+                          className="button button-danger-soft"
+                          disabled={isBusy}
+                          onClick={() => setDeleteTarget(source)}
+                        >
+                          <Trash2 size={15} /> В архив
+                        </button>
+                      </>
+                    )}
+                  </>
+                )}
                 {source.schedule_url && (
                   <a href={source.schedule_url} target="_blank" rel="noreferrer">
                     Сайт расписания <ExternalLink size={13} />
@@ -386,7 +521,7 @@ export function SourcesPage({
                 )}
               </div>
 
-              {source.last_error && (
+              {!archived && source.last_error && (
                 <div className="source-error">
                   <strong>Последняя ошибка</strong>
                   <span>{source.last_error}</span>
@@ -448,12 +583,16 @@ export function SourcesPage({
                 </div>
               )}
 
-              {quarantined.map((snapshot) => (
+              {!archived && reviewable.map((snapshot) => (
                 <div className="snapshot-quarantine" key={snapshot.id}>
                   <div className="snapshot-quarantine-heading">
                     <ShieldAlert size={20} />
                     <div>
-                      <strong>Новый снимок ожидает проверки</strong>
+                      <strong>
+                        {snapshot.status === "staged"
+                          ? "Тестовый снимок коннектора ожидает проверки"
+                          : "Новый снимок ожидает проверки"}
+                      </strong>
                       <span>
                         {formatDateTime(snapshot.created_at)} ·{" "}
                         {number.format(snapshot.group_count)} групп ·{" "}
@@ -552,21 +691,21 @@ function DeleteSourceDialog({
         aria-labelledby="delete-source-title"
       >
         <span className="dialog-danger-icon"><Trash2 size={19} /></span>
-        <h2 id="delete-source-title">Удалить источник {source.university_name}?</h2>
+        <h2 id="delete-source-title">Архивировать источник {source.university_name}?</h2>
         <p>
-          Это удалит настройки подключения, историю запусков, диагностику и все
-          сохранённые снимки этого источника.
+          Источник перестанет запускаться и исчезнет из рабочего списка. Настройки,
+          история запусков, диагностика и снимки сохранятся.
         </p>
         <p className="dialog-note">
-          Уже опубликованные группы и занятия останутся в базе, но перестанут
-          автоматически обновляться. Отменить удаление через интерфейс нельзя.
+          Уже опубликованные группы и занятия останутся в базе и перестанут
+          автоматически обновляться. Источник можно восстановить на вкладке «Архив».
         </p>
         <div className="dialog-actions">
           <button className="button button-ghost" disabled={busy} onClick={onCancel}>
             Отмена
           </button>
           <button className="button button-danger" disabled={busy} onClick={onConfirm}>
-            <Trash2 size={15} /> {busy ? "Удаление…" : "Удалить источник"}
+            <Trash2 size={15} /> {busy ? "Архивация…" : "Перенести в архив"}
           </button>
         </div>
       </section>

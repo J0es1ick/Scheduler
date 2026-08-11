@@ -5,6 +5,7 @@ const admin = {
   name: "@release_admin",
   auth_method: "telegram",
   csrf_token: "csrf-test-token",
+  role: "owner",
 };
 
 const dashboard = {
@@ -66,6 +67,61 @@ test("access-key bootstrap login remains available only when enabled", async ({ 
 
   await expect(page.getByRole("heading", { name: "Обзор", exact: true })).toBeVisible();
   await expect(page.getByText("@release_admin")).toBeVisible();
+});
+
+test("integration wizard makes the managed parser the serverless default", async ({ page }) => {
+  await mockAuthenticated(page);
+  let createdMode = "";
+  let createdParser = "";
+  await page.route("**/api/connectors/catalog", (route) => json(route, {
+    items: [{
+      connected: false,
+      manifest: {
+        contract_version: "1.0",
+        parser_id: "ivgpu",
+        version: "1.0.0",
+        display_name: "ИВГПУ · управляемый парсер",
+        description: "Официальный JSON API",
+        institution: {
+          external_id: "ivgpu",
+          name: "ИВГПУ",
+          full_name: "Ивановский государственный политехнический университет",
+          schedule_url: "https://ivgpu.ru/raspisanie",
+          timezone: "Europe/Moscow",
+          locale: "ru-RU",
+        },
+        maintainer_name: "Scheduler contributors",
+        update_interval: 3600,
+      },
+    }],
+  }));
+  await page.route("**/api/connectors", async (route) => {
+    if (route.request().method() === "POST") {
+      const payload = route.request().postDataJSON() as { integration_mode: string; parser_id: string };
+      createdMode = payload.integration_mode;
+      createdParser = payload.parser_id;
+      await json(route, { connector: {}, credentials_warning: "" }, 201);
+      return;
+    }
+    await json(route, { items: [] });
+  });
+
+  await page.goto("/#/connectors");
+  await expect(page.getByRole("heading", { name: "Интеграции", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Подключить источник" }).click();
+  await expect(page.getByRole("button", { name: /Управляемый парсер Рекомендуется/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /JSON по HTTPS/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Внешний сервер/ })).toBeVisible();
+  await page.getByRole("button", { name: /Управляемый парсер Рекомендуется/ }).click();
+  await page.getByRole("button", { name: /Продолжить/ }).click();
+  await page.getByRole("button", { name: /ИВГПУ · управляемый парсер/ }).click();
+  await page.getByRole("button", { name: /Продолжить/ }).click();
+  await page.getByRole("button", { name: /Продолжить/ }).click();
+  await page.getByRole("button", { name: /Создать интеграцию/ }).click();
+
+  await expect(page.getByText("Интеграция создана в черновиках")).toBeVisible();
+  expect(createdMode).toBe("managed_parser");
+  expect(createdParser).toBe("ivgpu");
 });
 
 test("group search keeps the editor visible and confirms a manual change", async ({ page }) => {
@@ -285,23 +341,24 @@ test("quarantined snapshot can be inspected group by group before publication", 
   await expect(page.getByText("добавлено")).toBeVisible();
 });
 
-test("source can be disabled and deletion requires confirmation", async ({ page }) => {
+test("source can be disabled and archiving requires confirmation", async ({ page }) => {
   await mockAuthenticated(page);
   let enabled = true;
-  let deleted = false;
-  let deleteRequests = 0;
+  let archived = false;
+  let archiveRequests = 0;
+  let restoreRequests = 0;
 
   await page.route("**/api/sources", (route) =>
     json(route, {
-      items: deleted
-        ? []
-        : [{
+      items: [{
             id: "isuct-main",
             university_id: "isuct",
             university_name: "ИГХТУ",
             university_full_name: "Ивановский государственный химико-технологический университет",
             schedule_url: "https://example.test/schedule",
             adapter_type: "isuct",
+            lifecycle_status: archived ? "archived" : "active",
+            archived_at: archived ? "2026-08-03T15:00:00Z" : null,
             is_enabled: enabled,
             update_interval: 3600,
             last_run_at: "2026-08-03T14:02:00Z",
@@ -332,12 +389,18 @@ test("source can be disabled and deletion requires confirmation", async ({ page 
       return;
     }
     if (route.request().method() === "DELETE") {
-      deleteRequests += 1;
-      deleted = true;
-      await json(route, { status: "deleted" });
+      archiveRequests += 1;
+      archived = true;
+      await json(route, { status: "archived" });
       return;
     }
     await route.fallback();
+  });
+  await page.route("**/api/sources/isuct-main/restore", async (route) => {
+    restoreRequests += 1;
+    archived = false;
+    enabled = false;
+    await json(route, { status: "restored", lifecycle_status: "active" });
   });
 
   await page.goto("/#/sources");
@@ -345,15 +408,67 @@ test("source can be disabled and deletion requires confirmation", async ({ page 
   await expect(page.getByRole("button", { name: "Включить" })).toBeVisible();
   await expect(page.getByText("Отключено", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Удалить", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Удалить источник ИГХТУ?" })).toBeVisible();
+  await page.getByRole("button", { name: "В архив", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Архивировать источник ИГХТУ?" })).toBeVisible();
   await page.getByRole("button", { name: "Отмена" }).click();
-  expect(deleteRequests).toBe(0);
+  expect(archiveRequests).toBe(0);
 
-  await page.getByRole("button", { name: "Удалить", exact: true }).click();
-  await page.getByRole("button", { name: "Удалить источник" }).click();
-  await expect.poll(() => deleteRequests).toBe(1);
-  await expect(page.getByRole("heading", { name: "Удалить источник ИГХТУ?" })).toHaveCount(0);
+  await page.getByRole("button", { name: "В архив", exact: true }).click();
+  await page.getByRole("button", { name: "Перенести в архив" }).click();
+  await expect.poll(() => archiveRequests).toBe(1);
+  await expect(page.getByRole("heading", { name: "Архивировать источник ИГХТУ?" })).toHaveCount(0);
+  await page.getByRole("button", { name: /Архив 1/ }).click();
+  await expect(page.getByText(/Архивирован/)).toBeVisible();
+  await page.getByRole("button", { name: "Восстановить" }).click();
+  await expect.poll(() => restoreRequests).toBe(1);
+  await expect(page.getByRole("button", { name: /Архив 0/ })).toBeVisible();
+});
+
+test("external source is managed through its connector instead of parser controls", async ({ page }) => {
+  await mockAuthenticated(page);
+  await page.route("**/api/sources", (route) =>
+    json(route, {
+      items: [{
+        id: "external-ivgpu",
+        university_id: "ivgpu",
+        university_name: "ИВГПУ",
+        university_full_name: "Ивановский государственный политехнический университет",
+        schedule_url: "https://ivgpu.ru/raspisanie",
+        adapter_type: "external_push",
+        lifecycle_status: "active",
+        archived_at: null,
+        insecure_transport: false,
+        is_enabled: true,
+        update_interval: 3600,
+        last_run_at: "2026-08-10T12:26:00Z",
+        last_success_at: "2026-08-10T12:26:00Z",
+        next_run_at: null,
+        last_error: "",
+        consecutive_failures: 0,
+        next_retry_at: null,
+        current_snapshot_id: "snapshot-ivgpu",
+        quarantined_count: 0,
+        latest_status: "success",
+        latest_started_at: "2026-08-10T12:26:00Z",
+        latest_finished_at: "2026-08-10T12:26:01Z",
+        latest_records: 1651,
+        group_count: 266,
+        lesson_count: 1651,
+        running: false,
+        health: "healthy",
+      }],
+    }),
+  );
+  await page.route("**/api/parser-snapshots?**", (route) => json(route, { items: [] }));
+
+  await page.goto("/#/sources");
+
+  await expect(page.getByText("Внешний коннектор", { exact: true })).toBeVisible();
+  await expect(page.getByText("Управляется внешним коннектором", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Открыть коннектор" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Запустить" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Отключить" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "В архив", exact: true })).toHaveCount(0);
 });
 
 test("backend outage is shown instead of a blank screen", async ({ page }) => {
