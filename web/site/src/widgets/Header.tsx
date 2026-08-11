@@ -33,6 +33,12 @@ export function Header({ botURL }: HeaderProps) {
           <a href="#technologies" onClick={closeMenu}>
             Технологии
           </a>
+          <a href="#connectors" onClick={closeMenu}>
+            Разработчикам
+          </a>
+          <a href="#status" onClick={closeMenu}>
+            Статус
+          </a>
           <a
             className="public-header-cta"
             href={botURL}

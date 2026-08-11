@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/J0es1ick/Scheduler/internal/buildinfo"
 	"github.com/J0es1ick/Scheduler/internal/siteui"
 )
 
@@ -54,6 +55,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "ok",
 		"time":   time.Now(),
+		"build":  buildinfo.Values(),
 	})
 }
 
@@ -91,7 +93,7 @@ func securityHeaders(next http.Handler) http.Handler {
 			"Content-Security-Policy",
 			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "+
 				"img-src 'self' data:; connect-src 'self'; font-src 'self'; "+
-				"base-uri 'self'; form-action 'self'",
+				"base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'none'",
 		)
 		next.ServeHTTP(w, r)
 	})

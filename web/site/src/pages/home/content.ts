@@ -25,7 +25,7 @@ export const technologyGroups: HomeContentGroup[] = [
   {
     title: "Сервис и парсеры",
     icon: Braces,
-    items: ["Go", "Telegram Bot API", "pgx", "HTML-парсеры"],
+    items: ["Go", "Parser SDK v1", "Telegram Bot API", "HTML/JSON-парсеры"],
   },
   {
     title: "Данные",
