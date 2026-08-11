@@ -3,7 +3,17 @@ export interface AdminIdentity {
   name: string;
   auth_method: string;
   csrf_token: string;
+  role: AdminRole;
 }
+
+export type AdminRole =
+  | "none"
+  | "read_only"
+  | "support"
+  | "editor"
+  | "reviewer"
+  | "operator"
+  | "owner";
 
 export interface DashboardStats {
   universities: number;
@@ -20,6 +30,7 @@ export type SourceHealth =
   | "error"
   | "stale"
   | "quarantined"
+  | "empty"
   | "disabled";
 
 export interface SourceView {
@@ -29,6 +40,10 @@ export interface SourceView {
   university_full_name: string;
   schedule_url: string;
   adapter_type: string;
+  lifecycle_status: string;
+  archived_at: string | null;
+  allow_empty: boolean;
+  insecure_transport: boolean;
   is_enabled: boolean;
   update_interval: number;
   last_run_at: string | null;
@@ -206,6 +221,8 @@ export interface OperationalHealth {
   failed_notifications: number;
   pending_outbox: number;
   failed_outbox: number;
+  pending_connector_runs: number;
+  failed_connector_runs: number;
   oldest_pending_seconds: number;
   last_successful_parse_at: string | null;
   checked_at: string;
@@ -316,12 +333,108 @@ export interface UserView {
   id: string;
   username: string;
   is_admin: boolean;
+  admin_role: AdminRole;
   subscriptions: number;
   default_group_id: string;
   default_group_name: string;
   notifications_enabled: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export type ConnectorStatus =
+  | "draft"
+  | "testing"
+  | "pending_review"
+  | "active"
+  | "suspended"
+  | "archived";
+
+export type IntegrationMode =
+  | "managed_parser"
+  | "declarative_pull"
+  | "external_push";
+
+export interface ConnectorClient {
+  id: string;
+  data_source_id: string;
+  university_id: string;
+  university_name: string;
+  display_name: string;
+  integration_mode: IntegrationMode;
+  parser_id: string;
+  description: string;
+  maintainer_name: string;
+  maintainer_url: string;
+  key_id: string;
+  status: ConnectorStatus;
+  rate_limit_per_minute: number;
+  max_payload_bytes: number;
+  last_seen_at: string | null;
+  last_snapshot_at: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  quality_policy: SourceQualityPolicy;
+}
+
+export interface ManagedParserManifest {
+  contract_version: string;
+  parser_id: string;
+  version: string;
+  display_name: string;
+  description: string;
+  institution: {
+    external_id: string;
+    name: string;
+    full_name?: string;
+    schedule_url?: string;
+    timezone: string;
+    locale?: string;
+  };
+  maintainer_name?: string;
+  maintainer_url?: string;
+  update_interval: number;
+}
+
+export interface ManagedParserCatalogItem {
+  manifest: ManagedParserManifest;
+  connected: boolean;
+  connector_id?: string;
+  status?: ConnectorStatus;
+}
+
+export interface ConnectorRun {
+  run_id: string;
+  connector_id: string;
+  external_snapshot_id: string;
+  schema_version: string;
+  payload_sha256: string;
+  status: "received" | "processing" | "staged" | "quarantined" | "published" | "rejected" | "failed";
+  attempts: number;
+  error?: string;
+  parser_snapshot_id?: string;
+  group_count: number;
+  lesson_count: number;
+  received_at: string;
+  completed_at: string | null;
+}
+
+export interface ConnectorCredentials {
+  connector_id: string;
+  key_id: string;
+  private_key: string;
+  submit_path: string;
+}
+
+export interface SourceQualityPolicy {
+  allow_empty: boolean;
+  minimum_groups: number;
+  minimum_lessons: number;
+  maximum_group_drop_ratio: number;
+  maximum_group_growth_ratio: number;
+  maximum_lesson_drop_ratio: number;
+  maximum_lesson_growth_ratio: number;
 }
 
 export interface SupportRequestView {

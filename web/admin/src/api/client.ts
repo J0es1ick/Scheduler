@@ -16,6 +16,13 @@ import type {
   SupportRequestView,
   UniversityOption,
   UserView,
+  ConnectorClient,
+  ConnectorCredentials,
+  ConnectorRun,
+  ConnectorStatus,
+  IntegrationMode,
+  ManagedParserCatalogItem,
+  SourceQualityPolicy,
 } from "../types";
 
 export class APIError extends Error {
@@ -128,6 +135,10 @@ export const api = {
     }),
   deleteSource: (id: string) =>
     request(`/api/sources/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  restoreSource: (id: string) =>
+    request(`/api/sources/${encodeURIComponent(id)}/restore`, {
+      method: "POST",
+    }),
   syncSource: (id: string) =>
     request(`/api/sources/${encodeURIComponent(id)}/sync`, { method: "POST" }),
   rollbackSource: (id: string) =>
@@ -249,11 +260,61 @@ export const api = {
     if (q) query.set("q", q);
     return (await request<{ items: UserView[] }>(`/api/users?${query}`)).items;
   },
-  updateUser: (id: string, isAdmin: boolean) =>
+  updateUser: (id: string, adminRole: UserView["admin_role"]) =>
     request(`/api/users/${encodeURIComponent(id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ is_admin: isAdmin }),
+      body: JSON.stringify({ admin_role: adminRole }),
     }),
+  connectors: async () =>
+    (await request<{ items: ConnectorClient[] }>("/api/connectors")).items,
+  connectorCatalog: async () =>
+    (
+      await request<{ items: ManagedParserCatalogItem[] }>(
+        "/api/connectors/catalog",
+      )
+    ).items,
+  createConnector: (payload: {
+    integration_mode: IntegrationMode;
+    parser_id: string;
+    declarative_url: string;
+    update_interval: number;
+    university_id: string;
+    university_name: string;
+    university_full_name: string;
+    schedule_url: string;
+    timezone: string;
+    locale: string;
+    display_name: string;
+    description: string;
+    maintainer_name: string;
+    maintainer_url: string;
+  }) =>
+    request<{
+      connector: ConnectorClient;
+      credentials?: ConnectorCredentials;
+      credentials_warning: string;
+    }>("/api/connectors", { method: "POST", body: JSON.stringify(payload) }),
+  updateConnector: (
+    id: string,
+    payload: { status?: ConnectorStatus; quality_policy?: SourceQualityPolicy },
+  ) =>
+    request<{ connector: ConnectorClient }>(
+      `/api/connectors/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(payload) },
+    ),
+  rotateConnectorKey: (id: string) =>
+    request<{
+      credentials: ConnectorCredentials;
+      credentials_warning: string;
+    }>(`/api/connectors/${encodeURIComponent(id)}/rotate-key`, {
+      method: "POST",
+    }),
+  connectorRuns: async (id: string) =>
+    (
+      await request<{ items: ConnectorRun[] }>(
+        `/api/connectors/${encodeURIComponent(id)}/runs`,
+      )
+    ).items,
   supportRequests: async (
     params: { status?: string; type?: string; q?: string } = {},
   ) => {

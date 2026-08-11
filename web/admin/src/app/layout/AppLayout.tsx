@@ -8,16 +8,18 @@ import {
   LogOut,
   MessagesSquare,
   RadioTower,
+  PlugZap,
   ShieldCheck,
   Users,
 } from "lucide-react";
 import { LogoMark } from "../../components";
-import type { AdminIdentity } from "../../types";
+import type { AdminIdentity, AdminRole } from "../../types";
 
 export type ViewName =
   | "overview"
   | "editor"
   | "sources"
+  | "connectors"
   | "logs"
   | "data"
   | "support"
@@ -28,16 +30,67 @@ const navigation: Array<{
   id: ViewName;
   label: string;
   icon: typeof LayoutDashboard;
+  minimumRole: AdminRole;
 }> = [
-  { id: "overview", label: "Обзор", icon: LayoutDashboard },
-  { id: "editor", label: "Редактор", icon: CalendarDays },
-  { id: "sources", label: "Источники", icon: RadioTower },
-  { id: "logs", label: "Запуски", icon: History },
-  { id: "data", label: "Расписание", icon: Database },
-  { id: "support", label: "Обращения", icon: MessagesSquare },
-  { id: "users", label: "Пользователи", icon: Users },
-  { id: "audit", label: "Аудит", icon: ShieldCheck },
+  {
+    id: "overview",
+    label: "Обзор",
+    icon: LayoutDashboard,
+    minimumRole: "read_only",
+  },
+  {
+    id: "editor",
+    label: "Редактор",
+    icon: CalendarDays,
+    minimumRole: "editor",
+  },
+  {
+    id: "sources",
+    label: "Источники",
+    icon: RadioTower,
+    minimumRole: "operator",
+  },
+  {
+    id: "connectors",
+    label: "Интеграции",
+    icon: PlugZap,
+    minimumRole: "operator",
+  },
+  { id: "logs", label: "Запуски", icon: History, minimumRole: "read_only" },
+  { id: "data", label: "Расписание", icon: Database, minimumRole: "read_only" },
+  {
+    id: "support",
+    label: "Обращения",
+    icon: MessagesSquare,
+    minimumRole: "support",
+  },
+  { id: "users", label: "Пользователи", icon: Users, minimumRole: "owner" },
+  { id: "audit", label: "Аудит", icon: ShieldCheck, minimumRole: "operator" },
 ];
+
+const roleLabels: Record<AdminRole, string> = {
+  none: "Нет доступа",
+  read_only: "Наблюдатель",
+  support: "Поддержка",
+  editor: "Редактор",
+  reviewer: "Ревьюер",
+  operator: "Оператор",
+  owner: "Владелец",
+};
+
+export function canAccessView(view: ViewName, role: AdminRole): boolean {
+  const item = navigation.find((entry) => entry.id === view);
+  if (!item) return false;
+  if (role === "owner") return true;
+  if (item.minimumRole === "read_only") return role !== "none";
+  const permissions: Partial<Record<AdminRole, AdminRole[]>> = {
+    support: ["support"],
+    editor: ["editor"],
+    reviewer: ["reviewer", "editor"],
+    operator: ["operator", "reviewer", "editor", "support"],
+  };
+  return permissions[role]?.includes(item.minimumRole) ?? false;
+}
 
 const pageCopy: Record<ViewName, { title: string; subtitle: string }> = {
   overview: {
@@ -49,6 +102,10 @@ const pageCopy: Record<ViewName, { title: string; subtitle: string }> = {
     subtitle: "Ручные изменения поверх данных источников",
   },
   sources: { title: "Источники", subtitle: "Парсеры и интервалы обновления" },
+  connectors: {
+    title: "Интеграции",
+    subtitle: "Управляемые парсеры, JSON pull и внешние поставщики",
+  },
   logs: { title: "Запуски", subtitle: "История работы парсеров" },
   data: { title: "Справочники", subtitle: "Группы и занятия в базе" },
   support: { title: "Обращения", subtitle: "Горячая линия расписаний" },
@@ -82,19 +139,21 @@ export function AppLayout({
         <LogoMark />
         <nav className="desktop-nav" aria-label="Основная навигация">
           <span className="nav-caption">Управление</span>
-          {navigation.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.id}
-                className={view === item.id ? "is-active" : ""}
-                onClick={() => onNavigate(item.id)}
-              >
-                <Icon size={19} />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
+          {navigation
+            .filter((item) => canAccessView(item.id, user.role))
+            .map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.id}
+                  className={view === item.id ? "is-active" : ""}
+                  onClick={() => onNavigate(item.id)}
+                >
+                  <Icon size={19} />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
         </nav>
         <div className="sidebar-status">
           <Activity size={15} />
@@ -108,8 +167,8 @@ export function AppLayout({
             <strong>{user.name}</strong>
             <span>
               {user.auth_method === "telegram"
-                ? "Telegram Admin"
-                : "Local Admin"}
+                ? roleLabels[user.role]
+                : `Локальный · ${roleLabels[user.role]}`}
             </span>
           </div>
           <button onClick={onLogout} title="Выйти">
@@ -120,7 +179,7 @@ export function AppLayout({
 
       <main className="main-area">
         <header className="topbar">
-          <div>
+          <div className="topbar-heading" key={view}>
             <span className="mobile-brand">
               <LogoMark compact />
             </span>
@@ -128,53 +187,65 @@ export function AppLayout({
             <h1>{current.title}</h1>
             <span>{current.subtitle}</span>
           </div>
-          <button
-            className="topbar-audit"
-            onClick={() => onNavigate("audit")}
-            aria-label="Открыть аудит"
-          >
-            <ShieldCheck size={20} />
-          </button>
+          {canAccessView("audit", user.role) && (
+            <button
+              className="topbar-audit"
+              onClick={() => onNavigate("audit")}
+              aria-label="Открыть аудит"
+            >
+              <ShieldCheck size={20} />
+            </button>
+          )}
         </header>
         <div className="content-area">{children}</div>
       </main>
 
       <nav className="mobile-nav" aria-label="Мобильная навигация">
-        <button
-          className={view === "overview" ? "is-active" : ""}
-          onClick={() => onNavigate("overview")}
-        >
-          <LayoutDashboard size={20} />
-          <span>Обзор</span>
-        </button>
-        <button
-          className={view === "sources" ? "is-active" : ""}
-          onClick={() => onNavigate("sources")}
-        >
-          <RadioTower size={20} />
-          <span>Источники</span>
-        </button>
-        <button
-          className={`mobile-primary ${view === "editor" ? "is-active" : ""}`}
-          onClick={() => onNavigate("editor")}
-          aria-label="Редактор"
-        >
-          <CalendarDays size={24} />
-        </button>
-        <button
-          className={view === "support" ? "is-active" : ""}
-          onClick={() => onNavigate("support")}
-        >
-          <MessagesSquare size={20} />
-          <span>Заявки</span>
-        </button>
-        <button
-          className={view === "users" ? "is-active" : ""}
-          onClick={() => onNavigate("users")}
-        >
-          <Users size={20} />
-          <span>Люди</span>
-        </button>
+        {canAccessView("overview", user.role) && (
+          <button
+            className={view === "overview" ? "is-active" : ""}
+            onClick={() => onNavigate("overview")}
+          >
+            <LayoutDashboard size={20} />
+            <span>Обзор</span>
+          </button>
+        )}
+        {canAccessView("sources", user.role) && (
+          <button
+            className={view === "sources" ? "is-active" : ""}
+            onClick={() => onNavigate("sources")}
+          >
+            <RadioTower size={20} />
+            <span>Источники</span>
+          </button>
+        )}
+        {canAccessView("editor", user.role) && (
+          <button
+            className={`mobile-primary ${view === "editor" ? "is-active" : ""}`}
+            onClick={() => onNavigate("editor")}
+            aria-label="Редактор"
+          >
+            <CalendarDays size={24} />
+          </button>
+        )}
+        {canAccessView("support", user.role) && (
+          <button
+            className={view === "support" ? "is-active" : ""}
+            onClick={() => onNavigate("support")}
+          >
+            <MessagesSquare size={20} />
+            <span>Заявки</span>
+          </button>
+        )}
+        {canAccessView("users", user.role) && (
+          <button
+            className={view === "users" ? "is-active" : ""}
+            onClick={() => onNavigate("users")}
+          >
+            <Users size={20} />
+            <span>Люди</span>
+          </button>
+        )}
       </nav>
     </div>
   );

@@ -119,6 +119,7 @@ export function StatusPill({
       error: "Ошибка",
       stale: "Данные устарели",
       quarantined: "Карантин",
+      empty: "Нет занятий",
       disabled: "Отключён",
       success: "Успешно",
       failed: "Ошибка",
@@ -131,7 +132,9 @@ export function StatusPill({
         <PauseCircle size={13} />
       ) : health === "healthy" || health === "success" ? (
         <Check size={13} />
-      ) : health === "stale" || health === "quarantined" ? (
+      ) : health === "stale" ||
+        health === "quarantined" ||
+        health === "empty" ? (
         <AlertCircle size={13} />
       ) : (
         <X size={13} />

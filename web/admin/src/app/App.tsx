@@ -3,6 +3,7 @@ import { APIError, api } from "../api";
 import { Toasts, type ToastMessage } from "../components";
 import { AuditPage } from "../pages/AuditPage";
 import { DataPage } from "../pages/DataPage";
+import { ConnectorsPage } from "../pages/ConnectorsPage";
 import { EditorPage } from "../pages/EditorPage";
 import { LoginPage } from "../pages/LoginPage";
 import { LogsPage } from "../pages/LogsPage";
@@ -11,12 +12,13 @@ import { SourcesPage } from "../pages/SourcesPage";
 import { SupportPage } from "../pages/SupportPage";
 import { UsersPage } from "../pages/UsersPage";
 import type { AdminIdentity } from "../types";
-import { AppLayout, type ViewName } from "./layout/AppLayout";
+import { AppLayout, canAccessView, type ViewName } from "./layout/AppLayout";
 
 const knownViews: ViewName[] = [
   "overview",
   "editor",
   "sources",
+  "connectors",
   "logs",
   "data",
   "support",
@@ -103,6 +105,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (user && !canAccessView(view, user.role)) {
+      setView("overview");
+      window.history.replaceState(null, "", "#/overview");
+    }
+  }, [user, view]);
+
+  useEffect(() => {
     const sessionExpired = () => {
       setUser(null);
       setAuthError(
@@ -156,6 +165,8 @@ export default function App() {
         return <EditorPage notify={notify} />;
       case "sources":
         return <SourcesPage notify={notify} />;
+      case "connectors":
+        return <ConnectorsPage notify={notify} />;
       case "logs":
         return <LogsPage />;
       case "data":

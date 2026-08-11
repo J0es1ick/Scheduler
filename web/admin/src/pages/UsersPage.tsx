@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BellRing, Shield, ShieldOff, UserRoundCheck } from "lucide-react";
+import { BellRing, Shield, UserRoundCheck } from "lucide-react";
 import { api } from "../api";
 import {
   EmptyBlock,
@@ -11,7 +11,17 @@ import {
   type ToastMessage,
 } from "../components";
 import { useDebounced, useRemote } from "../hooks";
-import type { AdminIdentity } from "../types";
+import type { AdminIdentity, AdminRole } from "../types";
+
+const roleLabels: Record<AdminRole, string> = {
+  none: "Нет доступа",
+  read_only: "Только просмотр",
+  support: "Поддержка",
+  editor: "Редактор",
+  reviewer: "Проверяющий",
+  operator: "Оператор",
+  owner: "Владелец",
+};
 
 export function UsersPage({
   user,
@@ -25,15 +35,11 @@ export function UsersPage({
   const debounced = useDebounced(query);
   const users = useRemote(() => api.users(debounced), [debounced]);
 
-  const changeRole = async (id: string, isAdmin: boolean) => {
+  const changeRole = async (id: string, role: AdminRole) => {
     setBusy(id);
     try {
-      await api.updateUser(id, isAdmin);
-      notify(
-        isAdmin
-          ? "Пользователю выданы права администратора"
-          : "Права администратора сняты",
-      );
+      await api.updateUser(id, role);
+      notify(`Назначена роль: ${roleLabels[role]}`);
       await users.reload();
     } catch (caught) {
       notify(
@@ -114,23 +120,18 @@ export function UsersPage({
                     </span>
                   </div>
                 </div>
-                <button
-                  className={`button ${item.is_admin ? "button-danger-soft" : "button-ghost"}`}
-                  disabled={
-                    busy === item.id || (item.id === user.id && item.is_admin)
-                  }
-                  onClick={() => void changeRole(item.id, !item.is_admin)}
-                >
-                  {item.is_admin ? (
-                    <>
-                      <ShieldOff size={16} /> Снять роль
-                    </>
-                  ) : (
-                    <>
-                      <Shield size={16} /> Сделать admin
-                    </>
-                  )}
-                </button>
+                <label className="role-select">
+                  <Shield size={15} />
+                  <select
+                    value={item.admin_role}
+                    disabled={busy === item.id || item.id === user.id}
+                    onChange={(event) => void changeRole(item.id, event.target.value as AdminRole)}
+                  >
+                    {Object.entries(roleLabels).map(([role, label]) => (
+                      <option key={role} value={role}>{label}</option>
+                    ))}
+                  </select>
+                </label>
               </article>
             ))}
           </div>
