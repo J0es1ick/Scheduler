@@ -20,7 +20,9 @@ import (
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/adminui"
+	"github.com/J0es1ick/Scheduler/internal/buildinfo"
 	"github.com/J0es1ick/Scheduler/internal/service"
+	managed "github.com/J0es1ick/Scheduler/parser/v1"
 	"github.com/google/uuid"
 )
 
@@ -32,16 +34,21 @@ const (
 type ServerOptions struct {
 	MetricsToken      string
 	TrustedProxyCIDRs string
+	ConnectorHandler  http.Handler
+	ManagedParsers    []managed.Manifest
+	WorkerReadiness   interface{ Checks() map[string]bool }
 }
 
 type Server struct {
-	store          *Store
-	auth           *AuthManager
-	parser         *service.ParserService
-	logins         *loginGuard
-	globalLogins   *loginGuard
-	metricsToken   string
-	trustedProxies []*net.IPNet
+	store           *Store
+	auth            *AuthManager
+	parser          *service.ParserService
+	logins          *loginGuard
+	globalLogins    *loginGuard
+	metricsToken    string
+	trustedProxies  []*net.IPNet
+	managedParsers  map[string]managed.Manifest
+	workerReadiness interface{ Checks() map[string]bool }
 
 	runningMu sync.RWMutex
 	running   map[string]bool
@@ -57,15 +64,28 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService, o
 	if err != nil {
 		return nil, err
 	}
+	catalog := make(map[string]managed.Manifest, len(opts.ManagedParsers))
+	for _, item := range opts.ManagedParsers {
+		item = managed.NormalizeManifest(item)
+		if err := managed.ValidateManifest(item); err != nil {
+			return nil, fmt.Errorf("managed parser catalog %q: %w", item.ParserID, err)
+		}
+		if _, exists := catalog[item.ParserID]; exists {
+			return nil, fmt.Errorf("managed parser %q is registered twice", item.ParserID)
+		}
+		catalog[item.ParserID] = item
+	}
 	server := &Server{
-		store:          store,
-		auth:           auth,
-		parser:         parser,
-		logins:         newLoginGuard(),
-		globalLogins:   newLoginGuard(50),
-		metricsToken:   strings.TrimSpace(opts.MetricsToken),
-		trustedProxies: trustedProxies,
-		running:        make(map[string]bool),
+		store:           store,
+		auth:            auth,
+		parser:          parser,
+		logins:          newLoginGuard(),
+		globalLogins:    newLoginGuard(50),
+		metricsToken:    strings.TrimSpace(opts.MetricsToken),
+		trustedProxies:  trustedProxies,
+		managedParsers:  catalog,
+		workerReadiness: opts.WorkerReadiness,
+		running:         make(map[string]bool),
 	}
 	assets, err := adminui.Files()
 	if err != nil {
@@ -83,6 +103,10 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService, o
 	mux.HandleFunc("GET /api/auth/config", server.handleAuthConfig)
 	mux.HandleFunc("POST /api/auth/access-key", server.handleAccessKeyLogin)
 	mux.HandleFunc("POST /api/auth/telegram", server.handleTelegramLogin)
+	if opts.ConnectorHandler != nil {
+		mux.Handle("/api/v1/connector-spec", opts.ConnectorHandler)
+		mux.Handle("/api/v1/connectors/", opts.ConnectorHandler)
+	}
 	server.protected(mux, "GET /api/auth/me", server.handleMe)
 	server.protected(mux, "POST /api/auth/logout", server.handleLogout)
 	server.protected(mux, "POST /api/client-errors", server.handleClientError)
@@ -90,8 +114,15 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService, o
 	server.protected(mux, "GET /api/sources", server.handleSources)
 	server.protected(mux, "PATCH /api/sources/{id}", server.handleUpdateSource)
 	server.protected(mux, "DELETE /api/sources/{id}", server.handleDeleteSource)
+	server.protected(mux, "POST /api/sources/{id}/restore", server.handleRestoreSource)
 	server.protected(mux, "POST /api/sources/{id}/sync", server.handleSyncSource)
 	server.protected(mux, "POST /api/sources/{id}/rollback", server.handleRollbackSource)
+	server.protected(mux, "GET /api/connectors", server.handleConnectors)
+	server.protected(mux, "GET /api/connectors/catalog", server.handleConnectorCatalog)
+	server.protected(mux, "POST /api/connectors", server.handleCreateConnector)
+	server.protected(mux, "PATCH /api/connectors/{id}", server.handleUpdateConnector)
+	server.protected(mux, "POST /api/connectors/{id}/rotate-key", server.handleRotateConnectorKey)
+	server.protected(mux, "GET /api/connectors/{id}/runs", server.handleConnectorRuns)
 	server.protected(mux, "GET /api/parser-snapshots", server.handleParserSnapshots)
 	server.protected(mux, "GET /api/parser-snapshots/{id}/preview", server.handleParserSnapshotPreview)
 	server.protected(mux, "GET /api/parser-snapshots/{id}/schedule", server.handleParserSnapshotSchedule)
@@ -122,6 +153,16 @@ func (s *Server) Handler() http.Handler { return s.handler }
 
 func (s *Server) protected(mux *http.ServeMux, pattern string, handler http.HandlerFunc) {
 	protectedHandler := http.Handler(handler)
+	requiredRole := roleForPattern(pattern)
+	nextByRole := protectedHandler
+	protectedHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		identity := identityFromContext(r.Context())
+		if !roleAllows(identity.Role, requiredRole) {
+			writeAPIError(w, http.StatusForbidden, "Недостаточно прав для этого действия")
+			return
+		}
+		nextByRole.ServeHTTP(w, r)
+	})
 	if isMutationPattern(pattern) && pattern != "POST /api/client-errors" {
 		next := protectedHandler
 		protectedHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -142,6 +183,54 @@ func (s *Server) protected(mux *http.ServeMux, pattern string, handler http.Hand
 		})
 	}
 	mux.Handle(pattern, s.auth.Require(s.store, protectedHandler))
+}
+
+func roleForPattern(pattern string) string {
+	switch {
+	case strings.HasPrefix(pattern, "GET /api/users"):
+		return "owner"
+	case strings.HasPrefix(pattern, "GET /api/audit"):
+		return "operator"
+	case strings.HasPrefix(pattern, "GET /api/support-requests"):
+		return "support"
+	case strings.HasPrefix(pattern, "GET /api/parser-snapshots"):
+		return "reviewer"
+	case strings.HasPrefix(pattern, "GET /api/connectors"):
+		return "operator"
+	}
+	if strings.HasPrefix(pattern, "GET ") || strings.HasPrefix(pattern, "HEAD ") {
+		return "read_only"
+	}
+	switch {
+	case strings.HasPrefix(pattern, "PATCH /api/users/"):
+		return "owner"
+	case strings.Contains(pattern, "/connectors"), strings.Contains(pattern, "/sources"):
+		return "operator"
+	case strings.Contains(pattern, "/parser-snapshots/"):
+		return "reviewer"
+	case strings.Contains(pattern, "/editor/"):
+		return "editor"
+	case strings.Contains(pattern, "/support-requests/"):
+		return "support"
+	default:
+		return "operator"
+	}
+}
+
+func roleAllows(actual, required string) bool {
+	if actual == "owner" {
+		return true
+	}
+	if required == "read_only" {
+		return actual != "" && actual != "none"
+	}
+	permissions := map[string]map[string]bool{
+		"support":  {"support": true},
+		"editor":   {"editor": true},
+		"reviewer": {"reviewer": true, "editor": true},
+		"operator": {"operator": true, "reviewer": true, "editor": true, "support": true},
+	}
+	return permissions[actual][required]
 }
 
 func isMutationPattern(pattern string) bool {
@@ -170,7 +259,11 @@ func (s *Server) writeAudit(
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "time": time.Now()})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"time":   time.Now(),
+		"build":  buildinfo.Values(),
+	})
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
@@ -180,12 +273,19 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusServiceUnavailable, "База данных недоступна")
 		return
 	}
-	operations, err := s.store.OperationalHealth(ctx)
-	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "Не удалось проверить состояние сервиса")
-		return
+	if s.workerReadiness != nil {
+		checks := s.workerReadiness.Checks()
+		for _, ready := range checks {
+			if !ready {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+					"status": "not_ready",
+					"checks": checks,
+				})
+				return
+			}
+		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ready", "operations": operations})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ready"})
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
@@ -201,6 +301,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	databaseStats := s.store.db.Stats()
 	status := 1
 	if operations.Status != "healthy" {
 		status = 0
@@ -224,6 +325,13 @@ scheduler_notification_queue{queue="schedule",status="pending"} %d
 scheduler_notification_queue{queue="schedule",status="failed"} %d
 scheduler_notification_queue{queue="outbox",status="pending"} %d
 scheduler_notification_queue{queue="outbox",status="failed"} %d
+# TYPE scheduler_connector_queue gauge
+scheduler_connector_queue{status="pending"} %d
+scheduler_connector_queue{status="failed"} %d
+# TYPE scheduler_database_connections gauge
+scheduler_database_connections{state="open"} %d
+scheduler_database_connections{state="in_use"} %d
+scheduler_database_connections{state="idle"} %d
 # TYPE scheduler_oldest_pending_seconds gauge
 scheduler_oldest_pending_seconds %d
 # TYPE scheduler_reminder_worker_last_run_timestamp_seconds gauge
@@ -250,6 +358,11 @@ scheduler_reminder_worker_cursor_pending %d
 		operations.FailedNotifications,
 		operations.PendingOutbox,
 		operations.FailedOutbox,
+		operations.PendingConnectorRuns,
+		operations.FailedConnectorRuns,
+		databaseStats.OpenConnections,
+		databaseStats.InUse,
+		databaseStats.Idle,
 		operations.OldestPendingSeconds,
 		unixTimestamp(operations.ReminderWorker.LastFinishedAt),
 		unixTimestamp(operations.ReminderWorker.LastFullCycleAt),
@@ -405,13 +518,38 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSources(w http.ResponseWriter, r *http.Request) {
-	sources, err := s.store.Sources(r.Context())
+	sources, err := s.store.Sources(r.Context(), true)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "Не удалось загрузить источники")
 		return
 	}
 	s.enrichRunning(sources)
 	writeJSON(w, http.StatusOK, map[string]any{"items": sources})
+}
+
+func (s *Server) handleRestoreSource(w http.ResponseWriter, r *http.Request) {
+	sourceID := strings.TrimSpace(r.PathValue("id"))
+	if sourceID == "" {
+		writeAPIError(w, http.StatusBadRequest, "Источник не указан")
+		return
+	}
+	lifecycle, err := s.store.RestoreSource(r.Context(), sourceID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotFound):
+			writeAPIError(w, http.StatusNotFound, "Архивный источник не найден")
+		case errors.Is(err, ErrSourceBusy):
+			writeAPIError(w, http.StatusConflict, "Источник сейчас обновляется")
+		default:
+			slog.Error("admin restore source failed", "source", sourceID, "err", err)
+			writeAPIError(w, http.StatusInternalServerError, "Не удалось восстановить источник")
+		}
+		return
+	}
+	identity := identityFromContext(r.Context())
+	s.writeAudit(r.Context(), identity, "restore_source", "data_source", sourceID,
+		map[string]any{"lifecycle_status": lifecycle, "enabled": false}, s.requestIP(r))
+	writeJSON(w, http.StatusOK, map[string]any{"status": "restored", "lifecycle_status": lifecycle})
 }
 
 func (s *Server) handleOperations(w http.ResponseWriter, r *http.Request) {
@@ -646,17 +784,13 @@ func (s *Server) handleSyncSource(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "Источник не указан")
 		return
 	}
-	enabled, err := s.store.SourceEnabled(r.Context(), sourceID)
+	_, err := s.store.SourceEnabled(r.Context(), sourceID)
 	if errors.Is(err, ErrNotFound) {
 		writeAPIError(w, http.StatusNotFound, "Источник не найден")
 		return
 	}
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "Не удалось проверить источник")
-		return
-	}
-	if !enabled {
-		writeAPIError(w, http.StatusConflict, "Источник отключён")
 		return
 	}
 	if !s.beginSync(sourceID) {
@@ -670,7 +804,7 @@ func (s *Server) handleSyncSource(w http.ResponseWriter, r *http.Request) {
 		defer s.finishSync(sourceID)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
-		records, err := s.parser.RunDataSource(ctx, sourceID)
+		records, err := s.parser.RunDataSourceManual(ctx, sourceID)
 		details := map[string]any{"records": records}
 		action := "sync_completed"
 		if err != nil {
@@ -797,27 +931,47 @@ func (s *Server) handleResolveSupportRequest(w http.ResponseWriter, r *http.Requ
 func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	userID := r.PathValue("id")
 	var request struct {
-		IsAdmin bool `json:"is_admin"`
+		IsAdmin   *bool  `json:"is_admin"`
+		AdminRole string `json:"admin_role"`
 	}
 	if err := decodeJSON(w, r, &request); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "Некорректный запрос")
 		return
 	}
 	identity := identityFromContext(r.Context())
-	if identity.ID == userID && !request.IsAdmin {
+	role := strings.TrimSpace(request.AdminRole)
+	if role == "" && request.IsAdmin != nil {
+		role = "none"
+		if *request.IsAdmin {
+			role = "owner"
+		}
+	}
+	allowedRoles := map[string]bool{
+		"none": true, "read_only": true, "support": true, "editor": true,
+		"reviewer": true, "operator": true, "owner": true,
+	}
+	if !allowedRoles[role] {
+		writeAPIError(w, http.StatusBadRequest, "Неизвестная административная роль")
+		return
+	}
+	if identity.ID == userID && role != "owner" {
 		writeAPIError(w, http.StatusBadRequest, "Нельзя снять роль администратора у текущей сессии")
 		return
 	}
-	if err := s.store.UpdateUserAdmin(r.Context(), userID, request.IsAdmin); err != nil {
+	if err := s.store.UpdateUserAdminRole(r.Context(), userID, role); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			writeAPIError(w, http.StatusNotFound, "Пользователь не найден")
+			return
+		}
+		if errors.Is(err, ErrConflict) {
+			writeAPIError(w, http.StatusConflict, "В системе должен оставаться хотя бы один владелец")
 			return
 		}
 		writeAPIError(w, http.StatusInternalServerError, "Не удалось изменить роль")
 		return
 	}
 	s.writeAudit(r.Context(), identity, "update_admin_role", "user", userID,
-		map[string]any{"is_admin": request.IsAdmin}, s.requestIP(r))
+		map[string]any{"admin_role": role}, s.requestIP(r))
 	writeJSON(w, http.StatusOK, map[string]any{"status": "updated"})
 }
 
@@ -862,7 +1016,7 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "same-origin")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self'; base-uri 'self'; form-action 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; font-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'none'")
 		next.ServeHTTP(w, r)
 	})
 }

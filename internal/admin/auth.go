@@ -44,6 +44,12 @@ type telegramAdminChecker interface {
 	TelegramAdmin(context.Context, string) (*UserView, error)
 }
 
+type adminSessionStore interface {
+	SaveAdminSession(context.Context, string, AdminIdentity, time.Time, int) error
+	AdminSession(context.Context, string) (AdminIdentity, time.Time, error)
+	DeleteAdminSession(context.Context, string) error
+}
+
 type AuthManager struct {
 	botToken       string
 	accessToken    string
@@ -51,9 +57,14 @@ type AuthManager struct {
 	cookieSecure   bool
 	ttl            time.Duration
 	maxSessions    int
+	persistence    adminSessionStore
 
 	mu       sync.Mutex
 	sessions map[string]session
+}
+
+func (a *AuthManager) UseSessionStore(store adminSessionStore) {
+	a.persistence = store
 }
 
 func NewAuthManager(botToken, accessToken string, accessKeyLogin, cookieSecure bool) *AuthManager {
@@ -81,7 +92,7 @@ func (a *AuthManager) LoginWithAccessKey(key string) (AdminIdentity, error) {
 	if subtle.ConstantTimeCompare(expected[:], actual[:]) != 1 {
 		return AdminIdentity{}, ErrUnauthorized
 	}
-	return AdminIdentity{ID: "local-admin", Name: "Администратор", AuthMethod: "access_key"}, nil
+	return AdminIdentity{ID: "local-admin", Name: "Администратор", AuthMethod: "access_key", Role: "owner"}, nil
 }
 
 func (a *AuthManager) LoginWithTelegram(ctx context.Context, store telegramAdminChecker, initData string) (AdminIdentity, error) {
@@ -106,7 +117,7 @@ func (a *AuthManager) LoginWithTelegram(ctx context.Context, store telegramAdmin
 	if !strings.HasPrefix(name, "@") && (user.Username != "" || telegramUser.Username != "") {
 		name = "@" + name
 	}
-	return AdminIdentity{ID: user.ID, Name: name, AuthMethod: "telegram"}, nil
+	return AdminIdentity{ID: user.ID, Name: name, AuthMethod: "telegram", Role: user.AdminRole}, nil
 }
 
 func (a *AuthManager) IssueSession(w http.ResponseWriter, identity AdminIdentity) (AdminIdentity, error) {
@@ -119,13 +130,22 @@ func (a *AuthManager) IssueSession(w http.ResponseWriter, identity AdminIdentity
 		return AdminIdentity{}, err
 	}
 	identity.CSRFToken = csrf
-	a.mu.Lock()
-	a.cleanupExpiredLocked(time.Now())
-	if len(a.sessions) >= a.maxSessions {
-		a.evictEarliestSessionLocked()
+	expires := time.Now().Add(a.ttl)
+	if a.persistence != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err = a.persistence.SaveAdminSession(ctx, tokenHash(token), identity, expires, a.maxSessions); err != nil {
+			return AdminIdentity{}, fmt.Errorf("save admin session: %w", err)
+		}
+	} else {
+		a.mu.Lock()
+		a.cleanupExpiredLocked(time.Now())
+		if len(a.sessions) >= a.maxSessions {
+			a.evictEarliestSessionLocked()
+		}
+		a.sessions[token] = session{identity: identity, expires: expires}
+		a.mu.Unlock()
 	}
-	a.sessions[token] = session{identity: identity, expires: time.Now().Add(a.ttl)}
-	a.mu.Unlock()
 	http.SetCookie(w, &http.Cookie{
 		Name:     adminSessionCookie,
 		Value:    token,
@@ -140,9 +160,13 @@ func (a *AuthManager) IssueSession(w http.ResponseWriter, identity AdminIdentity
 
 func (a *AuthManager) Logout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(adminSessionCookie); err == nil {
-		a.mu.Lock()
-		delete(a.sessions, cookie.Value)
-		a.mu.Unlock()
+		if a.persistence != nil {
+			_ = a.persistence.DeleteAdminSession(r.Context(), tokenHash(cookie.Value))
+		} else {
+			a.mu.Lock()
+			delete(a.sessions, cookie.Value)
+			a.mu.Unlock()
+		}
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     adminSessionCookie,
@@ -173,6 +197,7 @@ func (a *AuthManager) Require(store telegramAdminChecker, next http.Handler) htt
 				writeAPIError(w, http.StatusServiceUnavailable, "Не удалось проверить права администратора")
 				return
 			}
+			identity.Role = user.AdminRole
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
 			provided := r.Header.Get("X-CSRF-Token")
@@ -192,6 +217,10 @@ func (a *AuthManager) identityForRequest(r *http.Request) (AdminIdentity, bool) 
 	if err != nil || cookie.Value == "" {
 		return AdminIdentity{}, false
 	}
+	if a.persistence != nil {
+		identity, expires, loadErr := a.persistence.AdminSession(r.Context(), tokenHash(cookie.Value))
+		return identity, loadErr == nil && expires.After(time.Now())
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	now := time.Now()
@@ -201,6 +230,11 @@ func (a *AuthManager) identityForRequest(r *http.Request) (AdminIdentity, bool) 
 		return AdminIdentity{}, false
 	}
 	return current.identity, true
+}
+
+func tokenHash(token string) string {
+	digest := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(digest[:])
 }
 
 func (a *AuthManager) cleanupExpiredLocked(now time.Time) {

@@ -8,10 +8,11 @@ import (
 )
 
 type AdminIdentity struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	AuthMethod string `json:"auth_method"`
-	CSRFToken  string `json:"csrf_token,omitempty"`
+	ID         string `json:"id" db:"id"`
+	Name       string `json:"name" db:"name"`
+	AuthMethod string `json:"auth_method" db:"auth_method"`
+	Role       string `json:"role" db:"role"`
+	CSRFToken  string `json:"csrf_token,omitempty" db:"csrf_token"`
 }
 
 type Dashboard struct {
@@ -39,6 +40,10 @@ type SourceView struct {
 	UniversityFullName        string     `json:"university_full_name" db:"university_full_name"`
 	ScheduleURL               string     `json:"schedule_url" db:"schedule_url"`
 	AdapterType               string     `json:"adapter_type" db:"adapter_type"`
+	LifecycleStatus           string     `json:"lifecycle_status" db:"lifecycle_status"`
+	ArchivedAt                *time.Time `json:"archived_at" db:"archived_at"`
+	AllowEmpty                bool       `json:"allow_empty" db:"allow_empty"`
+	InsecureTransport         bool       `json:"insecure_transport" db:"insecure_transport"`
 	IsEnabled                 bool       `json:"is_enabled" db:"is_enabled"`
 	UpdateInterval            int        `json:"update_interval" db:"update_interval"`
 	LastRunAt                 *time.Time `json:"last_run_at" db:"last_run_at"`
@@ -84,6 +89,8 @@ type OperationalHealth struct {
 	FailedNotifications   int                 `json:"failed_notifications" db:"failed_notifications"`
 	PendingOutbox         int                 `json:"pending_outbox" db:"pending_outbox"`
 	FailedOutbox          int                 `json:"failed_outbox" db:"failed_outbox"`
+	PendingConnectorRuns  int                 `json:"pending_connector_runs" db:"pending_connector_runs"`
+	FailedConnectorRuns   int                 `json:"failed_connector_runs" db:"failed_connector_runs"`
 	OldestPendingSeconds  int64               `json:"oldest_pending_seconds" db:"oldest_pending_seconds"`
 	LastSuccessfulParseAt *time.Time          `json:"last_successful_parse_at" db:"last_successful_parse_at"`
 	ReminderWorker        domain.WorkerStatus `json:"reminder_worker"`
@@ -157,6 +164,7 @@ type UserView struct {
 	ID                   string    `json:"id" db:"id"`
 	Username             string    `json:"username" db:"username"`
 	IsAdmin              bool      `json:"is_admin" db:"is_admin"`
+	AdminRole            string    `json:"admin_role" db:"admin_role"`
 	Subscriptions        int       `json:"subscriptions" db:"subscriptions"`
 	DefaultGroupID       string    `json:"default_group_id" db:"default_group_id"`
 	DefaultGroupName     string    `json:"default_group_name" db:"default_group_name"`

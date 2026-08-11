@@ -99,8 +99,22 @@ func TestSourceLifecycle(t *testing.T) {
 	if err = store.DeleteSource(ctx, sourceID); err != nil {
 		t.Fatalf("delete source: %v", err)
 	}
+	activeSources, err := store.Sources(ctx, false)
+	if err != nil {
+		t.Fatalf("list active sources: %v", err)
+	}
+	if containsSource(activeSources, sourceID) {
+		t.Fatal("archived source is present in the active source list")
+	}
+	allSources, err := store.Sources(ctx, true)
+	if err != nil {
+		t.Fatalf("list all sources: %v", err)
+	}
+	if !containsSource(allSources, sourceID) {
+		t.Fatal("archived source is missing from the archive-capable source list")
+	}
 	for table, query := range map[string]string{
-		"data_sources":     `SELECT COUNT(*) FROM data_sources WHERE id=$1`,
+		"data_sources":     `SELECT COUNT(*) FROM data_sources WHERE id=$1 AND lifecycle_status='archived'`,
 		"parse_logs":       `SELECT COUNT(*) FROM parse_logs WHERE data_source_id=$1`,
 		"parser_snapshots": `SELECT COUNT(*) FROM parser_snapshots WHERE data_source_id=$1`,
 	} {
@@ -108,8 +122,36 @@ func TestSourceLifecycle(t *testing.T) {
 		if err = db.GetContext(ctx, &count, query, sourceID); err != nil {
 			t.Fatalf("count %s: %v", table, err)
 		}
-		if count != 0 {
-			t.Errorf("%s contains %d rows after source deletion", table, count)
+		if count != 1 {
+			t.Errorf("%s contains %d retained rows after source archival", table, count)
 		}
 	}
+	status, err := store.RestoreSource(ctx, sourceID)
+	if err != nil {
+		t.Fatalf("restore source: %v", err)
+	}
+	if status != "active" {
+		t.Fatalf("restored lifecycle=%q, want active", status)
+	}
+	var restored struct {
+		Lifecycle string `db:"lifecycle_status"`
+		Enabled   bool   `db:"is_enabled"`
+	}
+	if err = db.GetContext(ctx, &restored,
+		`SELECT lifecycle_status, is_enabled FROM data_sources WHERE id=$1`, sourceID,
+	); err != nil {
+		t.Fatalf("load restored source: %v", err)
+	}
+	if restored.Lifecycle != "active" || restored.Enabled {
+		t.Fatalf("unexpected restored source: %+v", restored)
+	}
+}
+
+func containsSource(items []SourceView, id string) bool {
+	for _, item := range items {
+		if item.ID == id {
+			return true
+		}
+	}
+	return false
 }
