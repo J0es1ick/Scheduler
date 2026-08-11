@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
+	"github.com/J0es1ick/Scheduler/internal/scraper"
 	"github.com/PuerkitoBio/goquery"
 )
 
@@ -64,6 +65,18 @@ func TestParseRecurringSundaySchedule(t *testing.T) {
 	}
 	if lesson.TimeStart != "09:50" || lesson.TimeEnd != "11:25" {
 		t.Fatalf("unexpected time: %s-%s", lesson.TimeStart, lesson.TimeEnd)
+	}
+}
+
+func TestParseScheduleTableRejectsUnexpectedMarkup(t *testing.T) {
+	doc := mustDocument(t, `<html><body>Обновлённая страница</body></html>`)
+	_, err := parseScheduleTable(doc, "ispu:group:1", "semester", "Основное")
+	if err == nil {
+		t.Fatal("missing schedule table was accepted as an empty schedule")
+	}
+	diagnostic, ok := scraper.ExtractResponseDiagnostic(err)
+	if !ok || diagnostic.Category != "markup_changed" || !diagnostic.StopBatch {
+		t.Fatalf("unexpected diagnostic: %#v, ok=%v", diagnostic, ok)
 	}
 }
 

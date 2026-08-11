@@ -259,13 +259,13 @@ func (r *ParserSnapshotRepository) PublishWithHook(
 		return nil, fmt.Errorf("publish snapshot: encode canonical payload: %w", err)
 	}
 	if _, err = tx.ExecContext(ctx, `
-		INSERT INTO semesters (id, university_id, name, start_date, end_date)
-		VALUES ($1,$2,'Актуальный снимок',$3,$4)
+		INSERT INTO semesters (id, university_id, external_id, name, start_date, end_date)
+		VALUES ($1,$2,$1,'Актуальный снимок',$3,$4)
 		ON CONFLICT (id) DO UPDATE SET
 			university_id=EXCLUDED.university_id,
-			name=EXCLUDED.name,
 			start_date=EXCLUDED.start_date,
-			end_date=EXCLUDED.end_date`,
+			end_date=EXCLUDED.end_date,
+			updated_at=NOW()`,
 		payload.SemesterID, payload.UniversityID, payload.StartDate, payload.EndDate,
 	); err != nil {
 		return nil, fmt.Errorf("publish snapshot: semester: %w", err)
@@ -291,7 +291,7 @@ func (r *ParserSnapshotRepository) PublishWithHook(
 		}
 	}
 	if _, err = tx.ExecContext(ctx,
-		`DELETE FROM lessons WHERE university_id=$1`, payload.UniversityID,
+		`DELETE FROM lessons WHERE university_id=$1 AND semester_id=$2`, payload.UniversityID, payload.SemesterID,
 	); err != nil {
 		return nil, fmt.Errorf("publish snapshot: clear lessons: %w", err)
 	}
@@ -299,8 +299,9 @@ func (r *ParserSnapshotRepository) PublishWithHook(
 		INSERT INTO lessons (
 			id, university_id, semester_id, day_of_week, special_date,
 			time_start, time_end, week_type, subject, type, teacher, room,
-			group_id, subgroup, valid_from, valid_to, updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,NOW())`
+			group_id, subgroup, valid_from, valid_to, recurrence, source_id,
+			external_id, fetched_at, source_fingerprint, updated_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,NOW())`
 	for _, group := range payload.Groups {
 		for _, lesson := range group.Lessons {
 			if _, err = tx.ExecContext(ctx, insertLesson,
@@ -309,6 +310,8 @@ func (r *ParserSnapshotRepository) PublishWithHook(
 				lesson.TimeStart, lesson.TimeEnd, lesson.WeekType,
 				lesson.Subject, lesson.Type, lesson.Teacher, lesson.Room,
 				group.ID, lesson.Subgroup, lesson.ValidFrom, lesson.ValidTo,
+				lesson.Recurrence, nullIfEmpty(lesson.SourceID), lesson.ExternalID,
+				lesson.FetchedAt, lesson.SourceFingerprint,
 			); err != nil {
 				return nil, fmt.Errorf("publish snapshot: lesson %s: %w", lesson.ID, err)
 			}

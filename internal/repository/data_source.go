@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -74,6 +75,7 @@ func (r *DataSourceRepository) GetDataSourceByID(ctx context.Context, id string)
 		        consecutive_failures,
 		        next_retry_at,
 		        COALESCE(current_snapshot_id, '') AS current_snapshot_id,
+		        lifecycle_status, archived_at, quality_policy,
 		        created_at, updated_at
 		 FROM data_sources WHERE id = $1`, id)
 	if err != nil {
@@ -81,6 +83,9 @@ func (r *DataSourceRepository) GetDataSourceByID(ctx context.Context, id string)
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get data source %s: %w", id, err)
+	}
+	if err := decodeQualityPolicy(&ds); err != nil {
+		return nil, err
 	}
 	return &ds, nil
 }
@@ -92,12 +97,14 @@ func (r *DataSourceRepository) UpdateDataSource(ctx context.Context, ds *domain.
 		     is_enabled = $4, update_interval = $5, last_run_at = $6, last_success_at = $7,
 		     last_error = $8, consecutive_failures = $9,
 		     next_retry_at = $10,
-		     current_snapshot_id = NULLIF($11, ''), updated_at = $12
-		 WHERE id = $13`,
+		     current_snapshot_id = NULLIF($11, ''), lifecycle_status=$12,
+		     archived_at=$13, quality_policy=$14::jsonb, updated_at = $15
+		 WHERE id = $16`,
 		ds.UniversityID, ds.AdapterType, ds.Config,
 		ds.IsEnabled, ds.UpdateInterval, ds.LastRunAt, ds.LastSuccessAt,
 		ds.LastError, ds.ConsecutiveFailures, ds.NextRetryAt,
-		ds.CurrentSnapshotID, time.Now(), ds.ID)
+		ds.CurrentSnapshotID, ds.LifecycleStatus, ds.ArchivedAt,
+		qualityPolicyJSON(ds.QualityPolicy), time.Now(), ds.ID)
 	if err != nil {
 		return fmt.Errorf("update data source %s: %w", ds.ID, err)
 	}
@@ -122,9 +129,12 @@ func (r *DataSourceRepository) ListActiveDataSources(ctx context.Context) ([]*do
 		        consecutive_failures,
 		        next_retry_at,
 		        COALESCE(current_snapshot_id, '') AS current_snapshot_id,
+		        lifecycle_status, archived_at, quality_policy,
 		        created_at, updated_at
 		 FROM data_sources
 		 WHERE is_enabled
+		 AND lifecycle_status='active'
+		 AND adapter_type<>'external_push'
 		 AND NOT EXISTS (
 			SELECT 1 FROM parser_snapshots ps
 			WHERE ps.data_source_id=data_sources.id AND ps.status='quarantined'
@@ -145,6 +155,11 @@ func (r *DataSourceRepository) ListActiveDataSources(ctx context.Context) ([]*do
 	if err != nil {
 		return nil, fmt.Errorf("list active data sources: %w", err)
 	}
+	for _, source := range sources {
+		if err := decodeQualityPolicy(source); err != nil {
+			return nil, err
+		}
+	}
 	return sources, nil
 }
 
@@ -158,12 +173,37 @@ func (r *DataSourceRepository) ListDataSourcesByUniversityID(ctx context.Context
 		        consecutive_failures,
 		        next_retry_at,
 		        COALESCE(current_snapshot_id, '') AS current_snapshot_id,
+		        lifecycle_status, archived_at, quality_policy,
 		        created_at, updated_at
-		 FROM data_sources WHERE university_id = $1`, universityID)
+		 FROM data_sources WHERE university_id = $1 AND lifecycle_status<>'archived'`, universityID)
 	if err != nil {
 		return nil, fmt.Errorf("list data sources for university %s: %w", universityID, err)
 	}
+	for _, source := range sources {
+		if err := decodeQualityPolicy(source); err != nil {
+			return nil, err
+		}
+	}
 	return sources, nil
+}
+
+func qualityPolicyJSON(policy domain.SourceQualityPolicy) []byte {
+	if policy == (domain.SourceQualityPolicy{}) {
+		policy = domain.DefaultSourceQualityPolicy()
+	}
+	encoded, _ := json.Marshal(policy)
+	return encoded
+}
+
+func decodeQualityPolicy(source *domain.DataSource) error {
+	policy := domain.DefaultSourceQualityPolicy()
+	if len(source.QualityPolicyRaw) > 0 {
+		if err := json.Unmarshal(source.QualityPolicyRaw, &policy); err != nil {
+			return fmt.Errorf("decode data source %s quality policy: %w", source.ID, err)
+		}
+	}
+	source.QualityPolicy = policy
+	return nil
 }
 
 func (r *DataSourceRepository) RecordFailure(
@@ -204,6 +244,18 @@ func (r *DataSourceRepository) RecordQuarantine(
 		WHERE id=$1`, id, message)
 	if err != nil {
 		return fmt.Errorf("record data source quarantine %s: %w", id, err)
+	}
+	return nil
+}
+
+func (r *DataSourceRepository) RecordAcceptedCandidate(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE data_sources
+		SET last_run_at=NOW(), last_error='', consecutive_failures=0,
+			next_retry_at=NULL, updated_at=NOW()
+		WHERE id=$1`, id)
+	if err != nil {
+		return fmt.Errorf("record accepted source candidate %s: %w", id, err)
 	}
 	return nil
 }

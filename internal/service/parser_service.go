@@ -38,6 +38,7 @@ type ParserService struct {
 	notificationRepo *repository.NotificationRepository
 	diagnosticRepo   *repository.ParserDiagnosticRepository
 	adapters         map[string]scraper.SourceAdapter
+	adapterFactories map[string]func(config string) (scraper.SourceAdapter, error)
 }
 
 func NewParserService(
@@ -58,11 +59,19 @@ func NewParserService(
 		notificationRepo: notificationRepo,
 		diagnosticRepo:   diagnosticRepo,
 		adapters:         make(map[string]scraper.SourceAdapter),
+		adapterFactories: make(map[string]func(string) (scraper.SourceAdapter, error)),
 	}
 }
 
 func (s *ParserService) RegisterAdapter(adapterType string, adapter scraper.SourceAdapter) {
 	s.adapters[adapterType] = adapter
+}
+
+func (s *ParserService) RegisterAdapterFactory(
+	adapterType string,
+	factory func(config string) (scraper.SourceAdapter, error),
+) {
+	s.adapterFactories[adapterType] = factory
 }
 
 func (s *ParserService) CleanupInterruptedRuns(ctx context.Context, olderThan time.Duration) error {
@@ -77,6 +86,14 @@ func (s *ParserService) CleanupInterruptedRuns(ctx context.Context, olderThan ti
 }
 
 func (s *ParserService) RunDataSource(ctx context.Context, dataSourceID string) (int, error) {
+	return s.runDataSource(ctx, dataSourceID, false)
+}
+
+func (s *ParserService) RunDataSourceManual(ctx context.Context, dataSourceID string) (int, error) {
+	return s.runDataSource(ctx, dataSourceID, true)
+}
+
+func (s *ParserService) runDataSource(ctx context.Context, dataSourceID string, manual bool) (int, error) {
 	release, acquired, err := s.dataSourceRepo.TryAcquireRunLock(ctx, dataSourceID)
 	if err != nil {
 		return 0, err
@@ -97,11 +114,21 @@ func (s *ParserService) RunDataSource(ctx context.Context, dataSourceID string) 
 	if ds == nil {
 		return 0, fmt.Errorf("parser: data source %s not found", dataSourceID)
 	}
-	if !ds.IsEnabled {
+	if !ds.IsEnabled && !manual {
 		return 0, fmt.Errorf("%w: %s", ErrDataSourceDisabled, dataSourceID)
 	}
+	if manual && (ds.LifecycleStatus == domain.ConnectorStatusArchived || ds.LifecycleStatus == domain.ConnectorStatusSuspended) {
+		return 0, fmt.Errorf("parser: data source %s is %s", dataSourceID, ds.LifecycleStatus)
+	}
 	adapter, ok := s.adapters[ds.AdapterType]
-	if !ok {
+	if factory, factoryOK := s.adapterFactories[ds.AdapterType]; factoryOK {
+		adapter, err = factory(ds.Config)
+		if err != nil {
+			return 0, fmt.Errorf("parser: create adapter type=%q: %w", ds.AdapterType, err)
+		}
+		ok = true
+	}
+	if !ok || adapter == nil {
 		return 0, fmt.Errorf("parser: no adapter registered for type=%q", ds.AdapterType)
 	}
 
@@ -171,7 +198,7 @@ func (s *ParserService) RunDataSource(ctx context.Context, dataSourceID string) 
 	if err != nil {
 		return fail(lessonCount, fmt.Errorf("parser: load baseline: %w", err))
 	}
-	anomalies, publishable := evaluateSnapshot(payload, lessonCount, baseline)
+	anomalies, publishable := evaluateSnapshot(payload, lessonCount, baseline, ds.QualityPolicy)
 	status := domain.SnapshotStatusStaged
 	if len(anomalies) > 0 {
 		status = domain.SnapshotStatusQuarantined
@@ -201,6 +228,15 @@ func (s *ParserService) RunDataSource(ctx context.Context, dataSourceID string) 
 		))
 		return lessonCount, fmt.Errorf("%w: snapshot=%s: %s", ErrSnapshotQuarantine, snapshot.ID, summary)
 	}
+	if ds.LifecycleStatus != domain.ConnectorStatusActive {
+		_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "success", lessonCount, "")
+		_ = s.dataSourceRepo.RecordAcceptedCandidate(ctx, ds.ID)
+		slog.Info("parser: test snapshot staged",
+			"adapter", adapter.Name(), "source", ds.ID, "snapshot", snapshot.ID,
+			"groups", len(payload.Groups), "lessons", lessonCount,
+		)
+		return lessonCount, nil
+	}
 
 	if _, err = s.publishSnapshot(ctx, snapshot.ID, "", "Автоматическая публикация"); err != nil {
 		return fail(lessonCount, fmt.Errorf("parser: publish snapshot %s: %w", snapshot.ID, err))
@@ -215,6 +251,106 @@ func (s *ParserService) RunDataSource(ctx context.Context, dataSourceID string) 
 		"elapsed", time.Since(startedAt),
 	)
 	return lessonCount, nil
+}
+
+func (s *ParserService) IngestExternalSnapshot(
+	ctx context.Context,
+	dataSourceID string,
+	payload domain.ScheduleSnapshot,
+) (*domain.ParserSnapshot, error) {
+	release, acquired, err := s.dataSourceRepo.TryAcquireRunLock(ctx, dataSourceID)
+	if err != nil {
+		return nil, err
+	}
+	if !acquired {
+		return nil, fmt.Errorf("%w: %s", ErrDataSourceBusy, dataSourceID)
+	}
+	defer func() { _ = release() }()
+
+	ds, err := s.dataSourceRepo.GetDataSourceByID(ctx, dataSourceID)
+	if err != nil {
+		return nil, err
+	}
+	if ds == nil || ds.AdapterType != "external_push" {
+		return nil, fmt.Errorf("parser: external data source %s not found", dataSourceID)
+	}
+	if ds.LifecycleStatus == domain.ConnectorStatusArchived ||
+		ds.LifecycleStatus == domain.ConnectorStatusSuspended {
+		return nil, fmt.Errorf("parser: external data source %s is %s", dataSourceID, ds.LifecycleStatus)
+	}
+	logID := uuid.NewString()
+	if _, err = s.parseLogRepo.CreateParseLog(ctx, logID, ds.ID, "running", 0, ""); err != nil {
+		return nil, err
+	}
+	fail := func(runErr error) (*domain.ParserSnapshot, error) {
+		message := truncate(runErr.Error(), 4000)
+		_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "failed", 0, message)
+		_, _, _ = s.dataSourceRepo.RecordFailure(ctx, ds.ID, message)
+		return nil, runErr
+	}
+	if payload.UniversityID != ds.UniversityID {
+		return fail(fmt.Errorf(
+			"parser: connector university %s does not match source university %s",
+			payload.UniversityID, ds.UniversityID,
+		))
+	}
+	lessonCount := 0
+	for groupIndex := range payload.Groups {
+		group := &payload.Groups[groupIndex]
+		group.UniversityID = payload.UniversityID
+		for lessonIndex := range group.Lessons {
+			lesson := &group.Lessons[lessonIndex]
+			lesson.UniversityID = payload.UniversityID
+			lesson.SemesterID = payload.SemesterID
+			lesson.GroupID = group.ID
+			lesson.SourceID = ds.ID
+			lessonCount++
+		}
+	}
+	existingGroups, err := s.groupRepo.GetGroupsByUniversityID(ctx, payload.UniversityID)
+	if err != nil {
+		return fail(fmt.Errorf("parser: load existing group identities: %w", err))
+	}
+	payload, _, err = repository.CanonicalizeSnapshotGroupIDs(payload, existingGroups)
+	if err != nil {
+		return fail(fmt.Errorf("parser: reconcile group identities: %w", err))
+	}
+	baseline, err := s.snapshotRepo.Baseline(ctx, payload.UniversityID, ds.ID)
+	if err != nil {
+		return fail(fmt.Errorf("parser: load baseline: %w", err))
+	}
+	anomalies, publishable := evaluateSnapshot(payload, lessonCount, baseline, ds.QualityPolicy)
+	status := domain.SnapshotStatusStaged
+	if len(anomalies) > 0 {
+		status = domain.SnapshotStatusQuarantined
+	}
+	snapshot := &domain.ParserSnapshot{
+		ID: uuid.NewString(), DataSourceID: ds.ID, ParseLogID: logID,
+		Status: status, Publishable: publishable,
+		GroupCount: len(payload.Groups), LessonCount: lessonCount,
+		AnomalyReasons: anomalies, Payload: payload,
+	}
+	if err = s.snapshotRepo.Create(ctx, snapshot); err != nil {
+		return fail(fmt.Errorf("parser: stage connector snapshot: %w", err))
+	}
+	if status == domain.SnapshotStatusQuarantined {
+		summary := anomalySummary(anomalies)
+		_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "quarantined", lessonCount, summary)
+		_ = s.dataSourceRepo.RecordQuarantine(ctx, ds.ID, "Внешний снимок помещён в карантин: "+summary)
+		return snapshot, nil
+	}
+	if ds.LifecycleStatus != domain.ConnectorStatusActive {
+		_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "success", lessonCount, "")
+		_ = s.dataSourceRepo.RecordAcceptedCandidate(ctx, ds.ID)
+		return snapshot, nil
+	}
+	published, err := s.publishSnapshot(ctx, snapshot.ID, "connector:"+dataSourceID, "Автоматическая публикация внешнего коннектора")
+	if err != nil {
+		return fail(fmt.Errorf("parser: publish connector snapshot: %w", err))
+	}
+	_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "success", lessonCount, "")
+	_ = s.snapshotRepo.Prune(ctx, ds.ID, snapshot.ID)
+	return published, nil
 }
 
 func (s *ParserService) PublishSnapshot(
@@ -393,7 +529,11 @@ func evaluateSnapshot(
 	payload domain.ScheduleSnapshot,
 	lessonCount int,
 	baseline *domain.SnapshotBaseline,
+	policy domain.SourceQualityPolicy,
 ) ([]domain.SnapshotAnomaly, bool) {
+	if policy == (domain.SourceQualityPolicy{}) {
+		policy = domain.DefaultSourceQualityPolicy()
+	}
 	anomalies := make([]domain.SnapshotAnomaly, 0)
 	publishable := true
 	groupIDs := make(map[string]struct{}, len(payload.Groups))
@@ -445,9 +585,23 @@ func evaluateSnapshot(
 		return uniqueAnomalies(anomalies), publishable
 	}
 
-	if lessonCount == 0 {
+	if lessonCount == 0 && !policy.AllowEmpty {
 		anomalies = append(anomalies, domain.SnapshotAnomaly{
 			Code: "all_lessons_empty", Message: "Источник вернул пустое расписание для всех групп",
+		})
+	}
+	if len(payload.Groups) < policy.MinimumGroups {
+		anomalies = append(anomalies, domain.SnapshotAnomaly{
+			Code: "minimum_groups", Message: fmt.Sprintf(
+				"Количество групп %d меньше настроенного минимума %d", len(payload.Groups), policy.MinimumGroups,
+			), Candidate: len(payload.Groups), Current: policy.MinimumGroups,
+		})
+	}
+	if lessonCount < policy.MinimumLessons {
+		anomalies = append(anomalies, domain.SnapshotAnomaly{
+			Code: "minimum_lessons", Message: fmt.Sprintf(
+				"Количество занятий %d меньше настроенного минимума %d", lessonCount, policy.MinimumLessons,
+			), Candidate: lessonCount, Current: policy.MinimumLessons,
 		})
 	}
 	if !baseline.HasExistingState {
@@ -455,25 +609,25 @@ func evaluateSnapshot(
 	}
 	groupRatio := safeRatio(len(payload.Groups), baseline.GroupCount)
 	lessonRatio := safeRatio(lessonCount, baseline.LessonCount)
-	if baseline.GroupCount >= 10 && groupRatio < 0.70 {
+	if baseline.GroupCount >= 10 && groupRatio < 1-policy.MaximumGroupDropRatio {
 		anomalies = append(anomalies, ratioAnomaly(
 			"group_count_drop", "Количество групп уменьшилось более чем на 30%",
 			baseline.GroupCount, len(payload.Groups), groupRatio,
 		))
 	}
-	if baseline.GroupCount >= 20 && groupRatio > 1.80 {
+	if baseline.GroupCount >= 20 && groupRatio > 1+policy.MaximumGroupGrowthRatio {
 		anomalies = append(anomalies, ratioAnomaly(
 			"group_count_spike", "Количество групп выросло более чем на 80%",
 			baseline.GroupCount, len(payload.Groups), groupRatio,
 		))
 	}
-	if baseline.LessonCount >= 20 && lessonRatio < 0.60 {
+	if baseline.LessonCount >= 20 && lessonRatio < 1-policy.MaximumLessonDropRatio {
 		anomalies = append(anomalies, ratioAnomaly(
 			"lesson_count_drop", "Количество занятий уменьшилось более чем на 40%",
 			baseline.LessonCount, lessonCount, lessonRatio,
 		))
 	}
-	if baseline.LessonCount >= 20 && lessonRatio > 2.0 {
+	if baseline.LessonCount >= 20 && lessonRatio > 1+policy.MaximumLessonGrowthRatio {
 		anomalies = append(anomalies, ratioAnomaly(
 			"lesson_count_spike", "Количество занятий выросло более чем в два раза",
 			baseline.LessonCount, lessonCount, lessonRatio,
@@ -581,7 +735,25 @@ func scheduleChangeSummary(diff ScheduleDiff) string {
 	if removed > 0 {
 		parts = append(parts, fmt.Sprintf("удалено: %d", removed))
 	}
-	return "Расписание обновлено — " + strings.Join(parts, ", ") + "."
+	summary := "Расписание обновлено — " + strings.Join(parts, ", ") + "."
+	for _, lesson := range diff.AddedItems[:min(3, len(diff.AddedItems))] {
+		summary += "\n+ " + lessonChangeLabel(lesson)
+	}
+	for _, lesson := range diff.RemovedItems[:min(3, len(diff.RemovedItems))] {
+		summary += "\n− " + lessonChangeLabel(lesson)
+	}
+	if len(diff.AddedItems)+len(diff.RemovedItems) > 6 {
+		summary += "\nОстальные изменения видны в актуальном расписании."
+	}
+	return summary
+}
+
+func lessonChangeLabel(lesson domain.Lesson) string {
+	day := map[int]string{1: "Пн", 2: "Вт", 3: "Ср", 4: "Чт", 5: "Пт", 6: "Сб", 7: "Вс"}[lesson.DayOfWeek]
+	if lesson.SpecialDate != nil {
+		day = lesson.SpecialDate.Format("02.01")
+	}
+	return fmt.Sprintf("%s %s–%s · %s", day, lesson.TimeStart, lesson.TimeEnd, lesson.Subject)
 }
 
 type groupScheduleResult struct {

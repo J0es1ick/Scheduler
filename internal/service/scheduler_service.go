@@ -138,6 +138,9 @@ func lessonMatchesDate(lesson domain.Lesson, date time.Time, fallbackSemesterSta
 	if lesson.DayOfWeek != helpers.Weekday(date) {
 		return false
 	}
+	if !lesson.Recurrence.Matches(date, fallbackSemesterStart) {
+		return false
+	}
 
 	if lesson.ValidFrom != nil {
 		validFrom := helpers.NormalizeDate(*lesson.ValidFrom)
@@ -220,17 +223,16 @@ func (s *ScheduleService) GetAllLessonsForUniversity(
 }
 
 type ScheduleDiff struct {
-	Added   int
-	Removed int
+	Added        int
+	Removed      int
+	AddedItems   []domain.Lesson
+	RemovedItems []domain.Lesson
 }
 
 func (d ScheduleDiff) Changed() bool {
 	return d.Added > 0 || d.Removed > 0
 }
 
-// CompareLessonSnapshots compares schedule content, deliberately ignoring
-// database IDs and updated_at. Source sites may regenerate identifiers even
-// when the schedule itself has not changed.
 func CompareLessonSnapshots(before, after []domain.Lesson) ScheduleDiff {
 	beforeSet := lessonFingerprintCounts(before)
 	afterSet := lessonFingerprintCounts(after)
@@ -245,49 +247,73 @@ func CompareLessonSnapshots(before, after []domain.Lesson) ScheduleDiff {
 			diff.Removed += delta
 		}
 	}
+	remainingBefore := lessonFingerprintCounts(before)
+	for _, lesson := range after {
+		fingerprint := lessonFingerprint(lesson)
+		if remainingBefore[fingerprint] > 0 {
+			remainingBefore[fingerprint]--
+			continue
+		}
+		diff.AddedItems = append(diff.AddedItems, lesson)
+	}
+	remainingAfter := lessonFingerprintCounts(after)
+	for _, lesson := range before {
+		fingerprint := lessonFingerprint(lesson)
+		if remainingAfter[fingerprint] > 0 {
+			remainingAfter[fingerprint]--
+			continue
+		}
+		diff.RemovedItems = append(diff.RemovedItems, lesson)
+	}
 	return diff
 }
 
 func lessonFingerprintCounts(lessons []domain.Lesson) map[string]int {
 	result := make(map[string]int, len(lessons))
 	for _, lesson := range lessons {
-		payload := struct {
-			UniversityID string
-			SemesterID   string
-			DayOfWeek    int
-			SpecialDate  string
-			TimeStart    string
-			TimeEnd      string
-			WeekType     domain.WeekType
-			Subject      string
-			Type         domain.LessonType
-			Teacher      string
-			Room         string
-			GroupID      string
-			Subgroup     int
-			ValidFrom    string
-			ValidTo      string
-		}{
-			UniversityID: lesson.UniversityID,
-			SemesterID:   lesson.SemesterID,
-			DayOfWeek:    lesson.DayOfWeek,
-			SpecialDate:  fingerprintDate(lesson.SpecialDate),
-			TimeStart:    lesson.TimeStart,
-			TimeEnd:      lesson.TimeEnd,
-			WeekType:     lesson.WeekType,
-			Subject:      lesson.Subject,
-			Type:         lesson.Type,
-			Teacher:      lesson.Teacher,
-			Room:         lesson.Room,
-			GroupID:      lesson.GroupID,
-			Subgroup:     lesson.Subgroup,
-			ValidFrom:    fingerprintDate(lesson.ValidFrom),
-			ValidTo:      fingerprintDate(lesson.ValidTo),
-		}
-		encoded, _ := json.Marshal(payload)
-		result[string(encoded)]++
+		result[lessonFingerprint(lesson)]++
 	}
 	return result
+}
+
+func lessonFingerprint(lesson domain.Lesson) string {
+	payload := struct {
+		UniversityID string
+		SemesterID   string
+		DayOfWeek    int
+		SpecialDate  string
+		TimeStart    string
+		TimeEnd      string
+		WeekType     domain.WeekType
+		Subject      string
+		Type         domain.LessonType
+		Teacher      string
+		Room         string
+		GroupID      string
+		Subgroup     int
+		ValidFrom    string
+		ValidTo      string
+		Recurrence   domain.RecurrenceRule
+	}{
+		UniversityID: lesson.UniversityID,
+		SemesterID:   lesson.SemesterID,
+		DayOfWeek:    lesson.DayOfWeek,
+		SpecialDate:  fingerprintDate(lesson.SpecialDate),
+		TimeStart:    lesson.TimeStart,
+		TimeEnd:      lesson.TimeEnd,
+		WeekType:     lesson.WeekType,
+		Subject:      lesson.Subject,
+		Type:         lesson.Type,
+		Teacher:      lesson.Teacher,
+		Room:         lesson.Room,
+		GroupID:      lesson.GroupID,
+		Subgroup:     lesson.Subgroup,
+		ValidFrom:    fingerprintDate(lesson.ValidFrom),
+		ValidTo:      fingerprintDate(lesson.ValidTo),
+		Recurrence:   lesson.Recurrence,
+	}
+	encoded, _ := json.Marshal(payload)
+	return string(encoded)
 }
 
 func fingerprintDate(value *time.Time) string {
