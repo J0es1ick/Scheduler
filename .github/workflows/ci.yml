@@ -112,7 +112,6 @@ jobs:
       DATABASE_PASSWORD: ci-database-password
       DATABASE_NAME: scheduler
       ADMIN_METRICS_TOKEN: ci-metrics-token
-      ADMIN_COOKIE_SECURE: "false"
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
