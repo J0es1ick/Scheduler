@@ -1,6 +1,6 @@
 module github.com/J0es1ick/Scheduler
 
-go 1.25.0
+go 1.25.12
 
 require (
 	github.com/PuerkitoBio/goquery v1.12.0

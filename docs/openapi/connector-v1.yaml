@@ -1,20 +1,20 @@
 openapi: 3.1.0
 info:
-  title: Scheduler Connector API
+  title: API внешних коннекторов Scheduler
   version: 1.0.0
-  description: Signed ingestion API for full schedule snapshots.
+  description: API для приёма полных снимков расписания с проверкой подписи.
 servers:
   - url: https://admin.example.org
 paths:
   /api/v1/connector-spec:
     get:
-      summary: Discover the active connector contract
+      summary: Получить действующий контракт коннектора
       responses:
         "200":
-          description: Contract metadata
+          description: Сведения о контракте
   /api/v1/connectors/{connectorId}/snapshots:
     post:
-      summary: Submit a complete schedule snapshot
+      summary: Отправить полный снимок расписания
       security: [{ ed25519: [] }]
       parameters:
         - $ref: "#/components/parameters/ConnectorId"
@@ -26,15 +26,15 @@ paths:
             schema:
               $ref: "../schema/schedule-snapshot-v1.json"
       responses:
-        "202": { description: Snapshot queued }
-        "200": { description: Idempotent duplicate }
-        "401": { description: Signature rejected }
-        "413": { description: Payload too large }
-        "422": { description: Contract validation failed }
-        "429": { description: Connector rate limit exceeded }
+        "202": { description: Снимок поставлен в очередь }
+        "200": { description: Повтор ранее принятого снимка }
+        "401": { description: Подпись отклонена }
+        "413": { description: Превышен допустимый размер данных }
+        "422": { description: Данные не соответствуют контракту }
+        "429": { description: Превышено ограничение частоты запросов }
   /api/v1/connectors/{connectorId}/runs/{runId}:
     get:
-      summary: Read ingestion status
+      summary: Получить состояние обработки
       security: [{ ed25519: [] }]
       parameters:
         - $ref: "#/components/parameters/ConnectorId"
@@ -43,15 +43,15 @@ paths:
           required: true
           schema: { type: string }
       responses:
-        "200": { description: Current ingestion state }
-        "404": { description: Run not found }
+        "200": { description: Текущее состояние обработки }
+        "404": { description: Запуск не найден }
 components:
   securitySchemes:
     ed25519:
       type: apiKey
       in: header
       name: X-Scheduler-Signature
-      description: See docs/connector-api.md for canonical request signing.
+      description: Правила формирования подписи описаны в docs/connector-api.md.
   parameters:
     ConnectorId:
       name: connectorId
@@ -63,4 +63,3 @@ components:
       in: header
       required: true
       schema: { type: string, maxLength: 200 }
-
