@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "scheduler-connector"
+version = "1.0.0"
+description = "Client SDK for Scheduler Connector API v1"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["cryptography>=45.0.0"]
+
+[project.scripts]
+scheduler-connector-python = "scheduler_connector.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["scheduler_connector"]

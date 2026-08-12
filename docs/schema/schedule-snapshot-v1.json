@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scheduler.example/schema/schedule-snapshot-v1.json",
+  "title": "Scheduler Schedule Snapshot v1",
+  "type": "object",
+  "required": ["schema_version", "snapshot_id", "generated_at", "institution", "term", "groups"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "snapshot_id": { "$ref": "#/$defs/externalId" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "institution": { "$ref": "#/$defs/institution" },
+    "term": { "$ref": "#/$defs/term" },
+    "groups": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10000,
+      "items": { "$ref": "#/$defs/group" }
+    },
+    "metadata": { "$ref": "#/$defs/metadata" }
+  },
+  "$defs": {
+    "externalId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "institution": {
+      "type": "object",
+      "required": ["external_id", "name", "timezone"],
+      "properties": {
+        "external_id": { "$ref": "#/$defs/externalId" },
+        "name": { "type": "string", "minLength": 1 },
+        "full_name": { "type": "string" },
+        "schedule_url": { "type": "string", "format": "uri" },
+        "timezone": { "type": "string", "minLength": 1 },
+        "locale": { "type": "string" }
+      }
+    },
+    "term": {
+      "type": "object",
+      "required": ["external_id", "name", "starts_on", "ends_on"],
+      "properties": {
+        "external_id": { "$ref": "#/$defs/externalId" },
+        "name": { "type": "string", "minLength": 1 },
+        "academic_year": { "type": "string" },
+        "starts_on": { "type": "string", "format": "date" },
+        "ends_on": { "type": "string", "format": "date" }
+      }
+    },
+    "group": {
+      "type": "object",
+      "required": ["external_id", "name", "lessons"],
+      "properties": {
+        "external_id": { "$ref": "#/$defs/externalId" },
+        "name": { "type": "string", "minLength": 1 },
+        "lessons": { "type": "array", "items": { "$ref": "#/$defs/lesson" } },
+        "metadata": { "$ref": "#/$defs/metadata" }
+      }
+    },
+    "lesson": {
+      "type": "object",
+      "required": ["external_id", "subject", "type", "schedule"],
+      "properties": {
+        "external_id": { "$ref": "#/$defs/externalId" },
+        "subject": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["lecture", "practice", "lab", "seminar", "exam", "credit", "consultation"] },
+        "teachers": { "type": "array", "items": { "type": "string" } },
+        "rooms": { "type": "array", "items": { "type": "string" } },
+        "subgroup": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "schedule": { "$ref": "#/$defs/schedule" },
+        "metadata": { "$ref": "#/$defs/metadata" }
+      }
+    },
+    "schedule": {
+      "type": "object",
+      "required": ["starts_at", "ends_at", "recurrence"],
+      "properties": {
+        "day_of_week": { "type": "integer", "minimum": 1, "maximum": 7 },
+        "date": { "type": "string", "format": "date" },
+        "starts_at": { "type": "string", "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$" },
+        "ends_at": { "type": "string", "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$" },
+        "recurrence": { "$ref": "#/$defs/recurrence" }
+      }
+    },
+    "recurrence": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["every", "odd", "even", "date", "cycle"] },
+        "valid_from": { "type": "string", "format": "date" },
+        "valid_to": { "type": "string", "format": "date" },
+        "cycle_length": { "type": "integer", "minimum": 2, "maximum": 16 },
+        "cycle_weeks": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 1, "maximum": 16 }
+        }
+      }
+    }
+  }
+}
+
