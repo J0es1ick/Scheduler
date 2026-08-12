@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://scheduler.example/schema/schedule-snapshot-v1.json",
-  "title": "Scheduler Schedule Snapshot v1",
+  "title": "Снимок расписания Scheduler v1",
   "type": "object",
   "required": ["schema_version", "snapshot_id", "generated_at", "institution", "term", "groups"],
   "properties": {
@@ -102,4 +102,3 @@
     }
   }
 }
-
