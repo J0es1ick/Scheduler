@@ -1,0 +1,66 @@
+openapi: 3.1.0
+info:
+  title: Scheduler Connector API
+  version: 1.0.0
+  description: Signed ingestion API for full schedule snapshots.
+servers:
+  - url: https://admin.example.org
+paths:
+  /api/v1/connector-spec:
+    get:
+      summary: Discover the active connector contract
+      responses:
+        "200":
+          description: Contract metadata
+  /api/v1/connectors/{connectorId}/snapshots:
+    post:
+      summary: Submit a complete schedule snapshot
+      security: [{ ed25519: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ConnectorId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "../schema/schedule-snapshot-v1.json"
+      responses:
+        "202": { description: Snapshot queued }
+        "200": { description: Idempotent duplicate }
+        "401": { description: Signature rejected }
+        "413": { description: Payload too large }
+        "422": { description: Contract validation failed }
+        "429": { description: Connector rate limit exceeded }
+  /api/v1/connectors/{connectorId}/runs/{runId}:
+    get:
+      summary: Read ingestion status
+      security: [{ ed25519: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ConnectorId"
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Current ingestion state }
+        "404": { description: Run not found }
+components:
+  securitySchemes:
+    ed25519:
+      type: apiKey
+      in: header
+      name: X-Scheduler-Signature
+      description: See docs/connector-api.md for canonical request signing.
+  parameters:
+    ConnectorId:
+      name: connectorId
+      in: path
+      required: true
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, maxLength: 200 }
+

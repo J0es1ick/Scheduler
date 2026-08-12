@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0",
+  "snapshot_id": "ivgpu-2026-09-01T06:00:00Z",
+  "generated_at": "2026-09-01T06:00:00Z",
+  "institution": {
+    "external_id": "ivgpu",
+    "name": "ИВГПУ",
+    "full_name": "Ивановский государственный политехнический университет",
+    "schedule_url": "https://example.org/schedule",
+    "timezone": "Europe/Moscow",
+    "locale": "ru-RU"
+  },
+  "term": {
+    "external_id": "2026-autumn",
+    "name": "Осенний семестр 2026/2027",
+    "academic_year": "2026/2027",
+    "starts_on": "2026-09-01",
+    "ends_on": "2027-01-31"
+  },
+  "groups": [
+    {
+      "external_id": "group-3-42",
+      "name": "3/42",
+      "lessons": [
+        {
+          "external_id": "lesson-programming-monday-1",
+          "subject": "Программирование",
+          "type": "lecture",
+          "teachers": ["Иванов И.И."],
+          "rooms": ["А-201"],
+          "schedule": {
+            "day_of_week": 1,
+            "starts_at": "09:50",
+            "ends_at": "11:25",
+            "recurrence": {
+              "kind": "cycle",
+              "valid_from": "2026-09-01",
+              "valid_to": "2027-01-31",
+              "cycle_length": 4,
+              "cycle_weeks": [1, 3]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
+
