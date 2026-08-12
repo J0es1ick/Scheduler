@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"time"
 
 	connector "github.com/J0es1ick/Scheduler/connector/v1"
 	"github.com/J0es1ick/Scheduler/internal/domain"
@@ -55,22 +54,6 @@ func (s *Service) process(ctx context.Context, run *domain.ConnectorIngestionRun
 			"institution.external_id %q does not match connector university %q",
 			input.Institution.ExternalID, client.UniversityID,
 		)}
-	}
-	termStart, _ := time.Parse(time.DateOnly, input.Term.StartsOn)
-	termEnd, _ := time.Parse(time.DateOnly, input.Term.EndsOn)
-	semesterID := stableID("term", client.UniversityID, input.Term.ExternalID)
-	locale := input.Institution.Locale
-	if locale == "" {
-		locale = "ru-RU"
-	}
-	if err = s.repository.PrepareSnapshotMetadata(
-		ctx, run.ConnectorID,
-		input.Institution.Name, input.Institution.FullName,
-		input.Institution.ScheduleURL, input.Institution.Timezone, locale,
-		semesterID, input.Term.ExternalID, input.Term.Name, input.Term.AcademicYear,
-		termStart, termEnd,
-	); err != nil {
-		return err
 	}
 	payload, err := convertSnapshot(client.DataSourceID, client.UniversityID, input)
 	if err != nil {

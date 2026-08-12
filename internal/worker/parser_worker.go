@@ -1,23 +1,8 @@
-// Package worker содержит ParserWorker — фоновую горутину, которая периодически
-// опрашивает таблицу data_sources и запускает парсинг для источников,
-// которым пришло время обновиться.
-//
-// Жизненный цикл:
-//
-//	worker := worker.NewParserWorker(parserService, tickInterval)
-//	worker.Start(ctx)   // запускается в main.go, не блокирует
-//	<-ctx.Done()        // при сигнале ctx.Done() воркер завершается сам
-//
-// tickInterval — как часто воркер проверяет, есть ли источники к обновлению.
-// Реальный интервал обновления каждого источника задаётся полем
-// data_sources.update_interval (в секундах), и ListActiveDataSources возвращает
-// только те источники, для которых last_run_at + update_interval < NOW().
-// Поэтому tickInterval можно ставить небольшим (60–300 секунд) без риска
-// слишком частых HTTP-запросов к сайтам вузов.
 package worker
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -84,8 +69,9 @@ func (w *ParserWorker) tick(ctx context.Context, monitor *Monitor) {
 	monitor.Heartbeat(ParserWorkerName)
 	defer monitor.Heartbeat(ParserWorkerName)
 	cleanupCtx, cleanupCancel := context.WithTimeout(ctx, time.Minute)
-	if err := w.parserSvc.CleanupInterruptedRuns(cleanupCtx, 35*time.Minute); err != nil {
-		slog.Error("parser worker: stale run cleanup failed", "err", err)
+	cleanupErr := w.parserSvc.CleanupInterruptedRuns(cleanupCtx, 35*time.Minute)
+	if cleanupErr != nil {
+		slog.Error("parser worker: stale run cleanup failed", "err", cleanupErr)
 	}
 	cleanupCancel()
 
@@ -101,10 +87,12 @@ func (w *ParserWorker) tick(ctx context.Context, monitor *Monitor) {
 			if err != nil {
 				slog.Error("parser worker: run active sources failed", "err", err)
 			}
+			monitor.Record(ParserWorkerName, errors.Join(cleanupErr, err))
 			return
 		case <-heartbeat.C:
 			monitor.Heartbeat(ParserWorkerName)
 		case <-ctx.Done():
+			monitor.Record(ParserWorkerName, ctx.Err())
 			return
 		}
 	}

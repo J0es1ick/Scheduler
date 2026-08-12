@@ -58,7 +58,7 @@ func (w *NotificationWorker) Start(ctx context.Context, monitors ...*Monitor) <-
 func (w *NotificationWorker) run(ctx context.Context, monitor *Monitor) {
 	slog.Info("notification worker started", "interval", w.interval)
 	w.prune(ctx)
-	w.tick(ctx)
+	monitor.Record(NotificationWorkerName, w.tick(ctx))
 	monitor.Heartbeat(NotificationWorkerName)
 
 	ticker := time.NewTicker(w.interval)
@@ -71,7 +71,7 @@ func (w *NotificationWorker) run(ctx context.Context, monitor *Monitor) {
 			slog.Info("notification worker stopped")
 			return
 		case <-ticker.C:
-			w.tick(ctx)
+			monitor.Record(NotificationWorkerName, w.tick(ctx))
 			monitor.Heartbeat(NotificationWorkerName)
 		case <-pruneTicker.C:
 			w.prune(ctx)
@@ -91,25 +91,26 @@ func (w *NotificationWorker) prune(ctx context.Context) {
 	}
 }
 
-func (w *NotificationWorker) tick(ctx context.Context) {
+func (w *NotificationWorker) tick(ctx context.Context) error {
 	items, err := w.repository.ClaimPending(ctx, notificationBatchSize)
 	if err != nil {
 		slog.Error("notification worker: claim failed", "err", err)
-		return
+		return err
 	}
 	w.deliverScheduleBatch(ctx, items)
 
 	outbox, err := w.repository.ClaimBotOutbox(ctx, notificationBatchSize)
 	if err != nil {
 		slog.Error("notification worker: claim bot outbox failed", "err", err)
-		return
+		return err
 	}
 	for _, item := range outbox {
 		if ctx.Err() != nil {
-			return
+			return ctx.Err()
 		}
 		w.deliverBotOutbox(ctx, item)
 	}
+	return nil
 }
 
 func (w *NotificationWorker) deliverScheduleBatch(ctx context.Context, items []domain.NotificationDelivery) {

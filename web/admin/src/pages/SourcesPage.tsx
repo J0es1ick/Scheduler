@@ -59,6 +59,7 @@ export function SourcesPage({
   const [reviewing, setReviewing] = useState<{
     snapshot: ParserSnapshot;
     sourceName: string;
+    approvalOnly: boolean;
   } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SourceView | null>(null);
   const [listView, setListView] = useState<"active" | "archived">("active");
@@ -70,7 +71,8 @@ export function SourcesPage({
   const archivedSources = allSources.filter(
     (source) => source.lifecycle_status === "archived",
   );
-  const visibleSources = listView === "archived" ? archivedSources : activeSources;
+  const visibleSources =
+    listView === "archived" ? archivedSources : activeSources;
 
   async function sync(id: string) {
     setBusy(id);
@@ -140,7 +142,9 @@ export function SourcesPage({
       await reload();
     } catch (caught) {
       notify(
-        caught instanceof Error ? caught.message : "Не удалось архивировать источник",
+        caught instanceof Error
+          ? caught.message
+          : "Не удалось архивировать источник",
         "error",
       );
     } finally {
@@ -169,9 +173,16 @@ export function SourcesPage({
   }
 
   async function publishSnapshot(id: string) {
+    const snapshot = data?.snapshots.find((item) => item.id === id);
+    const source = data?.sources.find(
+      (item) => item.id === snapshot?.data_source_id,
+    );
+    const approvalOnly = source?.lifecycle_status !== "active";
     if (
       !window.confirm(
-        "Опубликовать этот снимок несмотря на обнаруженные отклонения?",
+        approvalOnly
+          ? "Одобрить снимок для последующей активации источника? Боевое расписание пока не изменится."
+          : "Опубликовать этот снимок несмотря на обнаруженные отклонения?",
       )
     ) {
       return false;
@@ -182,14 +193,20 @@ export function SourcesPage({
         id,
         "Отклонения проверены администратором",
       );
-      notify("Снимок опубликован");
+      notify(
+        approvalOnly
+          ? "Снимок одобрен. Он будет применён атомарно при активации источника"
+          : "Снимок опубликован",
+      );
       await reload();
       return true;
     } catch (caught) {
       notify(
         caught instanceof Error
           ? caught.message
-          : "Не удалось опубликовать снимок",
+          : approvalOnly
+            ? "Не удалось одобрить снимок"
+            : "Не удалось опубликовать снимок",
         "error",
       );
       return false;
@@ -302,7 +319,9 @@ export function SourcesPage({
       <section className="source-list card-surface">
         {!visibleSources.length && (
           <EmptyBlock
-            title={listView === "archived" ? "Архив пуст" : "Рабочих источников нет"}
+            title={
+              listView === "archived" ? "Архив пуст" : "Рабочих источников нет"
+            }
             text={
               listView === "archived"
                 ? "Архивированные источники появятся здесь и их можно будет восстановить."
@@ -355,8 +374,8 @@ export function SourcesPage({
                     {!source.is_enabled
                       ? "Автообновление"
                       : source.last_error
-                      ? "Следующая попытка"
-                      : "Последний запуск"}
+                        ? "Следующая попытка"
+                        : "Последний запуск"}
                   </span>
                   <strong>
                     {!source.is_enabled
@@ -371,8 +390,8 @@ export function SourcesPage({
                     {!source.is_enabled
                       ? "Данные в базе сохранены"
                       : source.last_error
-                      ? `${number.format(source.consecutive_failures)} ошибок подряд`
-                      : relativeTime(source.last_run_at)}
+                        ? `${number.format(source.consecutive_failures)} ошибок подряд`
+                        : relativeTime(source.last_run_at)}
                   </em>
                 </div>
                 <div>
@@ -515,7 +534,11 @@ export function SourcesPage({
                   </>
                 )}
                 {source.schedule_url && (
-                  <a href={source.schedule_url} target="_blank" rel="noreferrer">
+                  <a
+                    href={source.schedule_url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
                     Сайт расписания <ExternalLink size={13} />
                   </a>
                 )}
@@ -583,68 +606,73 @@ export function SourcesPage({
                 </div>
               )}
 
-              {!archived && reviewable.map((snapshot) => (
-                <div className="snapshot-quarantine" key={snapshot.id}>
-                  <div className="snapshot-quarantine-heading">
-                    <ShieldAlert size={20} />
-                    <div>
-                      <strong>
-                        {snapshot.status === "staged"
-                          ? "Тестовый снимок коннектора ожидает проверки"
-                          : "Новый снимок ожидает проверки"}
-                      </strong>
-                      <span>
-                        {formatDateTime(snapshot.created_at)} ·{" "}
-                        {number.format(snapshot.group_count)} групп ·{" "}
-                        {number.format(snapshot.lesson_count)} занятий
-                      </span>
+              {!archived &&
+                reviewable.map((snapshot) => (
+                  <div className="snapshot-quarantine" key={snapshot.id}>
+                    <div className="snapshot-quarantine-heading">
+                      <ShieldAlert size={20} />
+                      <div>
+                        <strong>
+                          {snapshot.status === "staged"
+                            ? "Тестовый снимок коннектора ожидает проверки"
+                            : "Новый снимок ожидает проверки"}
+                        </strong>
+                        <span>
+                          {formatDateTime(snapshot.created_at)} ·{" "}
+                          {number.format(snapshot.group_count)} групп ·{" "}
+                          {number.format(snapshot.lesson_count)} занятий
+                        </span>
+                      </div>
+                    </div>
+                    <ul>
+                      {snapshot.anomaly_reasons.map((reason) => (
+                        <li
+                          key={`${snapshot.id}-${reason.code}-${reason.message}`}
+                        >
+                          {reason.message}
+                        </li>
+                      ))}
+                    </ul>
+                    {!snapshot.publishable && (
+                      <p>
+                        Снимок содержит структурные ошибки и не может быть
+                        опубликован вручную.
+                      </p>
+                    )}
+                    <div className="snapshot-quarantine-actions">
+                      <button
+                        className="button button-ghost"
+                        disabled={busy === snapshot.id}
+                        onClick={() =>
+                          setReviewing({
+                            snapshot,
+                            sourceName: source.university_name,
+                            approvalOnly: source.lifecycle_status !== "active",
+                          })
+                        }
+                      >
+                        <Eye size={15} /> Изучить данные
+                      </button>
+                      <button
+                        className="button button-danger-soft"
+                        disabled={busy === snapshot.id}
+                        onClick={() => void rejectSnapshot(snapshot.id)}
+                      >
+                        <X size={15} /> Отклонить
+                      </button>
+                      <button
+                        className="button button-primary"
+                        disabled={busy === snapshot.id || !snapshot.publishable}
+                        onClick={() => void publishSnapshot(snapshot.id)}
+                      >
+                        <Check size={15} />{" "}
+                        {source.lifecycle_status === "active"
+                          ? "Подтвердить публикацию"
+                          : "Одобрить для активации"}
+                      </button>
                     </div>
                   </div>
-                  <ul>
-                    {snapshot.anomaly_reasons.map((reason) => (
-                      <li
-                        key={`${snapshot.id}-${reason.code}-${reason.message}`}
-                      >
-                        {reason.message}
-                      </li>
-                    ))}
-                  </ul>
-                  {!snapshot.publishable && (
-                    <p>
-                      Снимок содержит структурные ошибки и не может быть
-                      опубликован вручную.
-                    </p>
-                  )}
-                  <div className="snapshot-quarantine-actions">
-                    <button
-                      className="button button-ghost"
-                      disabled={busy === snapshot.id}
-                      onClick={() =>
-                        setReviewing({
-                          snapshot,
-                          sourceName: source.university_name,
-                        })
-                      }
-                    >
-                      <Eye size={15} /> Изучить данные
-                    </button>
-                    <button
-                      className="button button-danger-soft"
-                      disabled={busy === snapshot.id}
-                      onClick={() => void rejectSnapshot(snapshot.id)}
-                    >
-                      <X size={15} /> Отклонить
-                    </button>
-                    <button
-                      className="button button-primary"
-                      disabled={busy === snapshot.id || !snapshot.publishable}
-                      onClick={() => void publishSnapshot(snapshot.id)}
-                    >
-                      <Check size={15} /> Подтвердить публикацию
-                    </button>
-                  </div>
-                </div>
-              ))}
+                ))}
             </article>
           );
         })}
@@ -653,6 +681,7 @@ export function SourcesPage({
         <SnapshotReviewDialog
           snapshot={reviewing.snapshot}
           sourceName={reviewing.sourceName}
+          approvalOnly={reviewing.approvalOnly}
           busy={busy === reviewing.snapshot.id}
           onClose={() => setReviewing(null)}
           onPublish={() => publishSnapshot(reviewing.snapshot.id)}
@@ -690,21 +719,34 @@ function DeleteSourceDialog({
         aria-modal="true"
         aria-labelledby="delete-source-title"
       >
-        <span className="dialog-danger-icon"><Trash2 size={19} /></span>
-        <h2 id="delete-source-title">Архивировать источник {source.university_name}?</h2>
+        <span className="dialog-danger-icon">
+          <Trash2 size={19} />
+        </span>
+        <h2 id="delete-source-title">
+          Архивировать источник {source.university_name}?
+        </h2>
         <p>
-          Источник перестанет запускаться и исчезнет из рабочего списка. Настройки,
-          история запусков, диагностика и снимки сохранятся.
+          Источник перестанет запускаться и исчезнет из рабочего списка.
+          Настройки, история запусков, диагностика и снимки сохранятся.
         </p>
         <p className="dialog-note">
           Уже опубликованные группы и занятия останутся в базе и перестанут
-          автоматически обновляться. Источник можно восстановить на вкладке «Архив».
+          автоматически обновляться. Источник можно восстановить на вкладке
+          «Архив».
         </p>
         <div className="dialog-actions">
-          <button className="button button-ghost" disabled={busy} onClick={onCancel}>
+          <button
+            className="button button-ghost"
+            disabled={busy}
+            onClick={onCancel}
+          >
             Отмена
           </button>
-          <button className="button button-danger" disabled={busy} onClick={onConfirm}>
+          <button
+            className="button button-danger"
+            disabled={busy}
+            onClick={onConfirm}
+          >
             <Trash2 size={15} /> {busy ? "Архивация…" : "Перенести в архив"}
           </button>
         </div>

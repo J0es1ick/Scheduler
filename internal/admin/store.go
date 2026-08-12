@@ -587,7 +587,9 @@ func (s *Store) UpdateUserAdminRole(ctx context.Context, userID, role string) er
 	}
 	isAdmin := role != "none"
 	result, err := tx.ExecContext(ctx,
-		`UPDATE users SET is_admin=$1, admin_role=$2, updated_at=NOW() WHERE id=$3`, isAdmin, role, userID)
+		`UPDATE users
+		 SET is_admin=$1, admin_role=$2, telegram_menu_fingerprint='', updated_at=NOW()
+		 WHERE id=$3`, isAdmin, role, userID)
 	if err != nil {
 		return fmt.Errorf("admin update user role: %w", err)
 	}

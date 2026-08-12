@@ -34,7 +34,9 @@ export function SnapshotSchedulePanel({
     <section className={`snapshot-schedule-panel is-${tone}`}>
       <header>
         <div>
-          <span>{tone === "current" ? "До публикации" : "После публикации"}</span>
+          <span>
+            {tone === "current" ? "До публикации" : "После публикации"}
+          </span>
           <h4>{title}</h4>
         </div>
         <strong>{lessons.length}</strong>
@@ -75,9 +77,7 @@ export function SnapshotSchedulePanel({
 function SnapshotDays({ lessons }: { lessons: SnapshotLesson[] }) {
   if (!lessons.length) {
     return (
-      <div className="snapshot-week-empty">
-        В этой части недели занятий нет
-      </div>
+      <div className="snapshot-week-empty">В этой части недели занятий нет</div>
     );
   }
 

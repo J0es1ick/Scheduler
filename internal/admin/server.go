@@ -21,6 +21,7 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/adminui"
 	"github.com/J0es1ick/Scheduler/internal/buildinfo"
+	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/J0es1ick/Scheduler/internal/service"
 	managed "github.com/J0es1ick/Scheduler/parser/v1"
@@ -649,7 +650,11 @@ func (s *Server) handlePublishSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusConflict, "Снимок нельзя опубликовать: "+err.Error())
 		return
 	}
-	s.writeAudit(r.Context(), identity, "publish_parser_snapshot", "parser_snapshot", snapshotID,
+	auditAction := "publish_parser_snapshot"
+	if snapshot.Status == domain.SnapshotStatusApproved {
+		auditAction = "approve_parser_snapshot"
+	}
+	s.writeAudit(r.Context(), identity, auditAction, "parser_snapshot", snapshotID,
 		map[string]any{
 			"source_id":   snapshot.DataSourceID,
 			"groups":      snapshot.GroupCount,

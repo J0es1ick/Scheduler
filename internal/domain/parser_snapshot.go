@@ -5,6 +5,7 @@ import "time"
 const (
 	SnapshotStatusStaged      = "staged"
 	SnapshotStatusQuarantined = "quarantined"
+	SnapshotStatusApproved    = "approved"
 	SnapshotStatusPublished   = "published"
 	SnapshotStatusRejected    = "rejected"
 )
@@ -24,12 +25,32 @@ type SnapshotGroup struct {
 	Lessons      []Lesson `json:"lessons"`
 }
 
+type SnapshotInstitutionMetadata struct {
+	Name        string `json:"name,omitempty"`
+	FullName    string `json:"full_name,omitempty"`
+	ScheduleURL string `json:"schedule_url,omitempty"`
+	Timezone    string `json:"timezone,omitempty"`
+	Locale      string `json:"locale,omitempty"`
+}
+
+type SnapshotTermMetadata struct {
+	ExternalID   string `json:"external_id,omitempty"`
+	Name         string `json:"name,omitempty"`
+	AcademicYear string `json:"academic_year,omitempty"`
+}
+
+type SnapshotMetadata struct {
+	Institution SnapshotInstitutionMetadata `json:"institution"`
+	Term        SnapshotTermMetadata        `json:"term"`
+}
+
 type ScheduleSnapshot struct {
-	UniversityID string          `json:"university_id"`
-	SemesterID   string          `json:"semester_id"`
-	StartDate    time.Time       `json:"start_date"`
-	EndDate      time.Time       `json:"end_date"`
-	Groups       []SnapshotGroup `json:"groups"`
+	UniversityID string            `json:"university_id"`
+	SemesterID   string            `json:"semester_id"`
+	StartDate    time.Time         `json:"start_date"`
+	EndDate      time.Time         `json:"end_date"`
+	Groups       []SnapshotGroup   `json:"groups"`
+	Metadata     *SnapshotMetadata `json:"metadata,omitempty"`
 }
 
 type ParserSnapshot struct {

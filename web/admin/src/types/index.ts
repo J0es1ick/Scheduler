@@ -122,7 +122,7 @@ export interface ParserSnapshot {
   id: string;
   data_source_id: string;
   parse_log_id: string;
-  status: "staged" | "quarantined" | "published" | "rejected";
+  status: "staged" | "quarantined" | "approved" | "published" | "rejected";
   publishable: boolean;
   group_count: number;
   lesson_count: number;

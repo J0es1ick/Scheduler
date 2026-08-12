@@ -35,6 +35,7 @@ func (w *ConnectorWorker) Start(ctx context.Context, monitors ...*Monitor) <-cha
 		for {
 			processed, err := w.service.ProcessNext(ctx)
 			monitor.Heartbeat(ConnectorWorkerName)
+			monitor.Record(ConnectorWorkerName, err)
 			if err != nil {
 				slog.Error("connector ingestion failed", "err", err)
 			}

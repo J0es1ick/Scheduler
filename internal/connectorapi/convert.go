@@ -28,6 +28,23 @@ func convertSnapshot(sourceID, universityID string, input connector.Snapshot) (d
 		StartDate:    termStart,
 		EndDate:      termEnd,
 		Groups:       make([]domain.SnapshotGroup, 0, len(input.Groups)),
+		Metadata: &domain.SnapshotMetadata{
+			Institution: domain.SnapshotInstitutionMetadata{
+				Name:        strings.TrimSpace(input.Institution.Name),
+				FullName:    strings.TrimSpace(input.Institution.FullName),
+				ScheduleURL: strings.TrimSpace(input.Institution.ScheduleURL),
+				Timezone:    input.Institution.Timezone,
+				Locale:      input.Institution.Locale,
+			},
+			Term: domain.SnapshotTermMetadata{
+				ExternalID:   input.Term.ExternalID,
+				Name:         strings.TrimSpace(input.Term.Name),
+				AcademicYear: input.Term.AcademicYear,
+			},
+		},
+	}
+	if result.Metadata.Institution.Locale == "" {
+		result.Metadata.Institution.Locale = "ru-RU"
 	}
 	for _, inputGroup := range input.Groups {
 		groupID := stableID("group", universityID, inputGroup.ExternalID)

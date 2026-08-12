@@ -66,7 +66,7 @@ func (s *Store) ConnectorActivationCandidate(ctx context.Context, connectorID st
 		err = s.db.GetContext(ctx, &candidate, `
 			SELECT '' AS run_id, ps.id AS snapshot_id, ps.status
 			FROM parser_snapshots ps
-			WHERE ps.data_source_id=$1 AND ps.publishable
+			WHERE ps.data_source_id=$1 AND ps.publishable AND ps.status='approved'
 			ORDER BY ps.created_at DESC LIMIT 1`, connector.DataSourceID)
 		if err != nil {
 			return "", "", "", err
@@ -78,8 +78,9 @@ func (s *Store) ConnectorActivationCandidate(ctx context.Context, connectorID st
 		FROM connector_ingestion_runs r
 		JOIN parser_snapshots ps ON ps.id=r.parser_snapshot_id
 		WHERE r.connector_id=$1
-		  AND r.status IN ('staged','published')
+		  AND r.status='staged'
 		  AND ps.publishable
+		  AND ps.status='approved'
 		ORDER BY r.received_at DESC LIMIT 1`, connectorID)
 	if errors.Is(err, repository.ErrConnectorNotFound) {
 		return "", "", "", ErrNotFound
@@ -88,10 +89,4 @@ func (s *Store) ConnectorActivationCandidate(ctx context.Context, connectorID st
 		return "", "", "", err
 	}
 	return candidate.RunID, candidate.SnapshotID, candidate.Status, nil
-}
-
-func (s *Store) MarkConnectorRunPublished(ctx context.Context, runID, snapshotID string, groups, lessons int) error {
-	return repository.NewConnectorRepository(s.db).Complete(
-		ctx, runID, domain.IngestionStatusPublished, snapshotID, groups, lessons,
-	)
 }

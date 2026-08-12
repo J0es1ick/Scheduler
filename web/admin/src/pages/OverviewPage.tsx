@@ -227,9 +227,9 @@ export function OverviewPage({
                         ? "failed"
                         : log.status === "quarantined"
                           ? "quarantined"
-                        : log.status === "running"
-                          ? "running"
-                          : "success"
+                          : log.status === "running"
+                            ? "running"
+                            : "success"
                     }
                   />
                 </div>
