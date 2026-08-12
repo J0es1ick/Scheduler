@@ -29,7 +29,7 @@ RUN LDFLAGS="-s -w -X github.com/J0es1ick/Scheduler/internal/buildinfo.Version=$
     && CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o /out/scheduler-sync ./cmd/sync \
     && CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o /out/scheduler-connector ./cmd/connector
 
-FROM alpine:3.21
+FROM alpine:3.24
 ARG VERSION=dev
 ARG COMMIT=local
 ARG BUILD_TIME=unknown
