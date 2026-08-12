@@ -22,6 +22,8 @@ const scheduleFetchConcurrency = 3
 const scheduleFetchAttempts = 3
 const scheduleCircuitThreshold = 3
 const parserDiagnosticRetention = 30 * 24 * time.Hour
+const activeSourceConcurrency = 3
+const activeSourceTimeout = 30 * time.Minute
 
 var (
 	ErrDataSourceBusy     = errors.New("parser: data source is already running")
@@ -976,14 +978,75 @@ func (s *ParserService) RunAllActiveSources(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("parser: list active sources: %w", err)
 	}
-	var runErrors []error
-	for _, dataSource := range sources {
-		if _, err = s.RunDataSource(ctx, dataSource.ID); err != nil {
-			slog.Error("parser: source run failed", "dataSourceID", dataSource.ID, "err", err)
-			runErrors = append(runErrors, err)
+	return runActiveSources(ctx, sources, activeSourceConcurrency, activeSourceTimeout,
+		func(sourceCtx context.Context, dataSource *domain.DataSource) error {
+			_, runErr := s.RunDataSource(sourceCtx, dataSource.ID)
+			if runErr != nil {
+				slog.Error("parser: source run failed", "dataSourceID", dataSource.ID, "err", runErr)
+			}
+			return runErr
+		},
+	)
+}
+
+func runActiveSources(
+	ctx context.Context,
+	sources []*domain.DataSource,
+	concurrency int,
+	timeout time.Duration,
+	run func(context.Context, *domain.DataSource) error,
+) error {
+	if len(sources) == 0 {
+		return nil
+	}
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	if concurrency > len(sources) {
+		concurrency = len(sources)
+	}
+	jobs := make(chan *domain.DataSource)
+	runErrors := make(chan error, len(sources)+1)
+	var workers sync.WaitGroup
+	workers.Add(concurrency)
+	for range concurrency {
+		go func() {
+			defer workers.Done()
+			for source := range jobs {
+				sourceCtx := ctx
+				cancel := func() {}
+				if timeout > 0 {
+					sourceCtx, cancel = context.WithTimeout(ctx, timeout)
+				}
+				runErr := run(sourceCtx, source)
+				cancel()
+				if runErr != nil {
+					runErrors <- fmt.Errorf("source %s: %w", source.ID, runErr)
+				}
+			}
+		}()
+	}
+	var enqueueErr error
+enqueue:
+	for _, source := range sources {
+		select {
+		case jobs <- source:
+		case <-ctx.Done():
+			enqueueErr = ctx.Err()
+			break enqueue
 		}
 	}
-	return errors.Join(runErrors...)
+	close(jobs)
+	workers.Wait()
+	close(runErrors)
+	errorsList := make([]error, 0, len(runErrors)+1)
+	if enqueueErr != nil {
+		errorsList = append(errorsList, enqueueErr)
+	}
+	for runErr := range runErrors {
+		errorsList = append(errorsList, runErr)
+	}
+	return errors.Join(errorsList...)
 }
 
 func truncate(value string, maximum int) string {

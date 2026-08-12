@@ -100,10 +100,10 @@ func TestSignedSnapshotIntakeAndStaging(t *testing.T) {
 	snapshot := connector.Snapshot{
 		SchemaVersion: connector.SchemaVersion, SnapshotID: "snapshot-" + suffix, GeneratedAt: time.Now().UTC(),
 		Institution: connector.Institution{ExternalID: universityID, Name: "Connector Integration", Timezone: "Europe/Moscow"},
-		Term:        connector.Term{ExternalID: "2026-autumn", Name: "Autumn", StartsOn: "2026-09-01", EndsOn: "2027-01-31"},
+		Term:        connector.Term{ExternalID: "2026-autumn", Name: "Autumn", StartsOn: "2026-08-31", EndsOn: "2027-01-31"},
 		Groups: []connector.Group{{ExternalID: "group-1", Name: "1/1", Lessons: []connector.Lesson{{
 			ExternalID: "lesson-1", Subject: "Mathematics", Type: "lecture",
-			Schedule: connector.Schedule{DayOfWeek: 1, StartsAt: "09:00", EndsAt: "10:30", Recurrence: connector.Recurrence{Kind: connector.RecurrenceEvery}},
+			Schedule: connector.Schedule{DayOfWeek: 2, StartsAt: "09:00", EndsAt: "10:30", Recurrence: connector.Recurrence{Kind: connector.RecurrenceOdd}},
 		}}}},
 	}
 	submission, err := client.Submit(ctx, snapshot)
@@ -123,5 +123,24 @@ func TestSignedSnapshotIntakeAndStaging(t *testing.T) {
 	}
 	if status.Status != domain.IngestionStatusStaged || status.GroupCount != 1 || status.LessonCount != 1 {
 		t.Fatalf("unexpected run: %+v", status)
+	}
+	candidate, err := repository.NewParserSnapshotRepository(db).Get(ctx, status.ParserSnapshotID)
+	if err != nil || candidate == nil {
+		t.Fatalf("load staged snapshot: candidate=%+v err=%v", candidate, err)
+	}
+	if _, err = parser.PublishSnapshot(ctx, candidate.ID, "integration", "approved"); err != nil {
+		t.Fatalf("publish connector snapshot: %v", err)
+	}
+	schedule := service.NewScheduleService(
+		repository.NewLessonRepository(db), repository.NewSemesterRepository(db), groupRepo,
+	)
+	groupID := candidate.Payload.Groups[0].ID
+	oddWeek, err := schedule.GetScheduleForGroup(ctx, groupID, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil || len(oddWeek) != 1 {
+		t.Fatalf("odd week schedule: lessons=%d err=%v", len(oddWeek), err)
+	}
+	evenWeek, err := schedule.GetScheduleForGroup(ctx, groupID, time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC))
+	if err != nil || len(evenWeek) != 0 {
+		t.Fatalf("even week schedule: lessons=%d err=%v", len(evenWeek), err)
 	}
 }

@@ -138,34 +138,36 @@ func lessonMatchesDate(lesson domain.Lesson, date time.Time, fallbackSemesterSta
 	if lesson.DayOfWeek != helpers.Weekday(date) {
 		return false
 	}
-	if !lesson.Recurrence.Matches(date, fallbackSemesterStart) {
-		return false
-	}
-
 	if lesson.ValidFrom != nil {
 		validFrom := helpers.NormalizeDate(*lesson.ValidFrom)
 		if date.Before(validFrom) {
 			return false
 		}
-		if lesson.ValidTo != nil && date.After(helpers.NormalizeDate(*lesson.ValidTo)) {
-			return false
-		}
-		switch lesson.WeekType {
-		case domain.WeekTypeOdd, domain.WeekTypeEven:
-			days := int(date.Sub(validFrom).Hours() / 24)
-			return days >= 0 && days%14 == 0
-		case domain.WeekTypeEvery:
-			return true
-		}
 	}
 	if lesson.ValidTo != nil && date.After(helpers.NormalizeDate(*lesson.ValidTo)) {
 		return false
 	}
-	if fallbackSemesterStart == nil {
-		return lesson.WeekType == domain.WeekTypeEvery
+	if !lesson.Recurrence.IsZero() {
+		return lesson.Recurrence.Matches(date, fallbackSemesterStart)
 	}
-	weekType := helpers.DetermineWeekType(date, *fallbackSemesterStart)
-	return helpers.MatchesWeekType(lesson.WeekType, weekType)
+
+	switch lesson.WeekType {
+	case domain.WeekTypeEvery:
+		return true
+	case domain.WeekTypeOdd, domain.WeekTypeEven:
+		if lesson.ValidFrom != nil {
+			validFrom := helpers.NormalizeDate(*lesson.ValidFrom)
+			days := int(date.Sub(validFrom).Hours() / 24)
+			return days >= 0 && days%14 == 0
+		}
+		if fallbackSemesterStart != nil {
+			weekType := helpers.DetermineWeekType(date, *fallbackSemesterStart)
+			return helpers.MatchesWeekType(lesson.WeekType, weekType)
+		}
+		return false
+	default:
+		return false
+	}
 }
 
 func semesterStart(cache map[string]*domain.Semester, semesterID string) *time.Time {

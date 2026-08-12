@@ -83,15 +83,29 @@ func (w *ParserWorker) run(ctx context.Context, monitor *Monitor) {
 func (w *ParserWorker) tick(ctx context.Context, monitor *Monitor) {
 	monitor.Heartbeat(ParserWorkerName)
 	defer monitor.Heartbeat(ParserWorkerName)
-	// Используем отдельный timeout для одного прохода, чтобы зависший HTTP-запрос
-	// не удерживал воркер вечно. Таймаут должен быть больше httpTimeout адаптера.
-	runCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
-	defer cancel()
-
-	if err := w.parserSvc.CleanupInterruptedRuns(runCtx, 35*time.Minute); err != nil {
+	cleanupCtx, cleanupCancel := context.WithTimeout(ctx, time.Minute)
+	if err := w.parserSvc.CleanupInterruptedRuns(cleanupCtx, 35*time.Minute); err != nil {
 		slog.Error("parser worker: stale run cleanup failed", "err", err)
 	}
-	if err := w.parserSvc.RunAllActiveSources(runCtx); err != nil {
-		slog.Error("parser worker: run active sources failed", "err", err)
+	cleanupCancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- w.parserSvc.RunAllActiveSources(ctx)
+	}()
+	heartbeat := time.NewTicker(30 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case err := <-runDone:
+			if err != nil {
+				slog.Error("parser worker: run active sources failed", "err", err)
+			}
+			return
+		case <-heartbeat.C:
+			monitor.Heartbeat(ParserWorkerName)
+		case <-ctx.Done():
+			return
+		}
 	}
 }

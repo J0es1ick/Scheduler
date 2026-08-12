@@ -33,6 +33,10 @@ func (h *Handler) HandleStart(c tele.Context) error {
 	}
 	if err = miniapp.ConfigureMenu(c.Bot(), c.Sender(), h.AdminPublicURL, user.IsAdmin); err != nil {
 		slog.Debug("menu button configuration skipped", "user_id", user.ID, "err", err)
+	} else if err = h.UserService.MarkTelegramMenuConfigured(
+		ctx, user.ID, miniapp.MenuFingerprint(h.AdminPublicURL, user.IsAdmin),
+	); err != nil {
+		slog.Warn("save menu button state failed", "user_id", user.ID, "err", err)
 	}
 
 	name := c.Sender().FirstName

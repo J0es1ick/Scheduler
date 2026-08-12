@@ -21,6 +21,7 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/adminui"
 	"github.com/J0es1ick/Scheduler/internal/buildinfo"
+	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/J0es1ick/Scheduler/internal/service"
 	managed "github.com/J0es1ick/Scheduler/parser/v1"
 	"github.com/google/uuid"
@@ -540,6 +541,8 @@ func (s *Server) handleRestoreSource(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusNotFound, "Архивный источник не найден")
 		case errors.Is(err, ErrSourceBusy):
 			writeAPIError(w, http.StatusConflict, "Источник сейчас обновляется")
+		case errors.Is(err, repository.ErrActiveSourceConflict):
+			writeAPIError(w, http.StatusConflict, "У этого вуза уже есть активный источник. Сначала приостановите его")
 		default:
 			slog.Error("admin restore source failed", "source", sourceID, "err", err)
 			writeAPIError(w, http.StatusInternalServerError, "Не удалось восстановить источник")

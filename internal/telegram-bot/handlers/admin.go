@@ -28,6 +28,10 @@ func (h *Handler) HandleAdmin(c telegram.Context) error {
 	}
 	if err = miniapp.ConfigureMenu(c.Bot(), c.Sender(), h.AdminPublicURL, true); err != nil {
 		slog.Warn("admin menu button configuration failed", "user_id", userID, "err", err)
+	} else if err = h.UserService.MarkTelegramMenuConfigured(
+		ctx, userID, miniapp.MenuFingerprint(h.AdminPublicURL, true),
+	); err != nil {
+		slog.Warn("save admin menu button state failed", "user_id", userID, "err", err)
 	}
 
 	menu := &telegram.ReplyMarkup{}

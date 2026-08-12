@@ -85,7 +85,19 @@ func convertLesson(
 	} else {
 		lesson.DayOfWeek = input.Schedule.DayOfWeek
 		lesson.WeekType = domain.WeekType(recurrence.Kind)
-		if recurrence.Kind == connector.RecurrenceCycle {
+		switch recurrence.Kind {
+		case connector.RecurrenceOdd, connector.RecurrenceEven:
+			cycleWeek := 1
+			if recurrence.Kind == connector.RecurrenceEven {
+				cycleWeek = 2
+			}
+			anchor := termStart
+			lesson.Recurrence = domain.RecurrenceRule{
+				CycleLength: 2,
+				CycleWeeks:  []int{cycleWeek},
+				AnchorDate:  &anchor,
+			}
+		case connector.RecurrenceCycle:
 			lesson.WeekType = domain.WeekTypeEvery
 			anchor := termStart
 			lesson.Recurrence = domain.RecurrenceRule{
