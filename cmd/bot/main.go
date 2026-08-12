@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -286,12 +287,15 @@ func configureAdminMenus(
 ) bool {
 	const pageSize = 200
 	const requestInterval = 50 * time.Millisecond
+	regularFingerprint := miniapp.MenuFingerprint(publicURL, false)
+	adminFingerprint := miniapp.MenuFingerprint(publicURL, true)
 	afterID := ""
-	configured := true
 	lastRequest := time.Time{}
 	for {
 		pageCtx, cancel := context.WithTimeout(parent, 5*time.Second)
-		items, err := users.GetUsersPage(pageCtx, afterID, pageSize)
+		items, err := users.GetUsersPendingMenuSync(
+			pageCtx, afterID, pageSize, adminFingerprint, regularFingerprint,
+		)
 		cancel()
 		if err != nil {
 			slog.Warn("load users page for Mini App menu failed", "after_user_id", afterID, "err", err)
@@ -326,15 +330,43 @@ func configureAdminMenus(
 				)
 			}
 			if configureErr != nil {
-				configured = false
-				slog.Debug("Mini App menu configuration failed", "user_id", user.ID, "err", configureErr)
+				if !permanentTelegramMenuError(configureErr) {
+					slog.Warn("Mini App menu configuration temporarily failed", "user_id", user.ID, "err", configureErr)
+					return false
+				}
+				slog.Debug("Mini App menu cannot be configured for user", "user_id", user.ID, "err", configureErr)
+			}
+			fingerprint := regularFingerprint
+			if user.IsAdmin {
+				fingerprint = adminFingerprint
+			}
+			markCtx, markCancel := context.WithTimeout(parent, 5*time.Second)
+			markErr := users.MarkMenuConfigured(markCtx, user.ID, fingerprint)
+			markCancel()
+			if markErr != nil {
+				slog.Warn("save Mini App menu state failed", "user_id", user.ID, "err", markErr)
+				return false
 			}
 		}
 		if len(items) < pageSize {
-			return configured
+			return true
 		}
 		afterID = items[len(items)-1].ID
 	}
+}
+
+func permanentTelegramMenuError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var telegramError *tgbotapi.Error
+	if errors.As(err, &telegramError) {
+		return telegramError.Code == 400 || telegramError.Code == 403 || telegramError.Code == 404
+	}
+	message := err.Error()
+	return strings.HasSuffix(message, "(400)") ||
+		strings.HasSuffix(message, "(403)") ||
+		strings.HasSuffix(message, "(404)")
 }
 
 func waitUntil(ctx context.Context, deadline time.Time) error {

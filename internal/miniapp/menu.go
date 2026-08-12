@@ -33,3 +33,10 @@ func ConfigureMenu(bot *telegram.Bot, user *telegram.User, publicURL string, isA
 		},
 	})
 }
+
+func MenuFingerprint(publicURL string, isAdmin bool) string {
+	if !isAdmin {
+		return "commands:v1"
+	}
+	return "admin:" + strings.TrimSpace(publicURL)
+}

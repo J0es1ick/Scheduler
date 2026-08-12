@@ -10,14 +10,16 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jmoiron/sqlx"
 )
 
 var (
-	ErrConnectorNotFound  = errors.New("connector not found")
-	ErrConnectorReplay    = errors.New("connector request replayed")
-	ErrConnectorRateLimit = errors.New("connector rate limit exceeded")
-	ErrIngestionDuplicate = errors.New("ingestion already exists")
+	ErrConnectorNotFound    = errors.New("connector not found")
+	ErrConnectorReplay      = errors.New("connector request replayed")
+	ErrConnectorRateLimit   = errors.New("connector rate limit exceeded")
+	ErrIngestionDuplicate   = errors.New("ingestion already exists")
+	ErrActiveSourceConflict = errors.New("another source is already active for this university")
 )
 
 type ConnectorRepository struct {
@@ -371,6 +373,39 @@ func (r *ConnectorRepository) UpdateStatus(ctx context.Context, connectorID, sta
 		return err
 	}
 	defer tx.Rollback()
+	var source struct {
+		ID           string `db:"id"`
+		UniversityID string `db:"university_id"`
+	}
+	if err = tx.GetContext(ctx, &source, `
+		SELECT ds.id, ds.university_id
+		FROM connector_clients c
+		JOIN data_sources ds ON ds.id=c.data_source_id
+		WHERE c.id=$1
+		FOR UPDATE OF c, ds`, connectorID); errors.Is(err, sql.ErrNoRows) {
+		return ErrConnectorNotFound
+	} else if err != nil {
+		return fmt.Errorf("load connector source: %w", err)
+	}
+	if status == domain.ConnectorStatusActive {
+		if _, err = tx.ExecContext(ctx,
+			`SELECT pg_advisory_xact_lock(hashtext('scheduler-source-activation'), hashtext($1))`,
+			source.UniversityID,
+		); err != nil {
+			return fmt.Errorf("lock connector university: %w", err)
+		}
+		var competingSource string
+		err = tx.GetContext(ctx, &competingSource, `
+			SELECT id FROM data_sources
+			WHERE university_id=$1 AND lifecycle_status='active' AND id<>$2
+			LIMIT 1`, source.UniversityID, source.ID)
+		if err == nil {
+			return fmt.Errorf("%w: %s", ErrActiveSourceConflict, competingSource)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("check active university source: %w", err)
+		}
+	}
 	result, err := tx.ExecContext(ctx, `
 		UPDATE connector_clients SET status=$2, updated_at=NOW() WHERE id=$1`, connectorID, status)
 	if err != nil {
@@ -386,6 +421,9 @@ func (r *ConnectorRepository) UpdateStatus(ctx context.Context, connectorID, sta
 			archived_at=CASE WHEN $2='archived' THEN NOW() ELSE NULL END,
 			updated_at=NOW()
 		FROM connector_clients c WHERE c.id=$1 AND ds.id=c.data_source_id`, connectorID, lifecycle, enabled); err != nil {
+		if IsActiveSourceConflict(err) {
+			return ErrActiveSourceConflict
+		}
 		return err
 	}
 	if enabled {
@@ -467,4 +505,11 @@ func isUniqueViolation(err error) bool {
 	type sqlState interface{ SQLState() string }
 	var state sqlState
 	return errors.As(err, &state) && state.SQLState() == "23505"
+}
+
+func IsActiveSourceConflict(err error) bool {
+	var postgresError *pgconn.PgError
+	return errors.As(err, &postgresError) &&
+		postgresError.Code == "23505" &&
+		postgresError.ConstraintName == "idx_data_sources_one_active_per_university"
 }

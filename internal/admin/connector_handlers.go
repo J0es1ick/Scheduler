@@ -278,7 +278,10 @@ func (s *Server) handleUpdateConnector(w http.ResponseWriter, r *http.Request) {
 				)
 			}
 		}
-		if err = s.store.UpdateConnectorStatus(r.Context(), id, request.Status); err != nil {
+		if err = s.store.UpdateConnectorStatus(r.Context(), id, request.Status); errors.Is(err, repository.ErrActiveSourceConflict) {
+			writeAPIError(w, http.StatusConflict, "У этого вуза уже есть активный источник. Сначала приостановите его")
+			return
+		} else if err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "Не удалось изменить состояние коннектора")
 			return
 		}

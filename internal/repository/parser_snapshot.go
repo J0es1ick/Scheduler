@@ -242,6 +242,21 @@ func (r *ParserSnapshotRepository) PublishWithHook(
 		return nil, err
 	}
 	payload := snapshot.Payload
+	var adapterType string
+	if err = tx.GetContext(ctx, &adapterType,
+		`SELECT adapter_type FROM data_sources WHERE id=$1`, snapshot.DataSourceID,
+	); err != nil {
+		return nil, fmt.Errorf("publish snapshot: load source type: %w", err)
+	}
+	if adapterType == domain.IntegrationModeExternalPush {
+		payload = normalizeExternalParityRecurrence(payload)
+	}
+	if _, err = tx.ExecContext(ctx,
+		`SELECT pg_advisory_xact_lock(hashtext('scheduler-snapshot-publication'), hashtext($1))`,
+		payload.UniversityID,
+	); err != nil {
+		return nil, fmt.Errorf("publish snapshot: acquire university lock: %w", err)
+	}
 	var existingGroups []domain.Group
 	if err = tx.SelectContext(ctx, &existingGroups, `
 		SELECT id, university_id, name, is_active, created_at, updated_at
@@ -350,6 +365,29 @@ func (r *ParserSnapshotRepository) PublishWithHook(
 		snapshot.ReviewNote = reviewNote
 	}
 	return snapshot, nil
+}
+
+func normalizeExternalParityRecurrence(payload domain.ScheduleSnapshot) domain.ScheduleSnapshot {
+	for groupIndex := range payload.Groups {
+		for lessonIndex := range payload.Groups[groupIndex].Lessons {
+			lesson := &payload.Groups[groupIndex].Lessons[lessonIndex]
+			if !lesson.Recurrence.IsZero() ||
+				(lesson.WeekType != domain.WeekTypeOdd && lesson.WeekType != domain.WeekTypeEven) {
+				continue
+			}
+			cycleWeek := 1
+			if lesson.WeekType == domain.WeekTypeEven {
+				cycleWeek = 2
+			}
+			anchor := payload.StartDate
+			lesson.Recurrence = domain.RecurrenceRule{
+				CycleLength: 2,
+				CycleWeeks:  []int{cycleWeek},
+				AnchorDate:  &anchor,
+			}
+		}
+	}
+	return payload
 }
 
 func (p *SnapshotPublication) EffectiveLessonsByUniversity(

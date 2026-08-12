@@ -542,6 +542,9 @@ func (s *Store) RestoreSource(ctx context.Context, sourceID string) (string, err
 		SET lifecycle_status=$2, is_enabled=FALSE, archived_at=NULL, updated_at=NOW()
 		WHERE id=$1 AND lifecycle_status='archived'`, sourceID, lifecycle)
 	if err != nil {
+		if repository.IsActiveSourceConflict(err) {
+			return "", repository.ErrActiveSourceConflict
+		}
 		return "", fmt.Errorf("admin restore source: %w", err)
 	}
 	if rows, _ := result.RowsAffected(); rows == 0 {

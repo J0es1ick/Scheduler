@@ -83,7 +83,13 @@ func (r *UserRepository) GetAllUsers(ctx context.Context) ([]domain.User, error)
 	return users, nil
 }
 
-func (r *UserRepository) GetUsersPage(ctx context.Context, afterID string, limit int) ([]domain.User, error) {
+func (r *UserRepository) GetUsersPendingMenuSync(
+	ctx context.Context,
+	afterID string,
+	limit int,
+	adminFingerprint string,
+	regularFingerprint string,
+) ([]domain.User, error) {
 	if limit <= 0 {
 		return []domain.User{}, nil
 	}
@@ -92,14 +98,25 @@ func (r *UserRepository) GetUsersPage(ctx context.Context, afterID string, limit
 		SELECT id, COALESCE(username, '') AS username, is_admin
 		FROM users
 		WHERE ($1 = '' OR id > $1)
+		  AND telegram_menu_fingerprint IS DISTINCT FROM
+		      CASE WHEN is_admin THEN $3 ELSE $4 END
 		ORDER BY id
-		LIMIT $2`, afterID, limit); err != nil {
-		return nil, fmt.Errorf("get users page after %q: %w", afterID, err)
+		LIMIT $2`, afterID, limit, adminFingerprint, regularFingerprint); err != nil {
+		return nil, fmt.Errorf("get users pending menu sync after %q: %w", afterID, err)
 	}
 	if users == nil {
 		users = []domain.User{}
 	}
 	return users, nil
+}
+
+func (r *UserRepository) MarkMenuConfigured(ctx context.Context, userID, fingerprint string) error {
+	if _, err := r.db.ExecContext(ctx, `
+		UPDATE users SET telegram_menu_fingerprint=$2 WHERE id=$1`, userID, fingerprint,
+	); err != nil {
+		return fmt.Errorf("mark Telegram menu configured for user %s: %w", userID, err)
+	}
+	return nil
 }
 
 func (r *UserRepository) UpdateUser(ctx context.Context, id, username string, isAdmin bool) error {

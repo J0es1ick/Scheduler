@@ -161,6 +161,17 @@ func TestPostgresRepositoryFlow(t *testing.T) {
 	if _, err = users.CreateUser(ctx, userID, "integration_user", false); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
+	pendingMenus, err := users.GetUsersPendingMenuSync(ctx, "", 10_000, "admin:test", "commands:v1")
+	if err != nil || !containsUser(pendingMenus, userID) {
+		t.Fatalf("new user is absent from pending menu sync: found=%t err=%v", containsUser(pendingMenus, userID), err)
+	}
+	if err = users.MarkMenuConfigured(ctx, userID, "commands:v1"); err != nil {
+		t.Fatalf("mark user menu configured: %v", err)
+	}
+	pendingMenus, err = users.GetUsersPendingMenuSync(ctx, "", 10_000, "admin:test", "commands:v1")
+	if err != nil || containsUser(pendingMenus, userID) {
+		t.Fatalf("configured user remains in pending menu sync: found=%t err=%v", containsUser(pendingMenus, userID), err)
+	}
 	if err = users.SetDefaultGroup(ctx, userID, groupID); err != nil {
 		t.Fatalf("set default group: %v", err)
 	}
@@ -217,6 +228,15 @@ func TestPostgresRepositoryFlow(t *testing.T) {
 	if workerStatus.LastFullCycleAt == nil || workerStatus.LastProcessed != 1 {
 		t.Fatalf("unexpected worker status: %+v", workerStatus)
 	}
+}
+
+func containsUser(items []domain.User, userID string) bool {
+	for _, item := range items {
+		if item.ID == userID {
+			return true
+		}
+	}
+	return false
 }
 
 func containsReminderRecipient(

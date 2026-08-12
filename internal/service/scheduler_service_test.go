@@ -36,6 +36,45 @@ func TestLessonMatchesDateUsesSourceValidityAsParityAnchor(t *testing.T) {
 	}
 }
 
+func TestLessonMatchesDateDistinguishesOddAndEvenByExplicitTermRecurrence(t *testing.T) {
+	semesterStart := mustDate(t, "2026-08-31") // понедельник первой, нечётной недели
+	validTo := mustDate(t, "2027-01-31")
+	odd := domain.Lesson{
+		DayOfWeek: 2,
+		WeekType:  domain.WeekTypeOdd,
+		ValidFrom: &semesterStart,
+		ValidTo:   &validTo,
+		Recurrence: domain.RecurrenceRule{
+			CycleLength: 2,
+			CycleWeeks:  []int{1},
+			AnchorDate:  &semesterStart,
+		},
+	}
+	even := odd
+	even.WeekType = domain.WeekTypeEven
+	even.Recurrence.CycleWeeks = []int{2}
+
+	firstTuesday := mustDate(t, "2026-09-01")
+	secondTuesday := mustDate(t, "2026-09-08")
+	if !lessonMatchesDate(odd, firstTuesday, &semesterStart) || lessonMatchesDate(even, firstTuesday, &semesterStart) {
+		t.Fatal("первая неделя должна содержать только нечётное занятие")
+	}
+	if lessonMatchesDate(odd, secondTuesday, &semesterStart) || !lessonMatchesDate(even, secondTuesday, &semesterStart) {
+		t.Fatal("вторая неделя должна содержать только чётное занятие")
+	}
+}
+
+func TestLessonMatchesDateUsesSemesterWeekWithoutSourceValidity(t *testing.T) {
+	semesterStart := mustDate(t, "2026-08-31")
+	lesson := domain.Lesson{DayOfWeek: 2, WeekType: domain.WeekTypeEven}
+	if lessonMatchesDate(lesson, mustDate(t, "2026-09-01"), &semesterStart) {
+		t.Fatal("odd semester week must not contain an even lesson")
+	}
+	if !lessonMatchesDate(lesson, mustDate(t, "2026-09-08"), &semesterStart) {
+		t.Fatal("even semester week must contain an even lesson")
+	}
+}
+
 func TestLessonMatchesDateUsesCivilDatesAcrossLocations(t *testing.T) {
 	moscow := time.FixedZone("MSK", 3*60*60)
 	specialDate := time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC)

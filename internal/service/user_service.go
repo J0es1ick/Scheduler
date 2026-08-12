@@ -1,4 +1,3 @@
-// internal/service/user_service.go
 package service
 
 import (
@@ -62,6 +61,10 @@ func (s *UserService) SetAdmin(ctx context.Context, userID string, isAdmin bool)
 		return fmt.Errorf("user not found")
 	}
 	return s.userRepo.UpdateUser(ctx, userID, user.Username, isAdmin)
+}
+
+func (s *UserService) MarkTelegramMenuConfigured(ctx context.Context, userID, fingerprint string) error {
+	return s.userRepo.MarkMenuConfigured(ctx, userID, fingerprint)
 }
 
 func (s *UserService) SetDefaultGroup(ctx context.Context, userID, groupID string) error {
