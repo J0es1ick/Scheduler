@@ -89,7 +89,7 @@ func (w *ReminderWorker) Start(ctx context.Context, monitors ...*Monitor) <-chan
 
 func (w *ReminderWorker) run(ctx context.Context, monitor *Monitor) {
 	slog.Info("lesson reminder worker started", "interval", w.interval)
-	w.tick(ctx)
+	monitor.Record(ReminderWorkerName, w.tick(ctx))
 	monitor.Heartbeat(ReminderWorkerName)
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
@@ -99,13 +99,13 @@ func (w *ReminderWorker) run(ctx context.Context, monitor *Monitor) {
 			slog.Info("lesson reminder worker stopped")
 			return
 		case <-ticker.C:
-			w.tick(ctx)
+			monitor.Record(ReminderWorkerName, w.tick(ctx))
 			monitor.Heartbeat(ReminderWorkerName)
 		}
 	}
 }
 
-func (w *ReminderWorker) tick(parent context.Context) {
+func (w *ReminderWorker) tick(parent context.Context) error {
 	startedAt := w.now()
 	ctx, cancel := context.WithTimeout(parent, w.runTimeout)
 	defer cancel()
@@ -113,7 +113,7 @@ func (w *ReminderWorker) tick(parent context.Context) {
 	status, err := w.statusRepository.Get(ctx, domain.LessonReminderWorker)
 	if err != nil {
 		slog.Error("lesson reminder worker: load cursor failed", "err", err)
-		return
+		return err
 	}
 
 	schedules := make(reminderScheduleCache)
@@ -169,7 +169,7 @@ scan:
 		failures = 1
 	}
 	finishedAt := w.now()
-	w.recordRun(parent, domain.WorkerRunResult{
+	recordErr := w.recordRun(parent, domain.WorkerRunResult{
 		Name:            domain.LessonReminderWorker,
 		Cursor:          afterUserID,
 		StartedAt:       startedAt,
@@ -179,14 +179,20 @@ scan:
 		Failures:        failures,
 		LastError:       compactWorkerError(runErr),
 	})
+	if runErr != nil {
+		return runErr
+	}
+	return recordErr
 }
 
-func (w *ReminderWorker) recordRun(parent context.Context, result domain.WorkerRunResult) {
+func (w *ReminderWorker) recordRun(parent context.Context, result domain.WorkerRunResult) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), workerStatusTimeout)
 	defer cancel()
 	if err := w.statusRepository.RecordRun(ctx, result); err != nil {
 		slog.Error("lesson reminder worker: record run failed", "err", err)
+		return err
 	}
+	return nil
 }
 
 func fullCycleTimestamp(completed bool, finishedAt time.Time) *time.Time {

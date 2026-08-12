@@ -125,10 +125,14 @@ export function UsersPage({
                   <select
                     value={item.admin_role}
                     disabled={busy === item.id || item.id === user.id}
-                    onChange={(event) => void changeRole(item.id, event.target.value as AdminRole)}
+                    onChange={(event) =>
+                      void changeRole(item.id, event.target.value as AdminRole)
+                    }
                   >
                     {Object.entries(roleLabels).map(([role, label]) => (
-                      <option key={role} value={role}>{label}</option>
+                      <option key={role} value={role}>
+                        {label}
+                      </option>
                     ))}
                   </select>
                 </label>

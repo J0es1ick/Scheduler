@@ -15,6 +15,11 @@ const (
 type workerProbe struct {
 	running       bool
 	lastHeartbeat time.Time
+	lastSuccess   time.Time
+	lastFailure   time.Time
+	lastError     string
+	hasResult     bool
+	lastResultOK  bool
 	maxSilence    time.Duration
 }
 
@@ -63,6 +68,45 @@ func (m *Monitor) Heartbeat(name string) {
 	m.mu.Unlock()
 }
 
+func (m *Monitor) Succeeded(name string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	probe := m.workers[name]
+	probe.lastSuccess = m.now()
+	probe.hasResult = true
+	probe.lastResultOK = true
+	m.workers[name] = probe
+	m.mu.Unlock()
+}
+
+func (m *Monitor) Failed(name string, err error) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	probe := m.workers[name]
+	probe.lastFailure = m.now()
+	probe.hasResult = true
+	probe.lastResultOK = false
+	if err != nil {
+		probe.lastError = err.Error()
+	} else {
+		probe.lastError = "worker pass failed"
+	}
+	m.workers[name] = probe
+	m.mu.Unlock()
+}
+
+func (m *Monitor) Record(name string, err error) {
+	if err != nil {
+		m.Failed(name, err)
+		return
+	}
+	m.Succeeded(name)
+}
+
 func (m *Monitor) Stopped(name string) {
 	if m == nil {
 		return
@@ -83,7 +127,8 @@ func (m *Monitor) Checks() map[string]bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for name, probe := range m.workers {
-		result[name] = probe.running && !probe.lastHeartbeat.IsZero() && now.Sub(probe.lastHeartbeat) <= probe.maxSilence
+		result[name] = probe.running && probe.hasResult && probe.lastResultOK &&
+			!probe.lastHeartbeat.IsZero() && now.Sub(probe.lastHeartbeat) <= probe.maxSilence
 	}
 	return result
 }

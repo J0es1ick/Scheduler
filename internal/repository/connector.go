@@ -451,56 +451,6 @@ func (r *ConnectorRepository) RotateKey(ctx context.Context, connectorID, keyID 
 	return nil
 }
 
-func (r *ConnectorRepository) PrepareSnapshotMetadata(
-	ctx context.Context,
-	connectorID, institutionName, institutionFullName, scheduleURL, timezone, locale,
-	semesterID, termExternalID, termName, academicYear string,
-	startsOn, endsOn time.Time,
-) error {
-	tx, err := r.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	var universityID string
-	if err = tx.GetContext(ctx, &universityID, `
-		SELECT ds.university_id
-		FROM connector_clients c JOIN data_sources ds ON ds.id=c.data_source_id
-		WHERE c.id=$1`, connectorID); err != nil {
-		return fmt.Errorf("prepare connector metadata: %w", err)
-	}
-	if _, err = tx.ExecContext(ctx, `
-		UPDATE universities SET
-			name=CASE WHEN $2='' THEN name ELSE $2 END,
-			full_name=CASE WHEN $3='' THEN full_name ELSE $3 END,
-			schedule_url=CASE WHEN $4='' THEN schedule_url ELSE $4 END,
-			timezone=$5, locale=$6, updated_at=NOW()
-		WHERE id=$1`, universityID, institutionName, institutionFullName,
-		scheduleURL, timezone, locale); err != nil {
-		return fmt.Errorf("update connector university: %w", err)
-	}
-	if _, err = tx.ExecContext(ctx, `
-		UPDATE semesters SET status='archived', updated_at=NOW()
-		WHERE university_id=$1 AND status='active' AND id<>$2`, universityID, semesterID); err != nil {
-		return err
-	}
-	if _, err = tx.ExecContext(ctx, `
-		INSERT INTO semesters (
-			id, university_id, external_id, name, academic_year,
-			status, start_date, end_date, created_at, updated_at
-		) VALUES ($1,$2,$3,$4,$5,'active',$6,$7,NOW(),NOW())
-		ON CONFLICT (id) DO UPDATE SET
-			external_id=EXCLUDED.external_id,
-			name=EXCLUDED.name,
-			academic_year=EXCLUDED.academic_year,
-			status='active', start_date=EXCLUDED.start_date,
-			end_date=EXCLUDED.end_date, updated_at=NOW()`,
-		semesterID, universityID, termExternalID, termName, academicYear, startsOn, endsOn); err != nil {
-		return fmt.Errorf("upsert connector term: %w", err)
-	}
-	return tx.Commit()
-}
-
 func isUniqueViolation(err error) bool {
 	type sqlState interface{ SQLState() string }
 	var state sqlState

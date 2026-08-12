@@ -18,10 +18,7 @@ import type {
   SnapshotScheduleComparison,
 } from "../../types";
 import { hasAlternatingWeeks } from "../schedule-shared/weekSections";
-import {
-  formatSnapshotDate,
-  snapshotGroupStatusLabels,
-} from "./model";
+import { formatSnapshotDate, snapshotGroupStatusLabels } from "./model";
 import { SnapshotSchedulePanel } from "./SnapshotSchedulePanel";
 
 type GroupFilter = "attention" | "all" | SnapshotGroupStatus;
@@ -29,6 +26,7 @@ type GroupFilter = "attention" | "all" | SnapshotGroupStatus;
 export function SnapshotReviewDialog({
   snapshot,
   sourceName,
+  approvalOnly,
   busy,
   onClose,
   onPublish,
@@ -36,6 +34,7 @@ export function SnapshotReviewDialog({
 }: {
   snapshot: ParserSnapshot;
   sourceName: string;
+  approvalOnly: boolean;
   busy: boolean;
   onClose: () => void;
   onPublish: () => Promise<boolean>;
@@ -47,8 +46,9 @@ export function SnapshotReviewDialog({
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<GroupFilter>("attention");
   const [selectedGroupID, setSelectedGroupID] = useState("");
-  const [schedule, setSchedule] =
-    useState<SnapshotScheduleComparison | null>(null);
+  const [schedule, setSchedule] = useState<SnapshotScheduleComparison | null>(
+    null,
+  );
   const [scheduleError, setScheduleError] = useState("");
   const [scheduleLoading, setScheduleLoading] = useState(false);
 
@@ -153,7 +153,10 @@ export function SnapshotReviewDialog({
   }
 
   return (
-    <div className="dialog-backdrop snapshot-review-backdrop" role="presentation">
+    <div
+      className="dialog-backdrop snapshot-review-backdrop"
+      role="presentation"
+    >
       <section
         className="snapshot-review-dialog"
         role="dialog"
@@ -162,13 +165,21 @@ export function SnapshotReviewDialog({
       >
         <header className="snapshot-review-header">
           <div className="snapshot-review-title">
-            <span className="eyebrow">Проверка перед публикацией</span>
+            <span className="eyebrow">
+              {approvalOnly
+                ? "Проверка перед активацией"
+                : "Проверка перед публикацией"}
+            </span>
             <h2 id="snapshot-review-title">Содержимое нового снимка</h2>
             <p>
               {sourceName} · {formatDateTime(snapshot.created_at)}
             </p>
           </div>
-          <button className="dialog-close" onClick={onClose} aria-label="Закрыть">
+          <button
+            className="dialog-close"
+            onClick={onClose}
+            aria-label="Закрыть"
+          >
             <X size={19} />
           </button>
         </header>
@@ -190,107 +201,109 @@ export function SnapshotReviewDialog({
             <>
               <SnapshotSummary preview={preview} />
               <div className="snapshot-review-workspace">
-              <aside className="snapshot-group-browser">
-                <div className="snapshot-group-search">
-                  <Search size={16} />
-                  <input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Группа или идентификатор"
-                    aria-label="Поиск группы в снимке"
-                  />
-                </div>
-                <div className="snapshot-group-filters">
-                  <FilterButton
-                    active={filter === "attention"}
-                    label="Изменения"
-                    count={
-                      preview.summary.added_groups +
-                      preview.summary.removed_groups +
-                      preview.summary.changed_groups
-                    }
-                    onClick={() => setFilter("attention")}
-                  />
-                  <FilterButton
-                    active={filter === "all"}
-                    label="Все"
-                    count={preview.groups.length}
-                    onClick={() => setFilter("all")}
-                  />
-                  <FilterButton
-                    active={filter === "unchanged"}
-                    label="Без изменений"
-                    count={preview.summary.unchanged_groups}
-                    onClick={() => setFilter("unchanged")}
-                  />
-                </div>
-                <div className="snapshot-group-list">
-                  {filteredGroups.length ? (
-                    filteredGroups.map((group) => (
-                      <SnapshotGroupButton
-                        key={group.id}
-                        group={group}
-                        selected={selectedGroupID === group.id}
-                        onClick={() => setSelectedGroupID(group.id)}
-                      />
-                    ))
+                <aside className="snapshot-group-browser">
+                  <div className="snapshot-group-search">
+                    <Search size={16} />
+                    <input
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder="Группа или идентификатор"
+                      aria-label="Поиск группы в снимке"
+                    />
+                  </div>
+                  <div className="snapshot-group-filters">
+                    <FilterButton
+                      active={filter === "attention"}
+                      label="Изменения"
+                      count={
+                        preview.summary.added_groups +
+                        preview.summary.removed_groups +
+                        preview.summary.changed_groups
+                      }
+                      onClick={() => setFilter("attention")}
+                    />
+                    <FilterButton
+                      active={filter === "all"}
+                      label="Все"
+                      count={preview.groups.length}
+                      onClick={() => setFilter("all")}
+                    />
+                    <FilterButton
+                      active={filter === "unchanged"}
+                      label="Без изменений"
+                      count={preview.summary.unchanged_groups}
+                      onClick={() => setFilter("unchanged")}
+                    />
+                  </div>
+                  <div className="snapshot-group-list">
+                    {filteredGroups.length ? (
+                      filteredGroups.map((group) => (
+                        <SnapshotGroupButton
+                          key={group.id}
+                          group={group}
+                          selected={selectedGroupID === group.id}
+                          onClick={() => setSelectedGroupID(group.id)}
+                        />
+                      ))
+                    ) : (
+                      <div className="snapshot-group-empty">
+                        <Search size={19} />
+                        <strong>Группы не найдены</strong>
+                        <p>Измените запрос или выберите другой фильтр.</p>
+                      </div>
+                    )}
+                  </div>
+                </aside>
+
+                <main className="snapshot-schedule-comparison">
+                  {scheduleLoading ? (
+                    <div className="snapshot-schedule-loading">
+                      <span className="spinner" /> Загружаем расписание группы
+                    </div>
+                  ) : scheduleError ? (
+                    <div className="snapshot-review-error is-compact">
+                      <ShieldAlert size={20} />
+                      <p>{scheduleError}</p>
+                    </div>
+                  ) : schedule ? (
+                    <>
+                      <header className="snapshot-comparison-heading">
+                        <div>
+                          <span>
+                            {snapshotGroupStatusLabels[schedule.status]}
+                          </span>
+                          <h3>{schedule.group_name}</h3>
+                          <p>{schedule.group_id}</p>
+                        </div>
+                        <ArrowRight size={20} />
+                      </header>
+                      <div className="snapshot-schedule-columns">
+                        <SnapshotSchedulePanel
+                          title="Опубликовано сейчас"
+                          subtitle="Последний снимок, который видят пользователи"
+                          lessons={schedule.current}
+                          emptyText="В опубликованной версии у группы занятий не было."
+                          tone="current"
+                          splitAlternatingWeeks={splitAlternatingWeeks}
+                        />
+                        <SnapshotSchedulePanel
+                          title="Получено с сайта"
+                          subtitle="Расписание, которое попадёт к пользователям"
+                          lessons={schedule.candidate}
+                          emptyText="Источник не вернул занятия для этой группы."
+                          tone="candidate"
+                          splitAlternatingWeeks={splitAlternatingWeeks}
+                        />
+                      </div>
+                    </>
                   ) : (
-                    <div className="snapshot-group-empty">
-                      <Search size={19} />
-                      <strong>Группы не найдены</strong>
-                      <p>Измените запрос или выберите другой фильтр.</p>
+                    <div className="snapshot-schedule-empty-state">
+                      <BookOpen size={25} />
+                      <strong>Выберите группу</strong>
+                      <p>Здесь появится расписание до и после публикации.</p>
                     </div>
                   )}
-                </div>
-              </aside>
-
-              <main className="snapshot-schedule-comparison">
-                {scheduleLoading ? (
-                  <div className="snapshot-schedule-loading">
-                    <span className="spinner" /> Загружаем расписание группы
-                  </div>
-                ) : scheduleError ? (
-                  <div className="snapshot-review-error is-compact">
-                    <ShieldAlert size={20} />
-                    <p>{scheduleError}</p>
-                  </div>
-                ) : schedule ? (
-                  <>
-                    <header className="snapshot-comparison-heading">
-                      <div>
-                        <span>{snapshotGroupStatusLabels[schedule.status]}</span>
-                        <h3>{schedule.group_name}</h3>
-                        <p>{schedule.group_id}</p>
-                      </div>
-                      <ArrowRight size={20} />
-                    </header>
-                    <div className="snapshot-schedule-columns">
-                      <SnapshotSchedulePanel
-                        title="Опубликовано сейчас"
-                        subtitle="Последний снимок, который видят пользователи"
-                        lessons={schedule.current}
-                        emptyText="В опубликованной версии у группы занятий не было."
-                        tone="current"
-                        splitAlternatingWeeks={splitAlternatingWeeks}
-                      />
-                      <SnapshotSchedulePanel
-                        title="Получено с сайта"
-                        subtitle="Расписание, которое попадёт к пользователям"
-                        lessons={schedule.candidate}
-                        emptyText="Источник не вернул занятия для этой группы."
-                        tone="candidate"
-                        splitAlternatingWeeks={splitAlternatingWeeks}
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <div className="snapshot-schedule-empty-state">
-                    <BookOpen size={25} />
-                    <strong>Выберите группу</strong>
-                    <p>Здесь появится расписание до и после публикации.</p>
-                  </div>
-                )}
-              </main>
+                </main>
               </div>
             </>
           )}
@@ -298,8 +311,9 @@ export function SnapshotReviewDialog({
 
         <footer className="snapshot-review-footer">
           <p>
-            Публикация заменит данные источника. Ручные правки редактора останутся
-            отдельным слоем.
+            {approvalOnly
+              ? "Одобрение не меняет рабочее расписание. Снимок будет применён вместе с активацией источника одной транзакцией."
+              : "Публикация заменит данные источника. Ручные правки редактора останутся отдельным слоем."}
           </p>
           <div>
             <button
@@ -314,7 +328,10 @@ export function SnapshotReviewDialog({
               disabled={busy || !snapshot.publishable}
               onClick={() => void publish()}
             >
-              <Check size={15} /> Подтвердить публикацию
+              <Check size={15} />{" "}
+              {approvalOnly
+                ? "Одобрить для активации"
+                : "Подтвердить публикацию"}
             </button>
           </div>
         </footer>
@@ -353,7 +370,8 @@ function SnapshotSummary({ preview }: { preview: SnapshotPreview }) {
       </div>
       <div className="snapshot-delta-strip">
         <span className="is-changed">
-          <BookOpen size={15} /> Изменено групп: {preview.summary.changed_groups}
+          <BookOpen size={15} /> Изменено групп:{" "}
+          {preview.summary.changed_groups}
         </span>
         <span className="is-added">
           <Users size={15} /> Новых: {preview.summary.added_groups}

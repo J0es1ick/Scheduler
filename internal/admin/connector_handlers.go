@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -14,6 +15,7 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/declarative"
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	"github.com/J0es1ick/Scheduler/internal/service"
 	"github.com/google/uuid"
 )
 
@@ -254,7 +256,7 @@ func (s *Server) handleUpdateConnector(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if request.Status == domain.ConnectorStatusActive {
-			runID, snapshotID, snapshotStatus, candidateErr := s.store.ConnectorActivationCandidate(r.Context(), id)
+			_, snapshotID, snapshotStatus, candidateErr := s.store.ConnectorActivationCandidate(r.Context(), id)
 			if errors.Is(candidateErr, sql.ErrNoRows) || candidateErr != nil && snapshotID == "" {
 				writeAPIError(w, http.StatusConflict, "Перед активацией отправьте и проверьте тестовый снимок")
 				return
@@ -263,27 +265,25 @@ func (s *Server) handleUpdateConnector(w http.ResponseWriter, r *http.Request) {
 				writeAPIError(w, http.StatusInternalServerError, "Не удалось проверить тестовый снимок")
 				return
 			}
-			if snapshotStatus != domain.SnapshotStatusPublished {
-				writeAPIError(w, http.StatusConflict, "Сначала откройте тестовый снимок в разделе источников и подтвердите его публикацию")
+			if snapshotStatus != domain.SnapshotStatusApproved {
+				writeAPIError(w, http.StatusConflict, "Сначала откройте тестовый снимок в разделе источников и одобрите его для активации")
 				return
 			}
-			candidate, loadErr := repository.NewParserSnapshotRepository(s.store.db).Get(r.Context(), snapshotID)
-			if loadErr != nil || candidate == nil {
-				writeAPIError(w, http.StatusInternalServerError, "Не удалось загрузить проверенный снимок")
+			if _, activateErr := s.parser.ActivateConnector(
+				r.Context(), id, snapshotID, identity.ID, "Активация проверенного источника",
+			); errors.Is(activateErr, service.ErrDataSourceBusy) {
+				writeAPIError(w, http.StatusConflict, "Источник сейчас обновляется")
+				return
+			} else if activateErr != nil {
+				slog.Error("admin activate connector failed", "connector", id, "snapshot", snapshotID, "err", activateErr)
+				writeAPIError(w, http.StatusConflict, "Не удалось атомарно активировать источник: "+activateErr.Error())
 				return
 			}
-			if current.IntegrationMode == domain.IntegrationModeExternalPush && runID != "" {
-				_ = s.store.MarkConnectorRunPublished(
-					r.Context(), runID, snapshotID, candidate.GroupCount, candidate.LessonCount,
-				)
+		} else {
+			if err = s.store.UpdateConnectorStatus(r.Context(), id, request.Status); err != nil {
+				writeAPIError(w, http.StatusInternalServerError, "Не удалось изменить состояние коннектора")
+				return
 			}
-		}
-		if err = s.store.UpdateConnectorStatus(r.Context(), id, request.Status); errors.Is(err, repository.ErrActiveSourceConflict) {
-			writeAPIError(w, http.StatusConflict, "У этого вуза уже есть активный источник. Сначала приостановите его")
-			return
-		} else if err != nil {
-			writeAPIError(w, http.StatusInternalServerError, "Не удалось изменить состояние коннектора")
-			return
 		}
 	}
 	s.writeAudit(r.Context(), identity, "connector_updated", "connector", id,

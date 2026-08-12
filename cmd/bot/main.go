@@ -261,20 +261,26 @@ func keepAdminMenusConfigured(
 	users *repository.UserRepository,
 	publicURL string,
 ) {
+	const syncInterval = 30 * time.Second
 	if _, err := miniapp.EditorURL(publicURL); err != nil {
 		slog.Warn("Mini App menu is disabled until ADMIN_PUBLIC_URL is a public HTTPS URL")
 		return
 	}
+	firstSync := true
 	for {
-		if configureAdminMenus(ctx, bot, users, publicURL) {
-			slog.Info("Mini App menu configured for administrators")
-			return
+		configured := configureAdminMenus(ctx, bot, users, publicURL)
+		if configured {
+			if firstSync {
+				slog.Info("Mini App menu configured for administrators")
+				firstSync = false
+			}
+		} else {
+			slog.Warn("Telegram API is unavailable; Mini App menu configuration will be retried")
 		}
-		slog.Warn("Telegram API is unavailable; Mini App menu configuration will be retried")
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(30 * time.Second):
+		case <-time.After(syncInterval):
 		}
 	}
 }

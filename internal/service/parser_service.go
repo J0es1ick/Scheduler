@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -371,7 +372,42 @@ func (s *ParserService) PublishSnapshot(
 		return nil, fmt.Errorf("%w: %s", ErrDataSourceBusy, candidate.DataSourceID)
 	}
 	defer func() { _ = release() }()
+	dataSource, err := s.dataSourceRepo.GetDataSourceByID(ctx, candidate.DataSourceID)
+	if err != nil {
+		return nil, err
+	}
+	if dataSource == nil {
+		return nil, sql.ErrNoRows
+	}
+	if dataSource.LifecycleStatus != domain.ConnectorStatusActive {
+		return s.snapshotRepo.Approve(ctx, snapshotID, actorID, reviewNote)
+	}
 	return s.publishSnapshot(ctx, snapshotID, actorID, reviewNote)
+}
+
+func (s *ParserService) ActivateConnector(
+	ctx context.Context,
+	connectorID, snapshotID, actorID, reviewNote string,
+) (*domain.ParserSnapshot, error) {
+	candidate, err := s.snapshotRepo.Get(ctx, snapshotID)
+	if err != nil || candidate == nil {
+		return candidate, err
+	}
+	release, acquired, err := s.dataSourceRepo.TryAcquireRunLock(ctx, candidate.DataSourceID)
+	if err != nil {
+		return nil, err
+	}
+	if !acquired {
+		return nil, fmt.Errorf("%w: %s", ErrDataSourceBusy, candidate.DataSourceID)
+	}
+	defer func() { _ = release() }()
+	hook, err := s.snapshotPublicationHook(ctx, candidate)
+	if err != nil {
+		return nil, err
+	}
+	return s.snapshotRepo.ActivateConnectorWithSnapshot(
+		ctx, connectorID, snapshotID, actorID, reviewNote, hook,
+	)
 }
 
 func (s *ParserService) RejectSnapshot(
@@ -408,6 +444,17 @@ func (s *ParserService) publishSnapshot(
 	if err != nil || candidate == nil {
 		return candidate, err
 	}
+	hook, err := s.snapshotPublicationHook(ctx, candidate)
+	if err != nil {
+		return nil, err
+	}
+	return s.snapshotRepo.PublishWithHook(ctx, snapshotID, actorID, reviewNote, hook)
+}
+
+func (s *ParserService) snapshotPublicationHook(
+	ctx context.Context,
+	candidate *domain.ParserSnapshot,
+) (repository.SnapshotPublicationHook, error) {
 	groupIDs := make(map[string]struct{}, len(candidate.Payload.Groups))
 	for _, group := range candidate.Payload.Groups {
 		groupIDs[group.ID] = struct{}{}
@@ -447,7 +494,7 @@ func (s *ParserService) publishSnapshot(
 			return nil
 		}
 	}
-	return s.snapshotRepo.PublishWithHook(ctx, snapshotID, actorID, reviewNote, hook)
+	return hook, nil
 }
 
 func (s *ParserService) captureEffectiveSchedules(
