@@ -20,6 +20,16 @@ type SnapshotPublication struct {
 	tx *sqlx.Tx
 }
 
+func (p *SnapshotPublication) CompleteConnectorIngestion(
+	ctx context.Context,
+	runID, claimToken, status, parserSnapshotID string,
+	groupCount, lessonCount int,
+) error {
+	return completeConnectorIngestion(
+		ctx, p.tx, runID, claimToken, status, parserSnapshotID, groupCount, lessonCount,
+	)
+}
+
 type SnapshotPublicationHook func(context.Context, *SnapshotPublication) error
 
 func NewParserSnapshotRepository(db *sqlx.DB) *ParserSnapshotRepository {
@@ -267,25 +277,43 @@ func (r *ParserSnapshotRepository) Reject(
 	ctx context.Context,
 	id, actorID, note string,
 ) error {
-	result, err := r.db.ExecContext(ctx, `
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("reject parser snapshot %s: begin: %w", id, err)
+	}
+	defer tx.Rollback()
+	var sourceID string
+	err = tx.GetContext(ctx, &sourceID, `
 		UPDATE parser_snapshots
 		SET status='rejected', reviewed_by=$2, review_note=$3, reviewed_at=NOW()
-		WHERE id=$1 AND status='quarantined'`, id, actorID, note)
+		WHERE id=$1 AND status IN ('staged', 'quarantined', 'approved')
+		RETURNING data_source_id`, id, actorID, note)
+	if errors.Is(err, sql.ErrNoRows) {
+		return sql.ErrNoRows
+	}
 	if err != nil {
 		return fmt.Errorf("reject parser snapshot %s: %w", id, err)
 	}
-	if count, _ := result.RowsAffected(); count == 0 {
-		return sql.ErrNoRows
+	if _, err = tx.ExecContext(ctx, `
+		UPDATE connector_ingestion_runs
+		SET status='rejected', error_message=$2, completed_at=NOW(), claimed_at=NULL
+		WHERE parser_snapshot_id=$1 AND status IN ('staged', 'quarantined')`, id, note); err != nil {
+		return fmt.Errorf("reject connector ingestion for snapshot %s: %w", id, err)
 	}
-	_, _ = r.db.ExecContext(ctx, `
+	if _, err = tx.ExecContext(ctx, `
 		UPDATE data_sources ds
 		SET last_error='', updated_at=NOW()
-		WHERE ds.id=(SELECT data_source_id FROM parser_snapshots WHERE id=$1)
+		WHERE ds.id=$1
 		  AND NOT EXISTS (
 			SELECT 1 FROM parser_snapshots s
 			WHERE s.data_source_id=ds.id AND s.status='quarantined'
 		  )
-		  AND ds.consecutive_failures=0`, id)
+		  AND ds.consecutive_failures=0`, sourceID); err != nil {
+		return fmt.Errorf("clear source quarantine after rejecting snapshot %s: %w", id, err)
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("reject parser snapshot %s: commit: %w", id, err)
+	}
 	return nil
 }
 
@@ -325,6 +353,10 @@ func (r *ParserSnapshotRepository) Prune(ctx context.Context, sourceID, keepID s
 				) AS position
 				FROM parser_snapshots
 				WHERE data_source_id=$1 AND id<>$2 AND status<>'quarantined'
+				  AND NOT EXISTS (
+					SELECT 1 FROM publication_reconciliation_queue queue
+					WHERE queue.snapshot_id=parser_snapshots.id
+				  )
 			) ranked WHERE position > 20
 		)`, sourceID, keepID)
 	if err != nil {

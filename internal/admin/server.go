@@ -52,9 +52,11 @@ type Server struct {
 	managedParsers  map[string]managed.Manifest
 	workerReadiness interface{ Checks() map[string]bool }
 
-	runningMu sync.RWMutex
-	running   map[string]bool
-	handler   http.Handler
+	runningMu     sync.RWMutex
+	running       map[string]bool
+	backgroundCtx context.Context
+	backgroundWG  sync.WaitGroup
+	handler       http.Handler
 }
 
 func NewServer(store *Store, auth *AuthManager, parser *service.ParserService, options ...ServerOptions) (*Server, error) {
@@ -88,6 +90,7 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService, o
 		managedParsers:  catalog,
 		workerReadiness: opts.WorkerReadiness,
 		running:         make(map[string]bool),
+		backgroundCtx:   context.Background(),
 	}
 	assets, err := adminui.Files()
 	if err != nil {
@@ -149,6 +152,26 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService, o
 
 	server.handler = server.requestContext(server.requestLog(server.recoverPanic(server.securityHeaders(mux))))
 	return server, nil
+}
+
+func (s *Server) UseBackgroundContext(ctx context.Context) {
+	if ctx != nil {
+		s.backgroundCtx = ctx
+	}
+}
+
+func (s *Server) WaitBackground(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		s.backgroundWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *Server) Handler() http.Handler { return s.handler }
@@ -272,18 +295,24 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 	if err := s.store.Ping(ctx); err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "База данных недоступна")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not_ready"})
 		return
 	}
 	if s.workerReadiness != nil {
 		checks := s.workerReadiness.Checks()
 		for _, ready := range checks {
 			if !ready {
-				writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-					"status": "not_ready",
-					"checks": checks,
-				})
+				writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not_ready"})
 				return
+			}
+		}
+		if degradation, ok := s.workerReadiness.(interface{ DegradedChecks() map[string]bool }); ok {
+			degraded := degradation.DegradedChecks()
+			for _, value := range degraded {
+				if value {
+					writeJSON(w, http.StatusOK, map[string]any{"status": "degraded"})
+					return
+				}
 			}
 		}
 	}
@@ -334,6 +363,10 @@ scheduler_connector_queue{status="failed"} %d
 scheduler_database_connections{state="open"} %d
 scheduler_database_connections{state="in_use"} %d
 scheduler_database_connections{state="idle"} %d
+# TYPE scheduler_storage_bytes gauge
+scheduler_storage_bytes{kind="database"} %d
+scheduler_storage_bytes{kind="connector_storage"} %d
+scheduler_storage_bytes{kind="snapshot_storage"} %d
 # TYPE scheduler_oldest_pending_seconds gauge
 scheduler_oldest_pending_seconds %d
 # TYPE scheduler_reminder_worker_last_run_timestamp_seconds gauge
@@ -365,6 +398,9 @@ scheduler_reminder_worker_cursor_pending %d
 		databaseStats.OpenConnections,
 		databaseStats.InUse,
 		databaseStats.Idle,
+		operations.DatabaseBytes,
+		operations.ConnectorPayloadBytes,
+		operations.SnapshotPayloadBytes,
 		operations.OldestPendingSeconds,
 		unixTimestamp(operations.ReminderWorker.LastFinishedAt),
 		unixTimestamp(operations.ReminderWorker.LastFullCycleAt),
@@ -504,7 +540,11 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	identity := identityFromContext(r.Context())
 	s.writeAudit(r.Context(), identity, "logout", "session", "", map[string]any{}, s.requestIP(r))
-	s.auth.Logout(w, r)
+	if err := s.auth.Logout(w, r); err != nil {
+		slog.Error("admin logout failed", "admin_id", identity.ID, "err", err)
+		writeAPIError(w, http.StatusServiceUnavailable, "Не удалось завершить сессию")
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -808,9 +848,11 @@ func (s *Server) handleSyncSource(w http.ResponseWriter, r *http.Request) {
 	identity := identityFromContext(r.Context())
 	ipAddress := s.requestIP(r)
 	s.writeAudit(r.Context(), identity, "sync_requested", "data_source", sourceID, map[string]any{}, ipAddress)
+	s.backgroundWG.Add(1)
 	go func() {
+		defer s.backgroundWG.Done()
 		defer s.finishSync(sourceID)
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		ctx, cancel := context.WithTimeout(s.backgroundCtx, 30*time.Minute)
 		defer cancel()
 		records, err := s.parser.RunDataSourceManual(ctx, sourceID)
 		details := map[string]any{"records": records}
@@ -822,7 +864,9 @@ func (s *Server) handleSyncSource(w http.ResponseWriter, r *http.Request) {
 		} else {
 			slog.Info("admin manual sync complete", "source", sourceID, "records", records)
 		}
-		s.writeAudit(context.Background(), identity, action, "data_source", sourceID, details, ipAddress)
+		auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer auditCancel()
+		s.writeAudit(auditCtx, identity, action, "data_source", sourceID, details, ipAddress)
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "started", "source_id": sourceID})
 }

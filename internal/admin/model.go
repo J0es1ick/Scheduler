@@ -91,6 +91,9 @@ type OperationalHealth struct {
 	FailedOutbox          int                 `json:"failed_outbox" db:"failed_outbox"`
 	PendingConnectorRuns  int                 `json:"pending_connector_runs" db:"pending_connector_runs"`
 	FailedConnectorRuns   int                 `json:"failed_connector_runs" db:"failed_connector_runs"`
+	DatabaseBytes         int64               `json:"database_bytes" db:"database_bytes"`
+	ConnectorPayloadBytes int64               `json:"connector_payload_bytes" db:"connector_payload_bytes"`
+	SnapshotPayloadBytes  int64               `json:"snapshot_payload_bytes" db:"snapshot_payload_bytes"`
 	OldestPendingSeconds  int64               `json:"oldest_pending_seconds" db:"oldest_pending_seconds"`
 	LastSuccessfulParseAt *time.Time          `json:"last_successful_parse_at" db:"last_successful_parse_at"`
 	ReminderWorker        domain.WorkerStatus `json:"reminder_worker"`

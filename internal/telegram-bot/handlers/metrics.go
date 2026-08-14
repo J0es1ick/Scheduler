@@ -70,6 +70,12 @@ func formatServiceMetrics(metrics *domain.ServiceMetrics) string {
 		fmt.Sprintf("Вузы: %d", metrics.Universities),
 		fmt.Sprintf("Группы: %d", metrics.Groups),
 		fmt.Sprintf("Занятия: %d", metrics.Lessons),
+		fmt.Sprintf(
+			"Хранилище: БД %s, таблица снимков %s, таблица загрузок коннекторов %s",
+			formatMetricBytes(metrics.DatabaseBytes),
+			formatMetricBytes(metrics.SnapshotPayloadBytes),
+			formatMetricBytes(metrics.ConnectorPayloadBytes),
+		),
 		"",
 		fmt.Sprintf(
 			"Источники: %d всего, %d в норме, %d обновляются, %d устарели, %d с ошибкой, %d в карантине, %d отключено — %s",
@@ -100,4 +106,18 @@ func formatServiceMetrics(metrics *domain.ServiceMetrics) string {
 		lines = append(lines, "Последняя ошибка напоминаний: "+metrics.ReminderWorker.LastError)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func formatMetricBytes(value int64) string {
+	const unit = int64(1024)
+	if value < unit {
+		return fmt.Sprintf("%d Б", value)
+	}
+	if value < unit*unit {
+		return fmt.Sprintf("%.1f КиБ", float64(value)/float64(unit))
+	}
+	if value < unit*unit*unit {
+		return fmt.Sprintf("%.1f МиБ", float64(value)/float64(unit*unit))
+	}
+	return fmt.Sprintf("%.1f ГиБ", float64(value)/float64(unit*unit*unit))
 }

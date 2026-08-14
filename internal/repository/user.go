@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -238,12 +240,41 @@ func (r *UserRepository) SetQuietHours(
 }
 
 func (r *UserRepository) DeleteUser(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, id)
+	randomMarker := make([]byte, 16)
+	if _, err := rand.Read(randomMarker); err != nil {
+		return fmt.Errorf("delete user %s: generate anonymous marker: %w", id, err)
+	}
+	anonymizedID := "deleted:" + hex.EncodeToString(randomMarker)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("delete user %s: begin: %w", id, err)
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `DELETE FROM admin_sessions WHERE admin_id=$1`, id); err != nil {
+		return fmt.Errorf("delete user %s: revoke admin sessions: %w", id, err)
+	}
+	statements := []string{
+		`UPDATE admin_audit_logs SET actor_id=$2, actor_name='Удалённый пользователь', ip_address='' WHERE actor_id=$1`,
+		`UPDATE chat_schedule_profiles SET configured_by=$2 WHERE configured_by=$1`,
+		`UPDATE lesson_overrides SET created_by=$2 WHERE created_by=$1`,
+		`UPDATE support_requests SET reviewed_by=$2 WHERE reviewed_by=$1`,
+		`UPDATE parser_snapshots SET reviewed_by=$2 WHERE reviewed_by=$1`,
+		`UPDATE connector_clients SET created_by=$2 WHERE created_by=$1`,
+	}
+	for _, statement := range statements {
+		if _, err = tx.ExecContext(ctx, statement, id, anonymizedID); err != nil {
+			return fmt.Errorf("delete user %s: anonymize references: %w", id, err)
+		}
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("delete user %s: %w", id, err)
 	}
 	if rows, _ := result.RowsAffected(); rows == 0 {
 		return sql.ErrNoRows
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("delete user %s: commit: %w", id, err)
 	}
 	return nil
 }
@@ -258,6 +289,9 @@ func (r *UserRepository) ExportUserData(ctx context.Context, id string) (*domain
 		User:            *user,
 		Subscriptions:   []domain.Subscription{},
 		SupportRequests: []domain.SupportRequest{},
+		AuditRecords:    []domain.PersonalAuditRecord{},
+		AdminSessions:   []domain.PersonalAdminSession{},
+		References:      []domain.PersonalDataReference{},
 	}
 	if err = r.db.SelectContext(ctx, &result.Subscriptions, `
 		SELECT id, user_id, object_id, object_type, created_at, updated_at
@@ -273,6 +307,49 @@ func (r *UserRepository) ExportUserData(ctx context.Context, id string) (*domain
 		WHERE user_id=$1
 		ORDER BY created_at`, id); err != nil {
 		return nil, fmt.Errorf("export support requests for user %s: %w", id, err)
+	}
+	if err = r.db.SelectContext(ctx, &result.AuditRecords, `
+		SELECT id, actor_name, action, object_type, object_id, details,
+		       ip_address, created_at
+		FROM admin_audit_logs
+		WHERE actor_id=$1
+		ORDER BY created_at`, id); err != nil {
+		return nil, fmt.Errorf("export audit records for user %s: %w", id, err)
+	}
+	if err = r.db.SelectContext(ctx, &result.AdminSessions, `
+		SELECT name, auth_method, admin_role, expires_at, created_at, last_seen_at
+		FROM admin_sessions
+		WHERE admin_id=$1
+		ORDER BY created_at`, id); err != nil {
+		return nil, fmt.Errorf("export admin sessions for user %s: %w", id, err)
+	}
+	if err = r.db.SelectContext(ctx, &result.References, `
+		SELECT category, object_id, relationship, created_at
+		FROM (
+			SELECT 'admin_audit' AS category, audit.id AS object_id,
+				'actor_id' AS relationship, audit.created_at
+			FROM admin_audit_logs audit WHERE audit.actor_id=$1
+			UNION ALL
+			SELECT 'admin_session', '', 'admin_id', session.created_at
+			FROM admin_sessions session WHERE session.admin_id=$1
+			UNION ALL
+			SELECT 'chat_schedule_profile', profile.chat_id, 'configured_by', profile.created_at
+			FROM chat_schedule_profiles profile WHERE profile.configured_by=$1
+			UNION ALL
+			SELECT 'lesson_override', override.id, 'created_by', override.created_at
+			FROM lesson_overrides override WHERE override.created_by=$1
+			UNION ALL
+			SELECT 'support_review', request.id, 'reviewed_by', request.created_at
+			FROM support_requests request WHERE request.reviewed_by=$1
+			UNION ALL
+			SELECT 'parser_snapshot_review', snapshot.id, 'reviewed_by', snapshot.created_at
+			FROM parser_snapshots snapshot WHERE snapshot.reviewed_by=$1
+			UNION ALL
+			SELECT 'connector', connector.id, 'created_by', connector.created_at
+			FROM connector_clients connector WHERE connector.created_by=$1
+		) personal_references
+		ORDER BY created_at, category`, id); err != nil {
+		return nil, fmt.Errorf("export references for user %s: %w", id, err)
 	}
 	return result, nil
 }

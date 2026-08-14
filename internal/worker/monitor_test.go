@@ -21,6 +21,13 @@ func TestMonitorDetectsStoppedAndStaleWorkers(t *testing.T) {
 	if !monitor.Checks()[ParserWorkerName] {
 		t.Fatal("started worker reported unready")
 	}
+	monitor.Degraded(ParserWorkerName, assertError("schedule site unavailable"))
+	if !monitor.Checks()[ParserWorkerName] {
+		t.Fatal("worker degraded by an external source reported unready")
+	}
+	if !monitor.DegradedChecks()[ParserWorkerName] {
+		t.Fatal("external source degradation was not exposed")
+	}
 	monitor.Failed(ParserWorkerName, assertError("database unavailable"))
 	if monitor.Checks()[ParserWorkerName] {
 		t.Fatal("worker with a newer failed pass reported ready")
@@ -28,6 +35,9 @@ func TestMonitorDetectsStoppedAndStaleWorkers(t *testing.T) {
 	monitor.Succeeded(ParserWorkerName)
 	if !monitor.Checks()[ParserWorkerName] {
 		t.Fatal("worker did not recover after a successful pass")
+	}
+	if monitor.DegradedChecks()[ParserWorkerName] {
+		t.Fatal("successful pass did not clear degraded state")
 	}
 	now = now.Add(2 * time.Minute)
 	if monitor.Checks()[ParserWorkerName] {

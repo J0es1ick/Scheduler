@@ -19,7 +19,7 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
-	cfg, err := config.InitConfig()
+	cfg, err := config.InitWorkerConfig()
 	if err != nil {
 		logger.Error("config init failed", "err", err)
 		os.Exit(1)
@@ -35,6 +35,10 @@ func main() {
 	defer cancel()
 	if err = database.ApplyMigrations(ctx, db.DB); err != nil {
 		logger.Error("database migrations failed", "err", err)
+		os.Exit(1)
+	}
+	if _, err = repository.NewParserSnapshotRepository(db.DB).ReconcilePendingPublications(ctx); err != nil {
+		logger.Error("publication reconciliation failed", "err", err)
 		os.Exit(1)
 	}
 

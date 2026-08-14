@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -145,6 +146,48 @@ func TestSessionStoreIsBounded(t *testing.T) {
 	}
 	if len(auth.sessions) != 2 {
 		t.Fatalf("sessions = %d, want 2", len(auth.sessions))
+	}
+}
+
+type failingDeleteSessionStore struct {
+	identity AdminIdentity
+	expires  time.Time
+}
+
+func (s *failingDeleteSessionStore) SaveAdminSession(
+	_ context.Context, _ string, identity AdminIdentity, expires time.Time, _ int,
+) error {
+	s.identity = identity
+	s.expires = expires
+	return nil
+}
+
+func (s *failingDeleteSessionStore) AdminSession(
+	context.Context, string,
+) (AdminIdentity, time.Time, error) {
+	return s.identity, s.expires, nil
+}
+
+func (*failingDeleteSessionStore) DeleteAdminSession(context.Context, string) error {
+	return errors.New("database unavailable")
+}
+
+func TestLogoutDoesNotPretendSuccessWhenSessionRevocationFails(t *testing.T) {
+	auth := NewAuthManager("bot-token", "access-key", true, true)
+	store := &failingDeleteSessionStore{}
+	auth.UseSessionStore(store)
+	login := httptest.NewRecorder()
+	if _, err := auth.IssueSession(login, AdminIdentity{ID: "42"}); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	request.AddCookie(login.Result().Cookies()[0])
+	response := httptest.NewRecorder()
+	if err := auth.Logout(response, request); err == nil {
+		t.Fatal("logout hid server-side revocation failure")
+	}
+	if cookies := response.Result().Cookies(); len(cookies) != 0 {
+		t.Fatalf("browser cookie was cleared despite failed revocation: %+v", cookies)
 	}
 }
 

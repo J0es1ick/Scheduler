@@ -19,6 +19,9 @@ type ServiceMetrics struct {
 	FailedNotifications   int        `db:"failed_notifications"`
 	PendingOutbox         int        `db:"pending_outbox"`
 	FailedOutbox          int        `db:"failed_outbox"`
+	DatabaseBytes         int64      `db:"database_bytes"`
+	ConnectorPayloadBytes int64      `db:"connector_payload_bytes"`
+	SnapshotPayloadBytes  int64      `db:"snapshot_payload_bytes"`
 	LastSuccessfulParseAt *time.Time `db:"last_successful_parse_at"`
 	ReminderWorker        WorkerStatus
 	CheckedAt             time.Time

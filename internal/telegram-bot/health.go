@@ -19,6 +19,10 @@ type workerReadiness interface {
 	Checks() map[string]bool
 }
 
+type workerDegradation interface {
+	DegradedChecks() map[string]bool
+}
+
 type Health struct {
 	database           databasePinger
 	polling            atomic.Bool
@@ -82,6 +86,10 @@ func (h *Health) ready(w http.ResponseWriter, request *http.Request) {
 			checks["worker_"+name] = ready
 		}
 	}
+	degraded := map[string]bool{}
+	if workers, ok := h.workers.(workerDegradation); ok {
+		degraded = workers.DegradedChecks()
+	}
 
 	status := http.StatusOK
 	for _, passed := range checks {
@@ -90,9 +98,18 @@ func (h *Health) ready(w http.ResponseWriter, request *http.Request) {
 			break
 		}
 	}
+	state := "not_ready"
+	if status == http.StatusOK {
+		state = "ready"
+		for _, value := range degraded {
+			if value {
+				state = "degraded"
+				break
+			}
+		}
+	}
 	writeHealthJSON(w, status, map[string]any{
-		"status": map[bool]string{true: "ready", false: "not_ready"}[status == http.StatusOK],
-		"checks": checks,
+		"status": state,
 	})
 }
 

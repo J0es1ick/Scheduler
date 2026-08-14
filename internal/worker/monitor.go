@@ -20,6 +20,7 @@ type workerProbe struct {
 	lastError     string
 	hasResult     bool
 	lastResultOK  bool
+	degraded      bool
 	maxSilence    time.Duration
 }
 
@@ -77,6 +78,8 @@ func (m *Monitor) Succeeded(name string) {
 	probe.lastSuccess = m.now()
 	probe.hasResult = true
 	probe.lastResultOK = true
+	probe.degraded = false
+	probe.lastError = ""
 	m.workers[name] = probe
 	m.mu.Unlock()
 }
@@ -90,10 +93,30 @@ func (m *Monitor) Failed(name string, err error) {
 	probe.lastFailure = m.now()
 	probe.hasResult = true
 	probe.lastResultOK = false
+	probe.degraded = false
 	if err != nil {
 		probe.lastError = err.Error()
 	} else {
 		probe.lastError = "worker pass failed"
+	}
+	m.workers[name] = probe
+	m.mu.Unlock()
+}
+
+func (m *Monitor) Degraded(name string, err error) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	probe := m.workers[name]
+	probe.lastFailure = m.now()
+	probe.hasResult = true
+	probe.lastResultOK = true
+	probe.degraded = true
+	if err != nil {
+		probe.lastError = err.Error()
+	} else {
+		probe.lastError = "external dependency degraded"
 	}
 	m.workers[name] = probe
 	m.mu.Unlock()
@@ -129,6 +152,19 @@ func (m *Monitor) Checks() map[string]bool {
 	for name, probe := range m.workers {
 		result[name] = probe.running && probe.hasResult && probe.lastResultOK &&
 			!probe.lastHeartbeat.IsZero() && now.Sub(probe.lastHeartbeat) <= probe.maxSilence
+	}
+	return result
+}
+
+func (m *Monitor) DegradedChecks() map[string]bool {
+	result := make(map[string]bool)
+	if m == nil {
+		return result
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for name, probe := range m.workers {
+		result[name] = probe.degraded
 	}
 	return result
 }

@@ -120,6 +120,17 @@ func TestSignedSnapshotIntakeAndStaging(t *testing.T) {
 	if _, err = snapshots.Publish(ctx, oldSnapshotID, "integration", "initial live schedule"); err != nil {
 		t.Fatal(err)
 	}
+	manualOverrideID := "manual-override-" + suffix
+	if _, err = db.ExecContext(ctx, `
+		INSERT INTO lesson_overrides (
+			id, university_id, semester_id, day_of_week, time_start, time_end,
+			week_type, subject, type, group_id, valid_from, valid_to, created_by
+		) VALUES ($1,$2,$3,3,'12:00','13:30','every',$4,'practice',$5,$6,$7,$8)`,
+		manualOverrideID, universityID, oldSemesterID, "Manual consultation",
+		oldGroupID, periodStart, periodEnd, "integration",
+	); err != nil {
+		t.Fatalf("create manual override: %v", err)
+	}
 	if err = repo.UpdateStatus(ctx, connectorID, domain.ConnectorStatusTesting); err != nil {
 		t.Fatal(err)
 	}
@@ -192,12 +203,54 @@ func TestSignedSnapshotIntakeAndStaging(t *testing.T) {
 	if lessonsBeforeActivation != 1 {
 		t.Fatalf("approved snapshot changed live schedule: lessons=%d, want old lesson", lessonsBeforeActivation)
 	}
-	activated, err := parser.ActivateConnector(
-		ctx, connectorID, candidate.ID, "integration", "activate approved source",
-	)
-	if err != nil {
-		t.Fatalf("activate connector snapshot: %v", err)
+	oldPublicationEntered := make(chan struct{})
+	releaseOldPublication := make(chan struct{})
+	oldPublicationDone := make(chan error, 1)
+	go func() {
+		_, publishErr := snapshots.PublishWithHook(
+			ctx, oldSnapshotID, "integration", "concurrent old publication",
+			func(hookCtx context.Context, _ *repository.SnapshotPublication) error {
+				close(oldPublicationEntered)
+				select {
+				case <-releaseOldPublication:
+					return nil
+				case <-hookCtx.Done():
+					return hookCtx.Err()
+				}
+			},
+		)
+		oldPublicationDone <- publishErr
+	}()
+	select {
+	case <-oldPublicationEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("concurrent old publication did not acquire the university lock")
 	}
+	type activationResult struct {
+		snapshot *domain.ParserSnapshot
+		err      error
+	}
+	activationDone := make(chan activationResult, 1)
+	go func() {
+		activated, activateErr := parser.ActivateConnector(
+			ctx, connectorID, candidate.ID, "integration", "activate approved source",
+		)
+		activationDone <- activationResult{snapshot: activated, err: activateErr}
+	}()
+	select {
+	case result := <-activationDone:
+		t.Fatalf("connector activation bypassed the publication lock: %v", result.err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	close(releaseOldPublication)
+	if publishErr := <-oldPublicationDone; publishErr != nil {
+		t.Fatalf("concurrent old publication failed before source switch: %v", publishErr)
+	}
+	result := <-activationDone
+	if result.err != nil {
+		t.Fatalf("activate connector snapshot: %v", result.err)
+	}
+	activated := result.snapshot
 	var nameAfterActivation string
 	if err = db.GetContext(ctx, &nameAfterActivation,
 		`SELECT name FROM universities WHERE id=$1`, universityID); err != nil {
@@ -218,6 +271,15 @@ func TestSignedSnapshotIntakeAndStaging(t *testing.T) {
 	if oldLifecycle != domain.ConnectorStatusSuspended || newLifecycle != domain.ConnectorStatusActive {
 		t.Fatalf("source switch was not atomic: old=%s new=%s", oldLifecycle, newLifecycle)
 	}
+	var manualOverrides int
+	if err = db.GetContext(ctx, &manualOverrides,
+		`SELECT COUNT(*)::int FROM effective_lessons WHERE id=$1 AND origin='manual'`,
+		manualOverrideID); err != nil {
+		t.Fatal(err)
+	}
+	if manualOverrides != 1 {
+		t.Fatalf("source switch removed manual override: count=%d", manualOverrides)
+	}
 	if _, err = snapshots.Publish(ctx, oldSnapshotID, "integration", "stale retry"); err == nil {
 		t.Fatal("suspended source was allowed to overwrite the active schedule")
 	}
@@ -233,6 +295,128 @@ func TestSignedSnapshotIntakeAndStaging(t *testing.T) {
 	if err != nil || len(evenWeek) != 0 {
 		t.Fatalf("even week schedule: lessons=%d err=%v", len(evenWeek), err)
 	}
+	if _, err = db.ExecContext(ctx, `DELETE FROM lessons WHERE university_id=$1`, universityID); err != nil {
+		t.Fatalf("simulate damaged live schedule: %v", err)
+	}
+	if _, err = db.ExecContext(ctx, `
+		UPDATE data_sources
+		SET last_error='temporary upstream failure', consecutive_failures=3,
+		    next_retry_at=NOW() + INTERVAL '15 minutes'
+		WHERE id=$1`, sourceID); err != nil {
+		t.Fatalf("put active source into backoff before reconciliation: %v", err)
+	}
+	var sourceHistoryBefore struct {
+		LastSuccessAt      *time.Time `db:"last_success_at"`
+		LastRunAt          *time.Time `db:"last_run_at"`
+		LastError          string     `db:"last_error"`
+		ConsecutiveFailure int        `db:"consecutive_failures"`
+		NextRetryAt        *time.Time `db:"next_retry_at"`
+		UpdatedAt          time.Time  `db:"updated_at"`
+		PublishedAt        time.Time  `db:"published_at"`
+	}
+	if err = db.GetContext(ctx, &sourceHistoryBefore, `
+		SELECT source.last_success_at, source.last_run_at, source.last_error,
+		       source.consecutive_failures, source.next_retry_at, source.updated_at,
+		       snapshot.published_at
+		FROM data_sources source
+		JOIN parser_snapshots snapshot ON snapshot.id=source.current_snapshot_id
+		WHERE source.id=$1`, sourceID); err != nil {
+		t.Fatalf("load source history before reconciliation: %v", err)
+	}
+	if _, err = db.ExecContext(ctx, `
+		INSERT INTO publication_reconciliation_queue (university_id, snapshot_id, reason)
+		VALUES ($1,$2,'integration recovery test')
+		ON CONFLICT (university_id) DO UPDATE SET
+			snapshot_id=EXCLUDED.snapshot_id, reason=EXCLUDED.reason,
+			attempts=0, claim_token='', claimed_at=NULL, last_error=''`,
+		universityID, candidate.ID,
+	); err != nil {
+		t.Fatalf("queue publication reconciliation: %v", err)
+	}
+	type reconciliationResult struct {
+		count int
+		err   error
+	}
+	reconciliations := make(chan reconciliationResult, 2)
+	for range 2 {
+		go func() {
+			count, reconcileErr := snapshots.ReconcilePendingPublications(ctx)
+			reconciliations <- reconciliationResult{count: count, err: reconcileErr}
+		}()
+	}
+	totalReconciled := 0
+	for range 2 {
+		result := <-reconciliations
+		if result.err != nil {
+			t.Fatalf("reconcile trusted publication concurrently: %v", result.err)
+		}
+		totalReconciled += result.count
+	}
+	if totalReconciled != 1 {
+		t.Fatalf("concurrent reconciliation count=%d, want exactly one publication", totalReconciled)
+	}
+	var restoredLessons, preservedOverrides int
+	if err = db.GetContext(ctx, &restoredLessons,
+		`SELECT COUNT(*)::int FROM lessons WHERE university_id=$1`, universityID); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.GetContext(ctx, &preservedOverrides,
+		`SELECT COUNT(*)::int FROM effective_lessons WHERE id=$1 AND origin='manual'`,
+		manualOverrideID); err != nil {
+		t.Fatal(err)
+	}
+	if restoredLessons != 1 || preservedOverrides != 1 {
+		t.Fatalf(
+			"reconciliation result: parsed lessons=%d manual overrides=%d",
+			restoredLessons, preservedOverrides,
+		)
+	}
+	var sourceHistoryAfter struct {
+		LastSuccessAt      *time.Time `db:"last_success_at"`
+		LastRunAt          *time.Time `db:"last_run_at"`
+		LastError          string     `db:"last_error"`
+		ConsecutiveFailure int        `db:"consecutive_failures"`
+		NextRetryAt        *time.Time `db:"next_retry_at"`
+		UpdatedAt          time.Time  `db:"updated_at"`
+		PublishedAt        time.Time  `db:"published_at"`
+	}
+	if err = db.GetContext(ctx, &sourceHistoryAfter, `
+		SELECT source.last_success_at, source.last_run_at, source.last_error,
+		       source.consecutive_failures, source.next_retry_at, source.updated_at,
+		       snapshot.published_at
+		FROM data_sources source
+		JOIN parser_snapshots snapshot ON snapshot.id=source.current_snapshot_id
+		WHERE source.id=$1`, sourceID); err != nil {
+		t.Fatalf("load source history after reconciliation: %v", err)
+	}
+	if !optionalTimesEqual(sourceHistoryBefore.LastSuccessAt, sourceHistoryAfter.LastSuccessAt) ||
+		!optionalTimesEqual(sourceHistoryBefore.LastRunAt, sourceHistoryAfter.LastRunAt) ||
+		sourceHistoryBefore.LastError != sourceHistoryAfter.LastError ||
+		sourceHistoryBefore.ConsecutiveFailure != sourceHistoryAfter.ConsecutiveFailure ||
+		!optionalTimesEqual(sourceHistoryBefore.NextRetryAt, sourceHistoryAfter.NextRetryAt) ||
+		!sourceHistoryBefore.UpdatedAt.Equal(sourceHistoryAfter.UpdatedAt) ||
+		!sourceHistoryBefore.PublishedAt.Equal(sourceHistoryAfter.PublishedAt) {
+		t.Fatalf(
+			"reconciliation changed parser history: before=%+v after=%+v",
+			sourceHistoryBefore, sourceHistoryAfter,
+		)
+	}
+	var remainingReconciliations int
+	if err = db.GetContext(ctx, &remainingReconciliations,
+		`SELECT COUNT(*)::int FROM publication_reconciliation_queue WHERE university_id=$1`,
+		universityID); err != nil {
+		t.Fatal(err)
+	}
+	if remainingReconciliations != 0 {
+		t.Fatalf("completed reconciliation was retained: count=%d", remainingReconciliations)
+	}
+}
+
+func optionalTimesEqual(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.Equal(*right)
 }
 
 func TestConnectorActivationRollsBackOnPublicationFailure(t *testing.T) {

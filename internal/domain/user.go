@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type User struct {
 	ID                   string    `db:"id" json:"id"`
@@ -18,8 +21,38 @@ type User struct {
 }
 
 type UserDataExport struct {
-	ExportedAt      time.Time        `json:"exported_at"`
-	User            User             `json:"user"`
-	Subscriptions   []Subscription   `json:"subscriptions"`
-	SupportRequests []SupportRequest `json:"support_requests"`
+	ExportedAt      time.Time               `json:"exported_at"`
+	User            User                    `json:"user"`
+	Subscriptions   []Subscription          `json:"subscriptions"`
+	SupportRequests []SupportRequest        `json:"support_requests"`
+	AuditRecords    []PersonalAuditRecord   `json:"audit_records"`
+	AdminSessions   []PersonalAdminSession  `json:"admin_sessions"`
+	References      []PersonalDataReference `json:"references"`
+}
+
+type PersonalAuditRecord struct {
+	ID         string          `db:"id" json:"id"`
+	ActorName  string          `db:"actor_name" json:"actor_name"`
+	Action     string          `db:"action" json:"action"`
+	ObjectType string          `db:"object_type" json:"object_type"`
+	ObjectID   string          `db:"object_id" json:"object_id"`
+	Details    json.RawMessage `db:"details" json:"details"`
+	IPAddress  string          `db:"ip_address" json:"ip_address"`
+	CreatedAt  time.Time       `db:"created_at" json:"created_at"`
+}
+
+type PersonalAdminSession struct {
+	Name       string    `db:"name" json:"name"`
+	AuthMethod string    `db:"auth_method" json:"auth_method"`
+	AdminRole  string    `db:"admin_role" json:"admin_role"`
+	ExpiresAt  time.Time `db:"expires_at" json:"expires_at"`
+	CreatedAt  time.Time `db:"created_at" json:"created_at"`
+	LastSeenAt time.Time `db:"last_seen_at" json:"last_seen_at"`
+}
+
+type PersonalDataReference struct {
+	Category     string    `db:"category" json:"category"`
+	ObjectID     string    `db:"object_id" json:"object_id,omitempty"`
+	Relationship string    `db:"relationship" json:"relationship"`
+	CreatedAt    time.Time `db:"created_at" json:"created_at"`
 }

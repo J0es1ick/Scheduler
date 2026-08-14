@@ -45,6 +45,9 @@ func (r *MetricsRepository) Get(ctx context.Context) (*domain.ServiceMetrics, er
 				WHERE status='pending') AS pending_outbox,
 			(SELECT COUNT(*)::int FROM bot_outbox
 				WHERE status='failed') AS failed_outbox,
+			pg_database_size(current_database()) AS database_bytes,
+			pg_total_relation_size('connector_ingestion_runs'::regclass) AS connector_payload_bytes,
+			pg_total_relation_size('parser_snapshots'::regclass) AS snapshot_payload_bytes,
 			(SELECT MAX(finished_at) FROM parse_logs
 				WHERE status='success') AS last_successful_parse_at`); err != nil {
 		return nil, fmt.Errorf("load service metrics: %w", err)

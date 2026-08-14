@@ -14,6 +14,7 @@ import (
 type Config struct {
 	BotToken                 string         `mapstructure:"BOT_TOKEN"`
 	BotUsername              string         `mapstructure:"BOT_USERNAME"`
+	BotTelegramAPIURL        string         `mapstructure:"BOT_TELEGRAM_API_URL"`
 	BotHealthPort            string         `mapstructure:"BOT_HEALTH_PORT"`
 	BotMaxConcurrentHandlers int            `mapstructure:"BOT_MAX_CONCURRENT_HANDLERS"`
 	BotMaxPendingPerSender   int            `mapstructure:"BOT_MAX_PENDING_PER_SENDER"`
@@ -67,10 +68,17 @@ func InitAdminConfig() (*Config, error) {
 	if isPlaceholderSecret(cfg.Admin.MetricsToken) {
 		return nil, errors.New("config: validation: ADMIN_METRICS_TOKEN still contains a placeholder value")
 	}
+	if len(cfg.Admin.MetricsToken) < 32 {
+		return nil, errors.New("config: validation: ADMIN_METRICS_TOKEN must contain at least 32 characters")
+	}
 	return cfg, nil
 }
 
 func InitSiteConfig() (*Config, error) {
+	return initConfig(false)
+}
+
+func InitWorkerConfig() (*Config, error) {
 	return initConfig(false)
 }
 
@@ -98,6 +106,7 @@ func initConfig(requireBotToken bool) (*Config, error) {
 	for _, key := range []string{
 		"BOT_TOKEN",
 		"BOT_USERNAME",
+		"BOT_TELEGRAM_API_URL",
 		"BOT_HEALTH_PORT",
 		"BOT_MAX_CONCURRENT_HANDLERS",
 		"BOT_MAX_PENDING_PER_SENDER",
@@ -178,8 +187,18 @@ func (c *Config) validate(requireBotToken bool) error {
 	if requireBotToken && isPlaceholderSecret(c.BotToken) {
 		return errors.New("BOT_TOKEN still contains a placeholder value")
 	}
+	if c.BotTelegramAPIURL != "" {
+		parsed, err := url.Parse(c.BotTelegramAPIURL)
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return errors.New("BOT_TELEGRAM_API_URL must be an absolute HTTP(S) URL")
+		}
+		c.BotTelegramAPIURL = strings.TrimRight(c.BotTelegramAPIURL, "/")
+	}
 	if isPlaceholderSecret(c.Database.Password) {
 		return errors.New("DATABASE_PASSWORD still contains a placeholder value")
+	}
+	if len(c.Database.Password) < 16 {
+		return errors.New("DATABASE_PASSWORD must contain at least 16 characters")
 	}
 	sslMode := strings.ToLower(strings.TrimSpace(c.Database.SSLMode))
 	allowedSSLModes := map[string]bool{
@@ -229,6 +248,9 @@ func (c *Config) validate(requireBotToken bool) error {
 	}
 	if c.Admin.AccessKeyLoginEnabled && isPlaceholderSecret(c.Admin.AccessToken) {
 		return errors.New("ADMIN_ACCESS_TOKEN still contains a placeholder value")
+	}
+	if c.Admin.AccessKeyLoginEnabled && len(c.Admin.AccessToken) < 32 {
+		return errors.New("ADMIN_ACCESS_TOKEN must contain at least 32 characters when access-key login is enabled")
 	}
 	if c.BotMaxConcurrentHandlers <= 0 {
 		return errors.New("BOT_MAX_CONCURRENT_HANDLERS must be greater than zero")

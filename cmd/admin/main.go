@@ -65,13 +65,24 @@ func main() {
 	groupRepo := repository.NewGroupRepository(db.DB)
 	lessonRepo := repository.NewLessonRepository(db.DB)
 	semesterRepo := repository.NewSemesterRepository(db.DB)
+	snapshotRepo := repository.NewParserSnapshotRepository(db.DB)
+	reconciliationCtx, reconciliationCancel := context.WithTimeout(context.Background(), 45*time.Minute)
+	reconciled, err := snapshotRepo.ReconcilePendingPublications(reconciliationCtx)
+	reconciliationCancel()
+	if err != nil {
+		logger.Error("publication reconciliation failed", "err", err)
+		os.Exit(1)
+	}
+	if reconciled > 0 {
+		logger.Info("trusted publications restored", "universities", reconciled)
+	}
 	scheduleService := service.NewScheduleService(lessonRepo, semesterRepo, groupRepo)
 	parserService := service.NewParserService(
 		repository.NewDataSourceRepository(db.DB),
 		repository.NewParseLogRepository(db.DB),
 		groupRepo,
 		scheduleService,
-		repository.NewParserSnapshotRepository(db.DB),
+		snapshotRepo,
 		repository.NewNotificationRepository(db.DB),
 		repository.NewParserDiagnosticRepository(db.DB),
 	)
@@ -126,6 +137,7 @@ func main() {
 
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	adminServer.UseBackgroundContext(rootCtx)
 	connectorDone := worker.NewConnectorWorker(connectorService, 2*time.Second).Start(rootCtx, workerMonitor)
 	serverErrors := make(chan error, 1)
 	go func() {
@@ -148,6 +160,9 @@ func main() {
 	defer shutdownCancel()
 	if err = httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("admin graceful shutdown failed", "err", err)
+	}
+	if err = adminServer.WaitBackground(shutdownCtx); err != nil {
+		logger.Warn("admin background work did not stop before deadline", "err", err)
 	}
 	select {
 	case <-connectorDone:

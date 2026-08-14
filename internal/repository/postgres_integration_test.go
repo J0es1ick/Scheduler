@@ -4,7 +4,9 @@ package repository_test
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -157,6 +159,157 @@ func TestPostgresRepositoryFlow(t *testing.T) {
 	if baseline.CurrentSnapshot != snapshotID || baseline.TrustedSnapshot == nil ||
 		baseline.LessonCount != 1 || baseline.LessonsByGroup[groupID] != 1 {
 		t.Fatalf("baseline was not restored from the trusted snapshot: %+v", baseline)
+	}
+	rejectedSnapshot := *trustedSnapshot
+	rejectedSnapshot.ID = "integration-rejected-snapshot-" + suffix
+	rejectedSnapshot.Status = domain.SnapshotStatusStaged
+	if err = snapshots.Create(ctx, &rejectedSnapshot); err != nil {
+		t.Fatalf("create staged snapshot to reject: %v", err)
+	}
+	if err = snapshots.Reject(ctx, rejectedSnapshot.ID, "integration", "invalid test candidate"); err != nil {
+		t.Fatalf("reject staged snapshot: %v", err)
+	}
+	rejected, err := snapshots.Get(ctx, rejectedSnapshot.ID)
+	if err != nil || rejected == nil || rejected.Status != domain.SnapshotStatusRejected {
+		t.Fatalf("staged snapshot was not rejected: snapshot=%+v err=%v", rejected, err)
+	}
+	queuedSnapshotID := "integration-queued-snapshot-" + suffix
+	for index := range 22 {
+		candidate := *trustedSnapshot
+		candidate.ID = fmt.Sprintf("integration-retention-snapshot-%02d-%s", index, suffix)
+		candidate.Status = domain.SnapshotStatusStaged
+		if index == 0 {
+			candidate.ID = queuedSnapshotID
+		}
+		if err = snapshots.Create(ctx, &candidate); err != nil {
+			t.Fatalf("create retention snapshot %d: %v", index, err)
+		}
+	}
+	if _, err = db.ExecContext(ctx, `
+		INSERT INTO publication_reconciliation_queue (university_id, snapshot_id, reason)
+		VALUES ($1,$2,'retention integration test')`, universityID, queuedSnapshotID); err != nil {
+		t.Fatalf("queue snapshot protected from pruning: %v", err)
+	}
+	if err = snapshots.Prune(ctx, dataSourceID, snapshotID); err != nil {
+		t.Fatalf("prune snapshot history with a pending reconciliation: %v", err)
+	}
+	var queuedSnapshotExists bool
+	if err = db.GetContext(ctx, &queuedSnapshotExists,
+		`SELECT EXISTS (SELECT 1 FROM parser_snapshots WHERE id=$1)`, queuedSnapshotID); err != nil {
+		t.Fatal(err)
+	}
+	if !queuedSnapshotExists {
+		t.Fatal("pruning removed a snapshot required by pending reconciliation")
+	}
+	if _, err = db.ExecContext(ctx,
+		`DELETE FROM publication_reconciliation_queue WHERE university_id=$1`, universityID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ExecContext(ctx, `
+		INSERT INTO publication_reconciliation_queue (
+			university_id, snapshot_id, reason, claim_token, claimed_at
+		)
+		VALUES ($1,$2,'stale claim integration test','terminated-worker',
+		        NOW() - INTERVAL '31 minutes')`, universityID, snapshotID); err != nil {
+		t.Fatalf("queue reconciliation with a stale claim: %v", err)
+	}
+	reconciled, err := snapshots.ReconcilePendingPublications(ctx)
+	if err != nil {
+		t.Fatalf("reclaim stale publication reconciliation: %v", err)
+	}
+	if reconciled != 1 {
+		t.Fatalf("stale publication reconciliation count=%d, want 1", reconciled)
+	}
+	var restoredLessonExists bool
+	if err = db.GetContext(ctx, &restoredLessonExists,
+		`SELECT EXISTS (SELECT 1 FROM lessons WHERE id=$1)`, lessonID); err != nil {
+		t.Fatal(err)
+	}
+	if !restoredLessonExists {
+		t.Fatal("stale reconciliation claim did not restore the published schedule")
+	}
+
+	if _, err = db.ExecContext(ctx, `
+		INSERT INTO publication_reconciliation_queue (university_id, snapshot_id, reason)
+		VALUES ($1,$2,'failed recovery integration test')`, universityID, queuedSnapshotID); err != nil {
+		t.Fatalf("queue invalid publication reconciliation: %v", err)
+	}
+	reconciled, err = snapshots.ReconcilePendingPublications(ctx)
+	if err == nil {
+		t.Fatal("reconciliation of a non-published snapshot must fail")
+	}
+	if reconciled != 0 {
+		t.Fatalf("failed publication reconciliation count=%d, want 0", reconciled)
+	}
+	var failedClaim struct {
+		Attempts   int    `db:"attempts"`
+		ClaimToken string `db:"claim_token"`
+		LastError  string `db:"last_error"`
+	}
+	if err = db.GetContext(ctx, &failedClaim, `
+		SELECT attempts, claim_token, last_error
+		FROM publication_reconciliation_queue
+		WHERE university_id=$1`, universityID); err != nil {
+		t.Fatalf("load failed publication reconciliation: %v", err)
+	}
+	if failedClaim.Attempts != 1 || failedClaim.ClaimToken != "" || failedClaim.LastError == "" {
+		t.Fatalf("failed reconciliation was not released for retry: %+v", failedClaim)
+	}
+	if _, err = db.ExecContext(ctx,
+		`DELETE FROM publication_reconciliation_queue WHERE university_id=$1`, universityID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ExecContext(ctx, `
+		CREATE OR REPLACE FUNCTION integration_steal_publication_claim()
+		RETURNS trigger AS $$
+		BEGIN
+			UPDATE publication_reconciliation_queue
+			SET claim_token='stolen-by-integration-test'
+			WHERE snapshot_id=NEW.id AND reason='lost claim integration test';
+			RETURN NEW;
+		END;
+		$$ LANGUAGE plpgsql;
+		CREATE TRIGGER integration_steal_publication_claim
+		AFTER UPDATE ON parser_snapshots
+		FOR EACH ROW EXECUTE FUNCTION integration_steal_publication_claim()`); err != nil {
+		t.Fatalf("install lost-claim integration trigger: %v", err)
+	}
+	if _, err = db.ExecContext(ctx, `
+		INSERT INTO publication_reconciliation_queue (university_id, snapshot_id, reason)
+		VALUES ($1,$2,'lost claim integration test')`, universityID, snapshotID); err != nil {
+		t.Fatalf("queue lost-claim publication reconciliation: %v", err)
+	}
+	reconciled, err = snapshots.ReconcilePendingPublications(ctx)
+	if err == nil || !strings.Contains(err.Error(), "claim was lost") {
+		t.Fatalf("lost reconciliation claim was not detected: count=%d err=%v", reconciled, err)
+	}
+	if reconciled != 0 {
+		t.Fatalf("lost-claim publication reconciliation count=%d, want 0", reconciled)
+	}
+	var stolenClaim struct {
+		Attempts   int    `db:"attempts"`
+		ClaimToken string `db:"claim_token"`
+	}
+	if err = db.GetContext(ctx, &stolenClaim, `
+		SELECT attempts, claim_token
+		FROM publication_reconciliation_queue
+		WHERE university_id=$1`, universityID); err != nil {
+		t.Fatalf("load stolen publication reconciliation claim: %v", err)
+	}
+	if stolenClaim.Attempts != 1 || stolenClaim.ClaimToken != "stolen-by-integration-test" {
+		t.Fatalf("unexpected lost-claim state: %+v", stolenClaim)
+	}
+	if _, err = db.ExecContext(ctx,
+		`DROP TRIGGER integration_steal_publication_claim ON parser_snapshots`); err != nil {
+		t.Fatalf("remove lost-claim integration trigger: %v", err)
+	}
+	if _, err = db.ExecContext(ctx,
+		`DROP FUNCTION integration_steal_publication_claim()`); err != nil {
+		t.Fatalf("remove lost-claim integration function: %v", err)
+	}
+	if _, err = db.ExecContext(ctx,
+		`DELETE FROM publication_reconciliation_queue WHERE university_id=$1`, universityID); err != nil {
+		t.Fatalf("remove lost-claim integration queue item: %v", err)
 	}
 	if _, err = users.CreateUser(ctx, userID, "integration_user", false); err != nil {
 		t.Fatalf("create user: %v", err)

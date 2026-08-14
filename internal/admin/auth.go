@@ -158,10 +158,12 @@ func (a *AuthManager) IssueSession(w http.ResponseWriter, identity AdminIdentity
 	return identity, nil
 }
 
-func (a *AuthManager) Logout(w http.ResponseWriter, r *http.Request) {
+func (a *AuthManager) Logout(w http.ResponseWriter, r *http.Request) error {
 	if cookie, err := r.Cookie(adminSessionCookie); err == nil {
 		if a.persistence != nil {
-			_ = a.persistence.DeleteAdminSession(r.Context(), tokenHash(cookie.Value))
+			if err = a.persistence.DeleteAdminSession(r.Context(), tokenHash(cookie.Value)); err != nil {
+				return fmt.Errorf("delete admin session: %w", err)
+			}
 		} else {
 			a.mu.Lock()
 			delete(a.sessions, cookie.Value)
@@ -177,6 +179,7 @@ func (a *AuthManager) Logout(w http.ResponseWriter, r *http.Request) {
 		Secure:   a.cookieSecure,
 		SameSite: http.SameSiteStrictMode,
 	})
+	return nil
 }
 
 func (a *AuthManager) Require(store telegramAdminChecker, next http.Handler) http.Handler {
@@ -189,7 +192,10 @@ func (a *AuthManager) Require(store telegramAdminChecker, next http.Handler) htt
 		if identity.AuthMethod == "telegram" {
 			user, err := store.TelegramAdmin(r.Context(), identity.ID)
 			if errors.Is(err, sql.ErrNoRows) || (err == nil && (user == nil || !user.IsAdmin)) {
-				a.Logout(w, r)
+				if logoutErr := a.Logout(w, r); logoutErr != nil {
+					writeAPIError(w, http.StatusServiceUnavailable, "Не удалось отозвать сессию администратора")
+					return
+				}
 				writeAPIError(w, http.StatusForbidden, "Права администратора отозваны")
 				return
 			}

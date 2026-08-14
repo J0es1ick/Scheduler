@@ -20,7 +20,10 @@ var (
 	ErrConnectorRateLimit   = errors.New("connector rate limit exceeded")
 	ErrIngestionDuplicate   = errors.New("ingestion already exists")
 	ErrActiveSourceConflict = errors.New("another source is already active for this university")
+	ErrConnectorClaimLost   = errors.New("connector ingestion claim was lost")
 )
+
+const connectorIngestionLease = 2 * time.Minute
 
 type ConnectorRepository struct {
 	db *sqlx.DB
@@ -173,7 +176,15 @@ func (r *ConnectorRepository) UseNonce(ctx context.Context, connectorID, nonce s
 		return err
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, `DELETE FROM connector_request_nonces WHERE expires_at<NOW()`); err != nil {
+	if _, err = tx.ExecContext(ctx, `
+		SELECT pg_advisory_xact_lock(
+			hashtext('scheduler-connector-rate-limit'), hashtext($1)
+		)`, connectorID); err != nil {
+		return fmt.Errorf("lock connector rate limit %s: %w", connectorID, err)
+	}
+	if _, err = tx.ExecContext(ctx, `
+		DELETE FROM connector_request_nonces
+		WHERE connector_id=$1 AND expires_at<NOW()`, connectorID); err != nil {
 		return err
 	}
 	var recent int
@@ -236,6 +247,7 @@ const ingestionColumns = `
 	r.status, r.attempts, r.error_message,
 	COALESCE(r.parser_snapshot_id, '') AS parser_snapshot_id,
 	r.group_count, r.lesson_count, r.next_attempt_at, r.claimed_at,
+	r.claim_token, r.lease_expires_at,
 	r.received_at, r.completed_at`
 
 func (r *ConnectorRepository) Run(ctx context.Context, connectorID, runID string) (*domain.ConnectorIngestionRun, error) {
@@ -282,8 +294,10 @@ func (r *ConnectorRepository) ClaimNext(ctx context.Context) (*domain.ConnectorI
 	defer tx.Rollback()
 	if _, err = tx.ExecContext(ctx, `
 		UPDATE connector_ingestion_runs
-		SET status='received', claimed_at=NULL, next_attempt_at=NOW()
-		WHERE status='processing' AND claimed_at<NOW()-INTERVAL '10 minutes'`); err != nil {
+		SET status='received', claimed_at=NULL, claim_token='',
+			lease_expires_at=NULL, next_attempt_at=NOW()
+		WHERE status='processing'
+		  AND COALESCE(lease_expires_at, claimed_at + INTERVAL '2 minutes', NOW()-INTERVAL '1 second')<NOW()`); err != nil {
 		return nil, err
 	}
 	var id string
@@ -302,10 +316,12 @@ func (r *ConnectorRepository) ClaimNext(ctx context.Context) (*domain.ConnectorI
 	if err != nil {
 		return nil, err
 	}
+	claimToken := uuid.NewString()
 	if _, err = tx.ExecContext(ctx, `
 		UPDATE connector_ingestion_runs
-		SET status='processing', claimed_at=NOW(), attempts=attempts+1
-		WHERE id=$1`, id); err != nil {
+		SET status='processing', claimed_at=NOW(), attempts=attempts+1,
+			claim_token=$2, lease_expires_at=NOW()+($3 * INTERVAL '1 second')
+		WHERE id=$1`, id, claimToken, int(connectorIngestionLease/time.Second)); err != nil {
 		return nil, err
 	}
 	var run domain.ConnectorIngestionRun
@@ -323,28 +339,47 @@ func (r *ConnectorRepository) ClaimNext(ctx context.Context) (*domain.ConnectorI
 
 func (r *ConnectorRepository) Complete(
 	ctx context.Context,
-	runID, status, parserSnapshotID string,
+	runID, claimToken, status, parserSnapshotID string,
 	groupCount, lessonCount int,
 ) error {
-	_, err := r.db.ExecContext(ctx, `
+	return completeConnectorIngestion(
+		ctx, r.db, runID, claimToken, status, parserSnapshotID, groupCount, lessonCount,
+	)
+}
+
+func completeConnectorIngestion(
+	ctx context.Context,
+	executor sqlx.ExtContext,
+	runID, claimToken, status, parserSnapshotID string,
+	groupCount, lessonCount int,
+) error {
+	result, err := executor.ExecContext(ctx, `
 		WITH updated AS (
 			UPDATE connector_ingestion_runs
-			SET status=$2, parser_snapshot_id=NULLIF($3,''), group_count=$4,
-				lesson_count=$5, error_message='', completed_at=NOW(), claimed_at=NULL
-			WHERE id=$1
+			SET status=$3, parser_snapshot_id=NULLIF($4,''), group_count=$5,
+				lesson_count=$6, error_message='', completed_at=NOW(), claimed_at=NULL,
+				claim_token='', lease_expires_at=NULL
+			WHERE id=$1 AND claim_token=$2 AND status='processing'
+			  AND lease_expires_at>clock_timestamp()
 			RETURNING connector_id
 		)
 		UPDATE connector_clients c
 		SET last_snapshot_at=NOW(), updated_at=NOW()
 		FROM updated WHERE c.id=updated.connector_id`,
-		runID, status, parserSnapshotID, groupCount, lessonCount)
+		runID, claimToken, status, parserSnapshotID, groupCount, lessonCount)
 	if err != nil {
 		return fmt.Errorf("complete connector ingestion %s: %w", runID, err)
+	}
+	if count, countErr := result.RowsAffected(); countErr != nil || count != 1 {
+		if countErr != nil {
+			return fmt.Errorf("complete connector ingestion %s: count update: %w", runID, countErr)
+		}
+		return fmt.Errorf("%w: %s", ErrConnectorClaimLost, runID)
 	}
 	return nil
 }
 
-func (r *ConnectorRepository) Fail(ctx context.Context, runID string, runErr error, retryable bool) error {
+func (r *ConnectorRepository) Fail(ctx context.Context, runID, claimToken string, runErr error, retryable bool) error {
 	message := runErr.Error()
 	if len(message) > 4000 {
 		message = message[:4000]
@@ -353,16 +388,43 @@ func (r *ConnectorRepository) Fail(ctx context.Context, runID string, runErr err
 	if retryable {
 		status = domain.IngestionStatusReceived
 	}
-	_, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, `
 		UPDATE connector_ingestion_runs
-		SET status=$2, error_message=$3, claimed_at=NULL,
-			next_attempt_at=CASE WHEN $2='received'
+		SET status=$3, error_message=$4, claimed_at=NULL,
+			claim_token='', lease_expires_at=NULL,
+			next_attempt_at=CASE WHEN $3='received'
 				THEN NOW()+LEAST(3600, 15*POWER(2, LEAST(attempts, 8))) * INTERVAL '1 second'
 				ELSE next_attempt_at END,
-			completed_at=CASE WHEN $2='failed' THEN NOW() ELSE NULL END
-		WHERE id=$1`, runID, status, message)
+			completed_at=CASE WHEN $3='failed' THEN NOW() ELSE NULL END
+		WHERE id=$1 AND claim_token=$2 AND status='processing'
+		  AND lease_expires_at>clock_timestamp()`, runID, claimToken, status, message)
 	if err != nil {
 		return fmt.Errorf("fail connector ingestion %s: %w", runID, err)
+	}
+	if count, countErr := result.RowsAffected(); countErr != nil || count != 1 {
+		if countErr != nil {
+			return fmt.Errorf("fail connector ingestion %s: count update: %w", runID, countErr)
+		}
+		return fmt.Errorf("%w: %s", ErrConnectorClaimLost, runID)
+	}
+	return nil
+}
+
+func (r *ConnectorRepository) RenewClaim(ctx context.Context, runID, claimToken string) error {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE connector_ingestion_runs
+		SET lease_expires_at=NOW()+($3 * INTERVAL '1 second')
+		WHERE id=$1 AND claim_token=$2 AND status='processing'
+		  AND lease_expires_at>clock_timestamp()`,
+		runID, claimToken, int(connectorIngestionLease/time.Second))
+	if err != nil {
+		return fmt.Errorf("renew connector ingestion %s: %w", runID, err)
+	}
+	if count, countErr := result.RowsAffected(); countErr != nil || count != 1 {
+		if countErr != nil {
+			return fmt.Errorf("renew connector ingestion %s: count update: %w", runID, countErr)
+		}
+		return fmt.Errorf("%w: %s", ErrConnectorClaimLost, runID)
 	}
 	return nil
 }

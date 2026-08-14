@@ -163,6 +163,27 @@ func (r *DataSourceRepository) ListActiveDataSources(ctx context.Context) ([]*do
 	return sources, nil
 }
 
+func (r *DataSourceRepository) ActiveDegradationCount(ctx context.Context) (int, error) {
+	var count int
+	err := r.db.GetContext(ctx, &count, `
+		SELECT COUNT(*)::int
+		FROM data_sources source
+		WHERE source.is_enabled
+		  AND source.lifecycle_status='active'
+		  AND (
+			COALESCE(source.last_error, '')<>''
+			OR EXISTS (
+				SELECT 1 FROM parser_snapshots snapshot
+				WHERE snapshot.data_source_id=source.id
+				  AND snapshot.status='quarantined'
+			)
+		  )`)
+	if err != nil {
+		return 0, fmt.Errorf("count degraded active data sources: %w", err)
+	}
+	return count, nil
+}
+
 func (r *DataSourceRepository) ListDataSourcesByUniversityID(ctx context.Context, universityID string) ([]*domain.DataSource, error) {
 	var sources []*domain.DataSource
 	err := r.db.SelectContext(ctx, &sources,
