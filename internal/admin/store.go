@@ -194,6 +194,9 @@ func (s *Store) OperationalHealth(ctx context.Context) (*OperationalHealth, erro
 			(SELECT COUNT(*)::int FROM bot_outbox WHERE status='failed') AS failed_outbox,
 			(SELECT COUNT(*)::int FROM connector_ingestion_runs WHERE status IN ('received','processing')) AS pending_connector_runs,
 			(SELECT COUNT(*)::int FROM connector_ingestion_runs WHERE status='failed') AS failed_connector_runs,
+			pg_database_size(current_database()) AS database_bytes,
+			pg_total_relation_size('connector_ingestion_runs'::regclass) AS connector_payload_bytes,
+			pg_total_relation_size('parser_snapshots'::regclass) AS snapshot_payload_bytes,
 			COALESCE((
 				SELECT EXTRACT(EPOCH FROM (NOW()-MIN(created_at)))::bigint
 				FROM (

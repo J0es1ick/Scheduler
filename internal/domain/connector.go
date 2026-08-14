@@ -69,6 +69,8 @@ type ConnectorIngestionRun struct {
 	LessonCount        int             `db:"lesson_count" json:"lesson_count"`
 	NextAttemptAt      time.Time       `db:"next_attempt_at" json:"next_attempt_at"`
 	ClaimedAt          *time.Time      `db:"claimed_at" json:"claimed_at,omitempty"`
+	ClaimToken         string          `db:"claim_token" json:"-"`
+	LeaseExpiresAt     *time.Time      `db:"lease_expires_at" json:"lease_expires_at,omitempty"`
 	ReceivedAt         time.Time       `db:"received_at" json:"received_at"`
 	CompletedAt        *time.Time      `db:"completed_at" json:"completed_at,omitempty"`
 }

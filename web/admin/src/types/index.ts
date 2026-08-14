@@ -223,6 +223,9 @@ export interface OperationalHealth {
   failed_outbox: number;
   pending_connector_runs: number;
   failed_connector_runs: number;
+  database_bytes: number;
+  connector_payload_bytes: number;
+  snapshot_payload_bytes: number;
   oldest_pending_seconds: number;
   last_successful_parse_at: string | null;
   checked_at: string;

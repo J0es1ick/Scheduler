@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
@@ -100,7 +101,7 @@ func (r *ParserSnapshotRepository) PublishWithHook(
 		return nil, fmt.Errorf("publish snapshot: source %s is not active", row.DataSourceID)
 	}
 	snapshot, err := applyPublicationSnapshot(
-		ctx, tx, row, source.AdapterType, source.UniversityID, actorID, reviewNote, hook,
+		ctx, tx, row, source.AdapterType, source.UniversityID, actorID, reviewNote, hook, true,
 	)
 	if err != nil {
 		return nil, err
@@ -108,6 +109,107 @@ func (r *ParserSnapshotRepository) PublishWithHook(
 	if err = tx.Commit(); err != nil {
 		return nil, fmt.Errorf("publish snapshot: commit: %w", err)
 	}
+	return snapshot, nil
+}
+
+func (r *ParserSnapshotRepository) RestorePublishedSnapshot(
+	ctx context.Context,
+	snapshotID string,
+) (*domain.ParserSnapshot, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("restore published snapshot: begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	row, err := loadPublicationSnapshot(ctx, tx, snapshotID, false)
+	if err != nil {
+		return nil, err
+	}
+	var universityID string
+	if err = tx.GetContext(ctx, &universityID,
+		`SELECT university_id FROM data_sources WHERE id=$1`, row.DataSourceID,
+	); err != nil {
+		return nil, fmt.Errorf("restore published snapshot: load source university: %w", err)
+	}
+	if err = lockUniversityPublication(ctx, tx, universityID); err != nil {
+		return nil, err
+	}
+	row, err = loadPublicationSnapshot(ctx, tx, snapshotID, true)
+	if err != nil {
+		return nil, err
+	}
+	if row.Status != domain.SnapshotStatusPublished || row.PublishedAt == nil {
+		return nil, fmt.Errorf("restore published snapshot: snapshot %s is not published", snapshotID)
+	}
+	type restorationSource struct {
+		AdapterType        string         `db:"adapter_type"`
+		Lifecycle          string         `db:"lifecycle_status"`
+		UniversityID       string         `db:"university_id"`
+		CurrentSnapshotID  string         `db:"current_snapshot_id"`
+		LastSuccessAt      *time.Time     `db:"last_success_at"`
+		LastRunAt          *time.Time     `db:"last_run_at"`
+		LastError          sql.NullString `db:"last_error"`
+		ConsecutiveFailure int            `db:"consecutive_failures"`
+		NextRetryAt        *time.Time     `db:"next_retry_at"`
+		UpdatedAt          time.Time      `db:"updated_at"`
+	}
+	var source restorationSource
+	if err = tx.GetContext(ctx, &source, `
+		SELECT adapter_type, lifecycle_status, university_id,
+		       COALESCE(current_snapshot_id, '') AS current_snapshot_id,
+		       last_success_at, last_run_at, last_error,
+		       consecutive_failures, next_retry_at, updated_at
+		FROM data_sources WHERE id=$1 FOR UPDATE`, row.DataSourceID); err != nil {
+		return nil, fmt.Errorf("restore published snapshot: lock source: %w", err)
+	}
+	if source.Lifecycle != domain.ConnectorStatusActive || source.CurrentSnapshotID != snapshotID {
+		var newerPublicationExists bool
+		if err = tx.GetContext(ctx, &newerPublicationExists, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM data_sources current_source
+				JOIN parser_snapshots current_snapshot
+				  ON current_snapshot.id=current_source.current_snapshot_id
+				WHERE current_source.university_id=$1
+				  AND current_source.lifecycle_status='active'
+				  AND current_snapshot.status='published'
+			)`, source.UniversityID); err != nil {
+			return nil, fmt.Errorf("restore published snapshot: inspect newer publication: %w", err)
+		}
+		if !newerPublicationExists {
+			return nil, fmt.Errorf(
+				"restore published snapshot: source %s is no longer the active current publication",
+				row.DataSourceID,
+			)
+		}
+		return nil, tx.Commit()
+	}
+	originalPublishedAt := *row.PublishedAt
+	snapshot, err := applyPublicationSnapshot(
+		ctx, tx, row, source.AdapterType, source.UniversityID, "", "", nil, false,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = tx.ExecContext(ctx,
+		`UPDATE parser_snapshots SET published_at=$2 WHERE id=$1`,
+		snapshotID, originalPublishedAt,
+	); err != nil {
+		return nil, fmt.Errorf("restore published snapshot: preserve publication time: %w", err)
+	}
+	if _, err = tx.ExecContext(ctx, `
+		UPDATE data_sources
+		SET last_success_at=$2, last_run_at=$3, last_error=$4,
+		    consecutive_failures=$5, next_retry_at=$6, updated_at=$7
+		WHERE id=$1`, row.DataSourceID, source.LastSuccessAt, source.LastRunAt,
+		source.LastError, source.ConsecutiveFailure, source.NextRetryAt, source.UpdatedAt); err != nil {
+		return nil, fmt.Errorf("restore published snapshot: preserve source history: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("restore published snapshot: commit: %w", err)
+	}
+	snapshot.PublishedAt = &originalPublishedAt
 	return snapshot, nil
 }
 
@@ -197,7 +299,7 @@ func (r *ParserSnapshotRepository) ActivateConnectorWithSnapshot(
 		return nil, fmt.Errorf("activate connector: enable university: %w", err)
 	}
 	snapshot, err := applyPublicationSnapshot(
-		ctx, tx, row, target.AdapterType, target.UniversityID, actorID, reviewNote, hook,
+		ctx, tx, row, target.AdapterType, target.UniversityID, actorID, reviewNote, hook, false,
 	)
 	if err != nil {
 		return nil, err
@@ -268,6 +370,7 @@ func applyPublicationSnapshot(
 	row *parserSnapshotRow,
 	adapterType, universityID, actorID, reviewNote string,
 	hook SnapshotPublicationHook,
+	finalizeParseLog bool,
 ) (*domain.ParserSnapshot, error) {
 	if !row.Publishable {
 		return nil, fmt.Errorf("snapshot %s is structurally invalid", row.ID)
@@ -299,6 +402,10 @@ func applyPublicationSnapshot(
 	if err != nil {
 		return nil, fmt.Errorf("publish snapshot: reconcile group identities: %w", err)
 	}
+	payload, err = reconcileLessonIdentities(ctx, tx, payload, row.DataSourceID)
+	if err != nil {
+		return nil, err
+	}
 	snapshot.Payload = payload
 	canonicalPayload, err := json.Marshal(payload)
 	if err != nil {
@@ -323,31 +430,16 @@ func applyPublicationSnapshot(
 			return nil, fmt.Errorf("publish snapshot: group %s: %w", group.ID, err)
 		}
 	}
+	if err = storeLessonIdentities(ctx, tx, payload); err != nil {
+		return nil, err
+	}
 	if _, err = tx.ExecContext(ctx,
 		`DELETE FROM lessons WHERE university_id=$1`, universityID,
 	); err != nil {
 		return nil, fmt.Errorf("publish snapshot: clear lessons: %w", err)
 	}
-	const insertLesson = `
-		INSERT INTO lessons (
-			id, university_id, semester_id, day_of_week, special_date,
-			time_start, time_end, week_type, subject, type, teacher, room,
-			group_id, subgroup, valid_from, valid_to, recurrence, source_id,
-			external_id, fetched_at, source_fingerprint, updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,NOW())`
-	for _, group := range payload.Groups {
-		for _, lesson := range group.Lessons {
-			if _, err = tx.ExecContext(ctx, insertLesson,
-				lesson.ID, lesson.UniversityID, payload.SemesterID,
-				lessonDayOfWeekDB(lesson), lesson.SpecialDate,
-				lesson.TimeStart, lesson.TimeEnd, lesson.WeekType,
-				lesson.Subject, lesson.Type, lesson.Teacher, lesson.Room,
-				group.ID, lesson.Subgroup, lesson.ValidFrom, lesson.ValidTo,
-				lesson.Recurrence, nullIfEmpty(lesson.SourceID), lesson.ExternalID,
-				lesson.FetchedAt, lesson.SourceFingerprint); err != nil {
-				return nil, fmt.Errorf("publish snapshot: lesson %s: %w", lesson.ID, err)
-			}
-		}
+	if err = insertPublicationLessons(ctx, tx, payload); err != nil {
+		return nil, err
 	}
 	now := time.Now()
 	if _, err = tx.ExecContext(ctx, `
@@ -366,6 +458,29 @@ func applyPublicationSnapshot(
 		WHERE id=$1`, row.DataSourceID, row.ID, now); err != nil {
 		return nil, fmt.Errorf("publish snapshot: update source: %w", err)
 	}
+	if finalizeParseLog && row.ParseLogID != "" {
+		result, finalizeErr := tx.ExecContext(ctx, `
+			UPDATE parse_logs
+			SET finished_at=NOW(), status='success', records_fetched=$2,
+				error_message=NULL
+			WHERE id=$1 AND status='running'`, row.ParseLogID, row.LessonCount)
+		if finalizeErr != nil {
+			return nil, fmt.Errorf("publish snapshot: finalize parse log: %w", finalizeErr)
+		}
+		if count, countErr := result.RowsAffected(); countErr != nil || count != 1 {
+			if countErr != nil {
+				return nil, fmt.Errorf("publish snapshot: count finalized parse log: %w", countErr)
+			}
+			var existingStatus string
+			if statusErr := tx.GetContext(ctx, &existingStatus,
+				`SELECT status FROM parse_logs WHERE id=$1`, row.ParseLogID); statusErr != nil {
+				return nil, fmt.Errorf("publish snapshot: inspect parse log finalization: %w", statusErr)
+			}
+			if existingStatus != "success" && existingStatus != "quarantined" {
+				return nil, fmt.Errorf("publish snapshot: parse log %s has invalid status %s", row.ParseLogID, existingStatus)
+			}
+		}
+	}
 	if hook != nil {
 		if err = hook(ctx, &SnapshotPublication{tx: tx}); err != nil {
 			return nil, fmt.Errorf("publish snapshot: transactional hook: %w", err)
@@ -379,6 +494,64 @@ func applyPublicationSnapshot(
 		snapshot.ReviewNote = reviewNote
 	}
 	return snapshot, nil
+}
+
+const publicationLessonBatchSize = 500
+
+func insertPublicationLessons(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	payload domain.ScheduleSnapshot,
+) error {
+	type groupLesson struct {
+		groupID string
+		lesson  domain.Lesson
+	}
+	lessons := make([]groupLesson, 0)
+	for _, group := range payload.Groups {
+		for _, lesson := range group.Lessons {
+			lessons = append(lessons, groupLesson{groupID: group.ID, lesson: lesson})
+		}
+	}
+	for start := 0; start < len(lessons); start += publicationLessonBatchSize {
+		end := min(start+publicationLessonBatchSize, len(lessons))
+		var query strings.Builder
+		query.WriteString(`INSERT INTO lessons (
+			id, university_id, semester_id, day_of_week, special_date,
+			time_start, time_end, week_type, subject, type, teacher, room,
+			group_id, subgroup, valid_from, valid_to, recurrence, source_id,
+			external_id, fetched_at, source_fingerprint, updated_at
+		) VALUES `)
+		args := make([]any, 0, (end-start)*21)
+		for index, item := range lessons[start:end] {
+			if index > 0 {
+				query.WriteByte(',')
+			}
+			base := index * 21
+			query.WriteByte('(')
+			for column := 1; column <= 21; column++ {
+				if column > 1 {
+					query.WriteByte(',')
+				}
+				fmt.Fprintf(&query, "$%d", base+column)
+			}
+			query.WriteString(",NOW())")
+			lesson := item.lesson
+			args = append(args,
+				lesson.ID, lesson.UniversityID, payload.SemesterID,
+				lessonDayOfWeekDB(lesson), lesson.SpecialDate,
+				lesson.TimeStart, lesson.TimeEnd, lesson.WeekType,
+				lesson.Subject, lesson.Type, lesson.Teacher, lesson.Room,
+				item.groupID, lesson.Subgroup, lesson.ValidFrom, lesson.ValidTo,
+				lesson.Recurrence, nullIfEmpty(lesson.SourceID), lesson.ExternalID,
+				lesson.FetchedAt, lesson.SourceFingerprint,
+			)
+		}
+		if _, err := tx.ExecContext(ctx, query.String(), args...); err != nil {
+			return fmt.Errorf("publish snapshot: insert lesson batch %d-%d: %w", start, end, err)
+		}
+	}
+	return nil
 }
 
 func applyPublicationMetadata(

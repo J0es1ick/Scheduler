@@ -13,6 +13,7 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/buildinfo"
 	"github.com/J0es1ick/Scheduler/internal/config"
 	"github.com/J0es1ick/Scheduler/internal/database"
+	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/J0es1ick/Scheduler/internal/site"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -35,10 +36,15 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
-	migrationContext, migrationCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	migrationContext, migrationCancel := context.WithTimeout(context.Background(), 45*time.Minute)
 	if err = database.ApplyMigrations(migrationContext, db.DB); err != nil {
 		migrationCancel()
 		logger.Error("site database migrations failed", "err", err)
+		os.Exit(1)
+	}
+	if _, err = repository.NewParserSnapshotRepository(db.DB).ReconcilePendingPublications(migrationContext); err != nil {
+		migrationCancel()
+		logger.Error("site publication reconciliation failed", "err", err)
 		os.Exit(1)
 	}
 	migrationCancel()

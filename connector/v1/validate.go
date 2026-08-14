@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	maxGroupsPerSnapshot  = 10_000
-	maxLessonsPerSnapshot = 500_000
+	maxGroupsPerSnapshot  = 5_000
+	maxLessonsPerSnapshot = 50_000
 )
 
 var (

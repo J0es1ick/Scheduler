@@ -87,7 +87,16 @@ func (w *ParserWorker) tick(ctx context.Context, monitor *Monitor) {
 			if err != nil {
 				slog.Error("parser worker: run active sources failed", "err", err)
 			}
-			monitor.Record(ParserWorkerName, errors.Join(cleanupErr, err))
+			switch {
+			case cleanupErr != nil || errors.Is(err, service.ErrParserInfrastructure):
+				monitor.Record(ParserWorkerName, errors.Join(cleanupErr, err))
+			case errors.Is(err, service.ErrSourceDegraded):
+				monitor.Degraded(ParserWorkerName, err)
+			case err != nil:
+				monitor.Record(ParserWorkerName, err)
+			default:
+				monitor.Succeeded(ParserWorkerName)
+			}
 			return
 		case <-heartbeat.C:
 			monitor.Heartbeat(ParserWorkerName)

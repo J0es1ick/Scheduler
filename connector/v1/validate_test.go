@@ -2,6 +2,7 @@ package v1
 
 import (
 	"crypto/ed25519"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -36,6 +37,26 @@ func TestValidateRejectsInvalidCycle(t *testing.T) {
 	}
 	if err := Validate(snapshot); err == nil {
 		t.Fatal("Validate() accepted an invalid cycle")
+	}
+}
+
+func TestValidateMaximumSupportedSnapshot(t *testing.T) {
+	snapshot := validSnapshot()
+	snapshot.Groups[0].Lessons = make([]Lesson, maxLessonsPerSnapshot)
+	baseLesson := validSnapshot().Groups[0].Lessons[0]
+	for index := range snapshot.Groups[0].Lessons {
+		lesson := baseLesson
+		lesson.ExternalID = fmt.Sprintf("lesson-%d", index)
+		snapshot.Groups[0].Lessons[index] = lesson
+	}
+	if err := Validate(snapshot); err != nil {
+		t.Fatalf("maximum snapshot was rejected: %v", err)
+	}
+	extra := snapshot.Groups[0].Lessons[0]
+	extra.ExternalID = "lesson-over-limit"
+	snapshot.Groups[0].Lessons = append(snapshot.Groups[0].Lessons, extra)
+	if err := Validate(snapshot); err == nil {
+		t.Fatal("snapshot above the lesson limit was accepted")
 	}
 }
 

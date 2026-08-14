@@ -82,6 +82,9 @@ func (s *Store) CreateManualLesson(ctx context.Context, actorID string, lesson L
 	if err != nil {
 		return "", err
 	}
+	if err = lockEditorUniversity(ctx, tx, universityID); err != nil {
+		return "", err
+	}
 	id := "manual:" + uuid.NewString()
 	if _, err = tx.ExecContext(ctx, `
 		INSERT INTO lesson_overrides (
@@ -127,6 +130,13 @@ func (s *Store) UpdateEditorLesson(
 	defer tx.Rollback()
 
 	current, err := effectiveLessonForUpdate(tx, ctx, lessonID)
+	if err != nil {
+		return "", err
+	}
+	if err = lockEditorUniversity(ctx, tx, current.UniversityID); err != nil {
+		return "", err
+	}
+	current, err = effectiveLessonForUpdate(tx, ctx, lessonID)
 	if err != nil {
 		return "", err
 	}
@@ -209,6 +219,13 @@ func (s *Store) DeleteEditorLesson(
 	if err != nil {
 		return err
 	}
+	if err = lockEditorUniversity(ctx, tx, current.UniversityID); err != nil {
+		return err
+	}
+	current, err = effectiveLessonForUpdate(tx, ctx, lessonID)
+	if err != nil {
+		return err
+	}
 	if !sameInstant(current.UpdatedAt, expectedUpdatedAt) {
 		return ErrConflict
 	}
@@ -275,19 +292,31 @@ func (s *Store) RestoreEditorLesson(ctx context.Context, lessonID string) error 
 	defer tx.Rollback()
 
 	var lesson struct {
-		GroupID string `db:"group_id"`
-		Subject string `db:"subject"`
+		UniversityID string `db:"university_id"`
+		GroupID      string `db:"group_id"`
+		Subject      string `db:"subject"`
 	}
 	err = tx.GetContext(ctx, &lesson, `
-		SELECT group_id, subject
+		SELECT university_id, group_id, subject
 		FROM lesson_overrides
-		WHERE id=$1 AND base_lesson_id IS NOT NULL
-		FOR UPDATE`, lessonID)
+		WHERE id=$1 AND base_lesson_id IS NOT NULL`, lessonID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("editor restore lesson: read override: %w", err)
+	}
+	if err = lockEditorUniversity(ctx, tx, lesson.UniversityID); err != nil {
+		return err
+	}
+	if err = tx.GetContext(ctx, &lesson, `
+		SELECT university_id, group_id, subject
+		FROM lesson_overrides
+		WHERE id=$1 AND base_lesson_id IS NOT NULL
+		FOR UPDATE`, lessonID); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return fmt.Errorf("editor restore lesson after publication lock: %w", err)
 	}
 
 	result, err := tx.ExecContext(ctx, `
@@ -363,6 +392,16 @@ func editorUniversity(tx *sqlx.Tx, ctx context.Context, groupID, semesterID stri
 		return "", fmt.Errorf("editor validate group and semester: %w", err)
 	}
 	return universityID, nil
+}
+
+func lockEditorUniversity(ctx context.Context, tx *sqlx.Tx, universityID string) error {
+	if _, err := tx.ExecContext(ctx, `
+		SELECT pg_advisory_xact_lock(
+			hashtext('scheduler-snapshot-publication'), hashtext($1)
+		)`, universityID); err != nil {
+		return fmt.Errorf("editor lock university publication: %w", err)
+	}
+	return nil
 }
 
 func editorDayOfWeek(lesson LessonMutation) any {

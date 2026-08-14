@@ -79,6 +79,7 @@ func main() {
 	}()
 
 	bot, err := tgbotapi.NewBot(tgbotapi.Settings{
+		URL:     cfg.BotTelegramAPIURL,
 		Token:   cfg.BotToken,
 		Offline: true,
 		OnError: botpkg.HandleError,
@@ -114,6 +115,16 @@ func main() {
 	notificationRepo := repository.NewNotificationRepository(db.DB)
 	snapshotRepo := repository.NewParserSnapshotRepository(db.DB)
 	diagnosticRepo := repository.NewParserDiagnosticRepository(db.DB)
+	reconciliationCtx, reconciliationCancel := context.WithTimeout(context.Background(), 45*time.Minute)
+	reconciled, err := snapshotRepo.ReconcilePendingPublications(reconciliationCtx)
+	reconciliationCancel()
+	if err != nil {
+		slog.Error("publication reconciliation failed", "err", err)
+		os.Exit(1)
+	}
+	if reconciled > 0 {
+		slog.Info("trusted publications restored", "universities", reconciled)
+	}
 
 	// --- Сервисы ---
 	scheduleService := service.NewScheduleService(lessonRepo, semesterRepo, groupRepo)

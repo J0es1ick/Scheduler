@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,9 +29,11 @@ const activeSourceConcurrency = 3
 const activeSourceTimeout = 30 * time.Minute
 
 var (
-	ErrDataSourceBusy     = errors.New("parser: data source is already running")
-	ErrDataSourceDisabled = errors.New("parser: data source is disabled")
-	ErrSnapshotQuarantine = errors.New("parser: candidate snapshot quarantined")
+	ErrDataSourceBusy       = errors.New("parser: data source is already running")
+	ErrDataSourceDisabled   = errors.New("parser: data source is disabled")
+	ErrSnapshotQuarantine   = errors.New("parser: candidate snapshot quarantined")
+	ErrSourceDegraded       = errors.New("parser: external source degraded")
+	ErrParserInfrastructure = errors.New("parser: infrastructure failure")
 )
 
 type ParserService struct {
@@ -84,6 +88,13 @@ func (s *ParserService) CleanupInterruptedRuns(ctx context.Context, olderThan ti
 	}
 	if count > 0 {
 		slog.Warn("parser: interrupted runs marked failed", "count", count)
+	}
+	retentionRan, err := s.parseLogRepo.RunOperationalRetention(ctx)
+	if err != nil {
+		return err
+	}
+	if retentionRan {
+		slog.Info("parser: operational retention completed")
 	}
 	return nil
 }
@@ -144,16 +155,13 @@ func (s *ParserService) runDataSource(ctx context.Context, dataSourceID string, 
 	startedAt := time.Now()
 	fail := func(records int, runErr error) (int, error) {
 		message := truncate(runErr.Error(), 4000)
-		_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "failed", records, message)
-		failures, nextRetryAt, recordErr := s.dataSourceRepo.RecordFailure(
-			ctx,
-			ds.ID,
-			message,
+		failures, nextRetryAt, recordErr := s.parseLogRepo.FinalizeFailure(
+			ctx, logID, ds.ID, records, message,
 		)
 		if recordErr != nil {
-			slog.Error("parser: record source failure failed", "source", ds.ID, "err", recordErr)
+			slog.Error("parser: finalize source failure failed", "source", ds.ID, "err", recordErr)
 		}
-		if failures == 1 || failures%3 == 0 {
+		if recordErr == nil && (failures == 1 || failures%3 == 0) {
 			s.enqueueAdminAlert(ctx, "parser-failure:"+logID, fmt.Sprintf(
 				"⚠️ Ошибка обновления расписания\n\nИсточник: %s\n"+
 					"Попытка подряд: %d\nСледующая попытка: %s\nОшибка: %s",
@@ -163,32 +171,48 @@ func (s *ParserService) runDataSource(ctx context.Context, dataSourceID string, 
 				truncate(message, 1200),
 			))
 		}
+		if recordErr != nil {
+			return records, errors.Join(
+				runErr,
+				fmt.Errorf("%w: finalize parser failure: %w", ErrParserInfrastructure, recordErr),
+			)
+		}
 		return records, runErr
 	}
 
 	groups, err := adapter.FetchGroups(ctx)
 	if err != nil {
-		return fail(0, fmt.Errorf("parser: FetchGroups [%s]: %w", adapter.Name(), err))
+		return fail(0, sourceDegradedError(
+			fmt.Errorf("parser: FetchGroups [%s]: %w", adapter.Name(), err),
+		))
 	}
 	if len(groups) == 0 {
-		return fail(0, fmt.Errorf("parser: FetchGroups [%s] returned no groups", adapter.Name()))
+		return fail(0, sourceDegradedError(
+			fmt.Errorf("parser: FetchGroups [%s] returned no groups", adapter.Name()),
+		))
 	}
 
 	fetchReport := s.fetchSchedules(ctx, adapter, groups)
-	s.saveScheduleDiagnostics(ctx, logID, ds.ID, fetchReport)
+	if diagnosticErr := s.saveScheduleDiagnostics(ctx, logID, ds.ID, fetchReport); diagnosticErr != nil {
+		return fail(0, fmt.Errorf(
+			"%w: persist parser diagnostics: %w", ErrParserInfrastructure, diagnosticErr,
+		))
+	}
 	if fetchReport.Failed > 0 {
-		return fail(0, fetchReport.Error(len(groups)))
+		return fail(0, sourceDegradedError(fetchReport.Error(len(groups))))
 	}
 	results := fetchReport.Results
 
-	payload, lessonCount := buildScheduleSnapshot(adapter.UniversityID(), semesterID, results)
+	payload, lessonCount := buildScheduleSnapshot(adapter.UniversityID(), semesterID, ds.ID, results)
 	existingGroups, err := s.groupRepo.GetGroupsByUniversityID(ctx, adapter.UniversityID())
 	if err != nil {
 		return fail(lessonCount, fmt.Errorf("parser: load existing group identities: %w", err))
 	}
 	payload, remappedGroups, err := repository.CanonicalizeSnapshotGroupIDs(payload, existingGroups)
 	if err != nil {
-		return fail(lessonCount, fmt.Errorf("parser: reconcile group identities: %w", err))
+		return fail(lessonCount, sourceDegradedError(
+			fmt.Errorf("parser: reconcile group identities: %w", err),
+		))
 	}
 	if remappedGroups > 0 {
 		slog.Info(
@@ -222,18 +246,27 @@ func (s *ParserService) runDataSource(ctx context.Context, dataSourceID string, 
 	}
 	if status == domain.SnapshotStatusQuarantined {
 		summary := anomalySummary(anomalies)
-		_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "quarantined", lessonCount, summary)
-		_ = s.dataSourceRepo.RecordQuarantine(ctx, ds.ID,
-			fmt.Sprintf("Снимок %s помещён в карантин: %s", snapshot.ID, summary))
+		if finalizeErr := s.parseLogRepo.FinalizeQuarantine(
+			ctx, logID, ds.ID, lessonCount, summary,
+			fmt.Sprintf("Снимок %s помещён в карантин: %s", snapshot.ID, summary),
+		); finalizeErr != nil {
+			return lessonCount, errors.Join(
+				sourceDegradedError(fmt.Errorf("%w: snapshot=%s: %s", ErrSnapshotQuarantine, snapshot.ID, summary)),
+				fmt.Errorf("%w: finalize quarantine: %w", ErrParserInfrastructure, finalizeErr),
+			)
+		}
 		s.enqueueAdminAlert(ctx, "parser-quarantine:"+snapshot.ID, fmt.Sprintf(
 			"🛡 Снимок расписания помещён в карантин\n\nИсточник: %s\nГрупп: %d\nЗанятий: %d\nПричины: %s\n\nПроверьте снимок в админ-панели.",
 			adapter.Name(), snapshot.GroupCount, snapshot.LessonCount, truncate(summary, 1800),
 		))
-		return lessonCount, fmt.Errorf("%w: snapshot=%s: %s", ErrSnapshotQuarantine, snapshot.ID, summary)
+		return lessonCount, sourceDegradedError(
+			fmt.Errorf("%w: snapshot=%s: %s", ErrSnapshotQuarantine, snapshot.ID, summary),
+		)
 	}
 	if ds.LifecycleStatus != domain.ConnectorStatusActive {
-		_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "success", lessonCount, "")
-		_ = s.dataSourceRepo.RecordAcceptedCandidate(ctx, ds.ID)
+		if finalizeErr := s.parseLogRepo.FinalizeAcceptedCandidate(ctx, logID, ds.ID, lessonCount); finalizeErr != nil {
+			return lessonCount, fmt.Errorf("%w: finalize staged candidate: %w", ErrParserInfrastructure, finalizeErr)
+		}
 		slog.Info("parser: test snapshot staged",
 			"adapter", adapter.Name(), "source", ds.ID, "snapshot", snapshot.ID,
 			"groups", len(payload.Groups), "lessons", lessonCount,
@@ -244,8 +277,9 @@ func (s *ParserService) runDataSource(ctx context.Context, dataSourceID string, 
 	if _, err = s.publishSnapshot(ctx, snapshot.ID, "", "Автоматическая публикация"); err != nil {
 		return fail(lessonCount, fmt.Errorf("parser: publish snapshot %s: %w", snapshot.ID, err))
 	}
-	_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "success", lessonCount, "")
-	_ = s.snapshotRepo.Prune(ctx, ds.ID, snapshot.ID)
+	if pruneErr := s.snapshotRepo.Prune(ctx, ds.ID, snapshot.ID); pruneErr != nil {
+		slog.Error("parser: prune snapshot history failed", "source", ds.ID, "err", pruneErr)
+	}
 	slog.Info("parser: data source run complete",
 		"adapter", adapter.Name(),
 		"groups", len(payload.Groups),
@@ -260,6 +294,27 @@ func (s *ParserService) IngestExternalSnapshot(
 	ctx context.Context,
 	dataSourceID string,
 	payload domain.ScheduleSnapshot,
+) (*domain.ParserSnapshot, error) {
+	return s.ingestExternalSnapshot(ctx, dataSourceID, payload, "", "")
+}
+
+func (s *ParserService) IngestClaimedExternalSnapshot(
+	ctx context.Context,
+	dataSourceID string,
+	payload domain.ScheduleSnapshot,
+	runID, claimToken string,
+) (*domain.ParserSnapshot, error) {
+	if runID == "" || claimToken == "" {
+		return nil, repository.ErrConnectorClaimLost
+	}
+	return s.ingestExternalSnapshot(ctx, dataSourceID, payload, runID, claimToken)
+}
+
+func (s *ParserService) ingestExternalSnapshot(
+	ctx context.Context,
+	dataSourceID string,
+	payload domain.ScheduleSnapshot,
+	runID, claimToken string,
 ) (*domain.ParserSnapshot, error) {
 	release, acquired, err := s.dataSourceRepo.TryAcquireRunLock(ctx, dataSourceID)
 	if err != nil {
@@ -285,10 +340,15 @@ func (s *ParserService) IngestExternalSnapshot(
 	if _, err = s.parseLogRepo.CreateParseLog(ctx, logID, ds.ID, "running", 0, ""); err != nil {
 		return nil, err
 	}
+	recordsFetched := 0
 	fail := func(runErr error) (*domain.ParserSnapshot, error) {
 		message := truncate(runErr.Error(), 4000)
-		_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "failed", 0, message)
-		_, _, _ = s.dataSourceRepo.RecordFailure(ctx, ds.ID, message)
+		if _, _, finalizeErr := s.parseLogRepo.FinalizeFailure(
+			ctx, logID, ds.ID, recordsFetched, message,
+		); finalizeErr != nil {
+			return nil, errors.Join(runErr,
+				fmt.Errorf("%w: finalize connector failure: %w", ErrParserInfrastructure, finalizeErr))
+		}
 		return nil, runErr
 	}
 	if payload.UniversityID != ds.UniversityID {
@@ -310,6 +370,7 @@ func (s *ParserService) IngestExternalSnapshot(
 			lessonCount++
 		}
 	}
+	recordsFetched = lessonCount
 	existingGroups, err := s.groupRepo.GetGroupsByUniversityID(ctx, payload.UniversityID)
 	if err != nil {
 		return fail(fmt.Errorf("parser: load existing group identities: %w", err))
@@ -338,21 +399,39 @@ func (s *ParserService) IngestExternalSnapshot(
 	}
 	if status == domain.SnapshotStatusQuarantined {
 		summary := anomalySummary(anomalies)
-		_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "quarantined", lessonCount, summary)
-		_ = s.dataSourceRepo.RecordQuarantine(ctx, ds.ID, "Внешний снимок помещён в карантин: "+summary)
+		if finalizeErr := s.parseLogRepo.FinalizeQuarantine(
+			ctx, logID, ds.ID, lessonCount, summary,
+			"Внешний снимок помещён в карантин: "+summary,
+		); finalizeErr != nil {
+			return nil, fmt.Errorf("%w: finalize connector quarantine: %w", ErrParserInfrastructure, finalizeErr)
+		}
 		return snapshot, nil
 	}
 	if ds.LifecycleStatus != domain.ConnectorStatusActive {
-		_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "success", lessonCount, "")
-		_ = s.dataSourceRepo.RecordAcceptedCandidate(ctx, ds.ID)
+		if finalizeErr := s.parseLogRepo.FinalizeAcceptedCandidate(ctx, logID, ds.ID, lessonCount); finalizeErr != nil {
+			return nil, fmt.Errorf("%w: finalize connector candidate: %w", ErrParserInfrastructure, finalizeErr)
+		}
 		return snapshot, nil
 	}
-	published, err := s.publishSnapshot(ctx, snapshot.ID, "connector:"+dataSourceID, "Автоматическая публикация внешнего коннектора")
+	var fencingHook repository.SnapshotPublicationHook
+	if runID != "" {
+		fencingHook = func(ctx context.Context, publication *repository.SnapshotPublication) error {
+			return publication.CompleteConnectorIngestion(
+				ctx, runID, claimToken, domain.IngestionStatusPublished,
+				snapshot.ID, snapshot.GroupCount, snapshot.LessonCount,
+			)
+		}
+	}
+	published, err := s.publishSnapshotWithHook(
+		ctx, snapshot.ID, "connector:"+dataSourceID,
+		"Автоматическая публикация внешнего коннектора", fencingHook,
+	)
 	if err != nil {
 		return fail(fmt.Errorf("parser: publish connector snapshot: %w", err))
 	}
-	_ = s.parseLogRepo.UpdateParseLog(ctx, logID, "success", lessonCount, "")
-	_ = s.snapshotRepo.Prune(ctx, ds.ID, snapshot.ID)
+	if pruneErr := s.snapshotRepo.Prune(ctx, ds.ID, snapshot.ID); pruneErr != nil {
+		slog.Error("parser: prune snapshot history failed", "source", ds.ID, "err", pruneErr)
+	}
 	return published, nil
 }
 
@@ -440,6 +519,14 @@ func (s *ParserService) publishSnapshot(
 	ctx context.Context,
 	snapshotID, actorID, reviewNote string,
 ) (*domain.ParserSnapshot, error) {
+	return s.publishSnapshotWithHook(ctx, snapshotID, actorID, reviewNote, nil)
+}
+
+func (s *ParserService) publishSnapshotWithHook(
+	ctx context.Context,
+	snapshotID, actorID, reviewNote string,
+	extraHook repository.SnapshotPublicationHook,
+) (*domain.ParserSnapshot, error) {
 	candidate, err := s.snapshotRepo.Get(ctx, snapshotID)
 	if err != nil || candidate == nil {
 		return candidate, err
@@ -448,7 +535,23 @@ func (s *ParserService) publishSnapshot(
 	if err != nil {
 		return nil, err
 	}
-	return s.snapshotRepo.PublishWithHook(ctx, snapshotID, actorID, reviewNote, hook)
+	return s.snapshotRepo.PublishWithHook(
+		ctx, snapshotID, actorID, reviewNote, combinePublicationHooks(hook, extraHook),
+	)
+}
+
+func combinePublicationHooks(hooks ...repository.SnapshotPublicationHook) repository.SnapshotPublicationHook {
+	return func(ctx context.Context, publication *repository.SnapshotPublication) error {
+		for _, hook := range hooks {
+			if hook == nil {
+				continue
+			}
+			if err := hook(ctx, publication); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 }
 
 func (s *ParserService) snapshotPublicationHook(
@@ -533,7 +636,7 @@ func (s *ParserService) enqueueAdminAlert(ctx context.Context, id, body string) 
 }
 
 func buildScheduleSnapshot(
-	universityID, semesterID string,
+	universityID, semesterID, sourceID string,
 	results []groupScheduleResult,
 ) (domain.ScheduleSnapshot, int) {
 	payload := domain.ScheduleSnapshot{
@@ -549,11 +652,23 @@ func buildScheduleSnapshot(
 			Name:         strings.TrimSpace(result.group.Name),
 			Lessons:      result.lessons,
 		}
+		sort.Slice(group.Lessons, func(i, j int) bool {
+			return sourceLessonOrderingKey(group.Lessons[i]) < sourceLessonOrderingKey(group.Lessons[j])
+		})
+		identityOccurrences := make(map[string]int)
 		for i := range group.Lessons {
 			lesson := &group.Lessons[i]
 			lesson.UniversityID = universityID
 			lesson.SemesterID = semesterID
 			lesson.GroupID = group.ID
+			lesson.SourceID = sourceID
+			if lesson.ExternalID == "" {
+				base := sourceLessonIdentityBase(*lesson)
+				ordinal := identityOccurrences[base]
+				identityOccurrences[base] = ordinal + 1
+				digest := sha256.Sum256([]byte(fmt.Sprintf("%s#%d", base, ordinal)))
+				lesson.ExternalID = "slot:" + hex.EncodeToString(digest[:16])
+			}
 			if lesson.ValidFrom != nil && (payload.StartDate.IsZero() || lesson.ValidFrom.Before(payload.StartDate)) {
 				payload.StartDate = *lesson.ValidFrom
 			}
@@ -572,6 +687,33 @@ func buildScheduleSnapshot(
 		payload.EndDate = payload.StartDate
 	}
 	return payload, total
+}
+
+func sourceLessonOrderingKey(lesson domain.Lesson) string {
+	validFrom := ""
+	if lesson.ValidFrom != nil {
+		validFrom = lesson.ValidFrom.Format(time.DateOnly)
+	}
+	validTo := ""
+	if lesson.ValidTo != nil {
+		validTo = lesson.ValidTo.Format(time.DateOnly)
+	}
+	return strings.Join([]string{
+		sourceLessonIdentityBase(lesson), lesson.ExternalID, lesson.TimeEnd,
+		string(lesson.Type), lesson.Subject, lesson.Teacher, lesson.Room,
+		validFrom, validTo, lesson.ID,
+	}, "\x00")
+}
+
+func sourceLessonIdentityBase(lesson domain.Lesson) string {
+	specialDate := ""
+	if lesson.SpecialDate != nil {
+		specialDate = lesson.SpecialDate.Format(time.DateOnly)
+	}
+	recurrence, _ := json.Marshal(lesson.Recurrence)
+	return fmt.Sprintf("%s|%s|%d|%s|%s|%s|%d|%s",
+		lesson.SemesterID, lesson.GroupID, lesson.DayOfWeek, specialDate,
+		lesson.TimeStart, lesson.WeekType, lesson.Subgroup, recurrence)
 }
 
 func evaluateSnapshot(
@@ -969,10 +1111,11 @@ func (s *ParserService) saveScheduleDiagnostics(
 	logID string,
 	dataSourceID string,
 	report scheduleFetchReport,
-) {
+) error {
 	if s.diagnosticRepo == nil || len(report.Diagnostics) == 0 {
-		return
+		return nil
 	}
+	var persistenceErrors []error
 	keys := make([]string, 0, len(report.Diagnostics))
 	for key := range report.Diagnostics {
 		keys = append(keys, key)
@@ -1013,27 +1156,63 @@ func (s *ParserService) saveScheduleDiagnostics(
 				"category", diagnostic.Category,
 				"err", err,
 			)
+			persistenceErrors = append(persistenceErrors, err)
 		}
 	}
 	if err := s.diagnosticRepo.Prune(ctx, parserDiagnosticRetention); err != nil {
 		slog.Error("parser: prune response diagnostics failed", "err", err)
+		persistenceErrors = append(persistenceErrors, err)
 	}
+	return errors.Join(persistenceErrors...)
 }
 
 func (s *ParserService) RunAllActiveSources(ctx context.Context) error {
 	sources, err := s.dataSourceRepo.ListActiveDataSources(ctx)
 	if err != nil {
-		return fmt.Errorf("parser: list active sources: %w", err)
+		return fmt.Errorf("%w: list active sources: %w", ErrParserInfrastructure, err)
 	}
-	return runActiveSources(ctx, sources, activeSourceConcurrency, activeSourceTimeout,
+	runErr := runActiveSources(ctx, sources, activeSourceConcurrency, activeSourceTimeout,
 		func(sourceCtx context.Context, dataSource *domain.DataSource) error {
 			_, runErr := s.RunDataSource(sourceCtx, dataSource.ID)
 			if runErr != nil {
 				slog.Error("parser: source run failed", "dataSourceID", dataSource.ID, "err", runErr)
 			}
+			if errors.Is(runErr, ErrDataSourceBusy) || errors.Is(runErr, ErrDataSourceDisabled) {
+				return nil
+			}
+			if runErr != nil && !errors.Is(runErr, ErrSourceDegraded) {
+				return fmt.Errorf("%w: %w", ErrParserInfrastructure, runErr)
+			}
 			return runErr
 		},
 	)
+	degradedCount, degradationErr := s.dataSourceRepo.ActiveDegradationCount(ctx)
+	if degradationErr != nil {
+		runErr = errors.Join(runErr,
+			fmt.Errorf("%w: load persisted source health: %w", ErrParserInfrastructure, degradationErr))
+	} else if degradedCount > 0 {
+		runErr = errors.Join(runErr, sourceDegradedError(
+			fmt.Errorf("%d active schedule source(s) remain degraded", degradedCount),
+		))
+	}
+	return classifyActiveSourceRunError(ctx, runErr)
+}
+
+func sourceDegradedError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", ErrSourceDegraded, err)
+}
+
+func classifyActiveSourceRunError(ctx context.Context, runErr error) error {
+	if runErr == nil || errors.Is(runErr, ErrParserInfrastructure) {
+		return runErr
+	}
+	if ctx.Err() != nil || !errors.Is(runErr, ErrSourceDegraded) {
+		return fmt.Errorf("%w: %w", ErrParserInfrastructure, runErr)
+	}
+	return runErr
 }
 
 func runActiveSources(
