@@ -48,6 +48,18 @@ services:
       retries: 12
     logging: *default-logging
 
+  migrator:
+    <<: *app-image
+    container_name: scheduler-migrator
+    restart: "no"
+    environment:
+      <<: *app-environment
+    command: ["/app/scheduler-migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
+
   bot:
     <<: *app-image
     container_name: scheduler-bot
@@ -57,11 +69,12 @@ services:
     environment:
       <<: *app-environment
       BOT_TOKEN: ${BOT_TOKEN:?BOT_TOKEN is required}
+      BOT_TELEGRAM_API_URL: ${BOT_TELEGRAM_API_URL:-}
       BOT_HEALTH_PORT: 8082
     command: ["/app/scheduler-bot"]
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
     stop_grace_period: 20s
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8082/ready >/dev/null || exit 1"]
@@ -87,8 +100,8 @@ services:
     ports:
       - "${ADMIN_BIND_ADDRESS:-127.0.0.1}:${ADMIN_HOST_PORT:-18080}:8080"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/api/ready >/dev/null || exit 1"]
       interval: 10s
@@ -110,8 +123,8 @@ services:
     ports:
       - "${SITE_BIND_ADDRESS:-127.0.0.1}:${SITE_HOST_PORT:-18081}:8080"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/api/ready >/dev/null || exit 1"]
       interval: 10s
@@ -136,18 +149,39 @@ services:
       <<: *app-environment
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
       BACKUP_MAX_AGE_SECONDS: ${BACKUP_MAX_AGE_SECONDS:-90000}
+      BACKUP_OFFSITE_MAX_AGE_SECONDS: ${BACKUP_OFFSITE_MAX_AGE_SECONDS:-90000}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_RETRY_SECONDS: ${BACKUP_RETRY_SECONDS:-300}
+      BACKUP_OFFSITE_DIRECTORY: ${BACKUP_OFFSITE_DIRECTORY:-}
+      BACKUP_ENCRYPTION_PASSPHRASE_FILE: ${BACKUP_ENCRYPTION_PASSPHRASE_FILE:-}
+      MIGRATIONS_PATH: /app/migrations
     volumes:
       - pgbackups:/backups
+      - ./migration:/app/migrations:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "/usr/local/bin/scheduler-backup-health"]
       interval: 60s
       timeout: 3s
       retries: 5
       start_period: 60s
+    logging: *default-logging
+
+  telegram-mock:
+    image: python:3.13-alpine
+    profiles: ["ci"]
+    command: ["python", "/mock/telegram_api.py"]
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=4m,mode=1777
+    volumes:
+      - ./docker/telegram-mock:/mock:ro
     logging: *default-logging
 
 volumes:
