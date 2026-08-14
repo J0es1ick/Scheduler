@@ -18,6 +18,13 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Reject committed environment files
+        shell: bash
+        run: |
+          if git log --all --format= --name-only -- .env | grep -Fxq .env; then
+            echo "A .env file exists in Git history. Rotate its secrets and purge it from every branch and tag."
+            exit 1
+          fi
 
   go:
     name: Go checks
@@ -111,7 +118,8 @@ jobs:
       DATABASE_USER: postgres
       DATABASE_PASSWORD: ci-database-password
       DATABASE_NAME: scheduler
-      ADMIN_METRICS_TOKEN: ci-metrics-token
+      ADMIN_METRICS_TOKEN: ci-metrics-token-with-at-least-32-characters
+      BOT_TELEGRAM_API_URL: http://telegram-mock:8080
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
@@ -125,18 +133,35 @@ jobs:
           cache-dependency-path: web/admin/package-lock.json
       - run: cp .env.example .env
       - run: docker compose config --quiet
-      - run: docker compose up -d --build postgres admin site bot
+      - name: Run the one-shot migrator and start HTTP services
+        run: docker compose --profile ci up -d --build telegram-mock postgres admin site
+      - name: Wait for reconciled services
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:18080/api/ready >/dev/null \
+              && curl --fail --silent http://127.0.0.1:18081/api/ready >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose --profile ci ps
+          exit 1
+      - name: Start bot with deterministic empty parser workload
+        run: |
+          docker compose exec -T postgres psql -U postgres -d scheduler \
+            -c "UPDATE data_sources SET is_enabled=FALSE"
+          docker compose --profile ci up -d bot
       - name: Wait for application readiness
         run: |
           for attempt in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:18080/api/ready >/dev/null \
               && curl --fail --silent http://127.0.0.1:18081/api/ready >/dev/null \
-              && docker compose exec -T bot wget -q -O - http://127.0.0.1:8082/health >/dev/null; then
+              && docker compose exec -T bot wget -q -O - http://127.0.0.1:8082/ready >/dev/null; then
               exit 0
             fi
             sleep 2
           done
-          docker compose ps
+          docker compose --profile ci ps
           exit 1
       - name: Verify every embedded migration was applied
         run: |
@@ -154,6 +179,7 @@ jobs:
       - name: Create and restore-verify a backup
         run: |
           docker compose up -d --build backup
+          docker compose run --rm --no-deps --entrypoint /usr/local/bin/scheduler-backup-tests backup
           for attempt in $(seq 1 30); do
             if docker compose exec -T backup /usr/local/bin/scheduler-backup-health; then
               docker compose exec -T backup /usr/local/bin/scheduler-verify-backup
@@ -167,4 +193,4 @@ jobs:
         run: docker compose logs --no-color --tail=200
       - name: Stop Compose
         if: always()
-        run: docker compose down -v --remove-orphans
+        run: docker compose --profile ci down -v --remove-orphans

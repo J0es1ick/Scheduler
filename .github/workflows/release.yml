@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   packages: write
   id-token: write
   attestations: write
@@ -15,6 +16,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Require a successful CI run for this exact commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          for attempt in $(seq 1 120); do
+            success=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&status=success&per_page=1" --jq '.total_count')
+            if [ "$success" -gt 0 ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "No successful CI run exists for ${GITHUB_SHA}; refusing to publish a release image."
+          exit 1
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:

@@ -1,0 +1,8 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "telegram-bot-token"
+description = "Telegram bot token"
+regex = '''\b[0-9]{8,12}:[A-Za-z0-9_-]{30,50}\b'''
+keywords = ["bot", "token"]
