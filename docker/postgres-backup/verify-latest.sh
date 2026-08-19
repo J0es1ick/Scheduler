@@ -55,6 +55,7 @@ createdb -h "$DATABASE_HOST" -p "$DATABASE_PORT" -U "$DATABASE_USER" "$verify_db
 pg_restore \
   --exit-on-error \
   --no-owner \
+  --no-privileges \
   --host "$DATABASE_HOST" \
   --port "$DATABASE_PORT" \
   --username "$DATABASE_USER" \

@@ -23,14 +23,20 @@ run_case() {
     export BACKUP_ENCRYPTION_PASSPHRASE_FILE="$work/passphrase"
     export BACKUP_RETENTION_DAYS=14
     export FAIL_STEP="$fail_step"
+    pg_dump_no_acl=false
 
     pg_dump() {
       output=""
       while [ "$#" -gt 0 ]; do
-        if [ "$1" = "--file" ]; then
-          shift
-          output="$1"
-        fi
+        case "$1" in
+          --file)
+            shift
+            output="$1"
+            ;;
+          --no-acl)
+            pg_dump_no_acl=true
+            ;;
+        esac
         shift
       done
       [ -n "$output" ] || return 1
@@ -103,6 +109,7 @@ run_case() {
         ;;
       success)
         create_local_backup || fail "successful local backup failed"
+        [ "$pg_dump_no_acl" = true ] || fail "local backup contains environment-specific ACLs"
         upload_offsite_backup "$last_local_backup" || fail "successful offsite upload failed"
         [ -s "$local_success_marker" ] || fail "local success marker missing"
         [ -s "$offsite_success_marker" ] || fail "offsite success marker missing"
@@ -119,5 +126,8 @@ run_case local-checksum checksum
 run_case encryption openssl
 run_case offsite-copy offsite
 run_case success none
+
+grep -q -- '--no-privileges' /usr/local/bin/scheduler-verify-backup ||
+  fail "restore verification attempts to replay environment-specific ACLs"
 
 echo "backup failure-injection tests passed"

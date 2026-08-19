@@ -59,6 +59,7 @@ create_local_backup() {
     --format custom \
     --compress 6 \
     --no-owner \
+    --no-acl \
     --file "$temporary"; then
     rm -f "$temporary" "$checksum_tmp"
     echo "database dump failed" >&2
