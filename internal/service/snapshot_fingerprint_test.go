@@ -49,6 +49,7 @@ func TestScheduleSnapshotsEquivalentIgnoresTechnicalIdentityAndOrder(t *testing.
 					ID: "new-lesson-1", DayOfWeek: 1, TimeStart: "08:00", TimeEnd: "09:35",
 					WeekType: domain.WeekTypeOdd, Subject: "  Математика ", Type: domain.LessonTypePractice,
 					Teacher: "Петров  П.П.", Room: "Б-202", ValidFrom: &validFrom, ValidTo: &validTo,
+					ExternalID: "new-external-identity",
 				}},
 			},
 			{

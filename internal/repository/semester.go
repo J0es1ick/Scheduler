@@ -20,8 +20,8 @@ func NewSemesterRepository(db *sqlx.DB) *SemesterRepository {
 
 func (r *SemesterRepository) CreateSemester(ctx context.Context, id, universityID, name string, startDate, endDate time.Time) (string, error) {
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO semesters (id, university_id, name, start_date, end_date)
-		 VALUES ($1, $2, $3, $4, $5)`,
+		`INSERT INTO semesters (id, university_id, name, start_date, end_date, external_id)
+		 VALUES ($1, $2, $3, $4, $5, $1)`,
 		id, universityID, name, startDate, endDate)
 	if err != nil {
 		return "", fmt.Errorf("create semester: %w", err)
@@ -31,8 +31,8 @@ func (r *SemesterRepository) CreateSemester(ctx context.Context, id, universityI
 
 func (r *SemesterRepository) UpsertSemester(ctx context.Context, id, universityID, name string, startDate, endDate time.Time) error {
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO semesters (id, university_id, name, start_date, end_date)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO semesters (id, university_id, name, start_date, end_date, external_id)
+		VALUES ($1, $2, $3, $4, $5, $1)
 		ON CONFLICT (id) DO UPDATE SET
 			university_id = EXCLUDED.university_id,
 			name = EXCLUDED.name,
