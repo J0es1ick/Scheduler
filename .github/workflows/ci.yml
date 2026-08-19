@@ -56,7 +56,7 @@ jobs:
       - run: go vet ./cmd/... ./connector/... ./integrations/... ./internal/... ./migration/... ./parser/...
       - name: Go vulnerability scan
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           govulncheck ./cmd/... ./connector/... ./integrations/... ./internal/... ./parser/...
 
   web:
@@ -115,9 +115,15 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BOT_TOKEN: 123456:ci-only-not-a-real-token
-      DATABASE_USER: postgres
-      DATABASE_PASSWORD: ci-database-password
       DATABASE_NAME: scheduler
+      POSTGRES_SUPERUSER: postgres
+      POSTGRES_SUPERUSER_PASSWORD: ci-superuser-password
+      DATABASE_MIGRATOR_PASSWORD: ci-migrator-password
+      DATABASE_BOT_PASSWORD: ci-bot-database-password
+      DATABASE_ADMIN_PASSWORD: ci-admin-database-password
+      DATABASE_SITE_PASSWORD: ci-site-database-password
+      DATABASE_BACKUP_PASSWORD: ci-backup-database-password
+      DATABASE_RESTORE_PASSWORD: ci-restore-database-password
       ADMIN_METRICS_TOKEN: ci-metrics-token-with-at-least-32-characters
       BOT_TELEGRAM_API_URL: http://telegram-mock:8080
     steps:
@@ -174,7 +180,7 @@ jobs:
           npm run build --prefix web/admin
       - name: Run PostgreSQL integration tests
         env:
-          TEST_DATABASE_URL: postgres://postgres:ci-database-password@127.0.0.1:55432/scheduler?sslmode=disable
+          TEST_DATABASE_URL: postgres://postgres:ci-superuser-password@127.0.0.1:55432/scheduler?sslmode=disable
         run: go test -tags=integration ./internal/database ./internal/repository ./internal/admin ./internal/connectorapi -count=1
       - name: Create and restore-verify a backup
         run: |
@@ -182,7 +188,10 @@ jobs:
           docker compose run --rm --no-deps --entrypoint /usr/local/bin/scheduler-backup-tests backup
           for attempt in $(seq 1 30); do
             if docker compose exec -T backup /usr/local/bin/scheduler-backup-health; then
-              docker compose exec -T backup /usr/local/bin/scheduler-verify-backup
+              docker compose exec -T \
+                -e DATABASE_USER=scheduler_restore \
+                -e DATABASE_PASSWORD=ci-restore-database-password \
+                backup /usr/local/bin/scheduler-verify-backup
               exit 0
             fi
             sleep 2
