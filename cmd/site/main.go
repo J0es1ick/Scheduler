@@ -13,7 +13,6 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/buildinfo"
 	"github.com/J0es1ick/Scheduler/internal/config"
 	"github.com/J0es1ick/Scheduler/internal/database"
-	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/J0es1ick/Scheduler/internal/site"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -36,19 +35,6 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
-	migrationContext, migrationCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	if err = database.VerifyMigrations(migrationContext, db.DB); err != nil {
-		migrationCancel()
-		logger.Error("site database schema verification failed", "err", err)
-		os.Exit(1)
-	}
-	if err = repository.NewParserSnapshotRepository(db.DB).EnsureNoPendingPublicationReconciliations(migrationContext); err != nil {
-		migrationCancel()
-		logger.Error("site publication reconciliation verification failed", "err", err)
-		os.Exit(1)
-	}
-	migrationCancel()
-
 	siteServer, err := site.NewServer(
 		site.NewStore(db.DB),
 		cfg.ProjectURL,

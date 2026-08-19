@@ -191,6 +191,12 @@ docker compose exec -e BACKUP_VERIFY_OFFSITE=true -e DATABASE_USER -e DATABASE_P
 Постоянный контейнер `backup` получает только read-only-учётные данные. Скрипт
 `scripts/verify-backup.ps1` передаёт более сильную restore-пару из `.env` лишь на время проверки.
 
+Публичный сайт не получает `SELECT` на прикладные таблицы. Его login-роль входит в NOLOGIN-роль
+`scheduler_public_reader`, которой доступны только представления `public_site_statistics`,
+`public_site_universities` и `public_site_sources`. Агрегированные числа пользователей и подписок
+рассчитываются владельцем представления; Telegram ID, профили, обращения, сессии и outbox сайту
+недоступны. Каждая новая публичная выборка должна добавляться отдельным ограниченным представлением.
+
 ## Масштабирование Telegram-бота
 
 Текущий transport использует long polling. В одном окружении должен работать ровно один экземпляр

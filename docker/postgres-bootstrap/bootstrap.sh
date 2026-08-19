@@ -10,6 +10,9 @@ set -eu
 : "${DATABASE_BACKUP_USER:=scheduler_backup}"
 : "${DATABASE_RESTORE_USER:=scheduler_restore}"
 
+# Это роль, которая будет использоваться для предоставления прав на чтение данных пользователю сайта. Она не имеет права входа в систему (NOLOGIN).
+DATABASE_SITE_READER_ROLE="scheduler_public_reader"
+
 export PGPASSWORD="${POSTGRES_SUPERUSER_PASSWORD:?POSTGRES_SUPERUSER_PASSWORD is required}"
 
 psql_super() {
@@ -29,6 +32,7 @@ psql_super postgres \
   --set admin_password="${DATABASE_ADMIN_PASSWORD:?DATABASE_ADMIN_PASSWORD is required}" \
   --set site="$DATABASE_SITE_USER" \
   --set site_password="${DATABASE_SITE_PASSWORD:?DATABASE_SITE_PASSWORD is required}" \
+  --set site_reader="$DATABASE_SITE_READER_ROLE" \
   --set backup="$DATABASE_BACKUP_USER" \
   --set backup_password="${DATABASE_BACKUP_PASSWORD:?DATABASE_BACKUP_PASSWORD is required}" \
   --set restore="$DATABASE_RESTORE_USER" \
@@ -41,6 +45,8 @@ SELECT format('CREATE ROLE %I LOGIN', :'admin')
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname=:'admin') \gexec
 SELECT format('CREATE ROLE %I LOGIN', :'site')
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname=:'site') \gexec
+SELECT format('CREATE ROLE %I NOLOGIN', :'site_reader')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname=:'site_reader') \gexec
 SELECT format('CREATE ROLE %I LOGIN', :'backup')
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname=:'backup') \gexec
 SELECT format('CREATE ROLE %I LOGIN', :'restore')
@@ -50,8 +56,10 @@ SELECT format('ALTER ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATERO
 SELECT format('ALTER ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION', :'bot', :'bot_password') \gexec
 SELECT format('ALTER ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION', :'admin', :'admin_password') \gexec
 SELECT format('ALTER ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION', :'site', :'site_password') \gexec
+SELECT format('ALTER ROLE %I NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION', :'site_reader') \gexec
 SELECT format('ALTER ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION', :'backup', :'backup_password') \gexec
 SELECT format('ALTER ROLE %I LOGIN PASSWORD %L NOSUPERUSER CREATEDB NOCREATEROLE NOREPLICATION', :'restore', :'restore_password') \gexec
+SELECT format('GRANT %I TO %I', :'site_reader', :'site') \gexec
 
 SELECT format('ALTER DATABASE %I OWNER TO %I', :'database', :'migrator') \gexec
 SELECT format('GRANT CONNECT ON DATABASE %I TO %I, %I, %I, %I, %I, %I',
@@ -94,13 +102,17 @@ WHERE n.nspname='public' AND t.typtype IN ('d', 'e')
 
 SELECT format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I, %I', :'bot', :'admin') \gexec
 SELECT format('GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO %I, %I', :'bot', :'admin') \gexec
-SELECT format('GRANT SELECT ON ALL TABLES IN SCHEMA public TO %I, %I', :'site', :'backup') \gexec
-SELECT format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %I, %I', :'site', :'backup') \gexec
+SELECT format('REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM %I', :'site') \gexec
+SELECT format('REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM %I', :'site') \gexec
+SELECT format('GRANT SELECT ON ALL TABLES IN SCHEMA public TO %I', :'backup') \gexec
+SELECT format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %I', :'backup') \gexec
 
 SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %I, %I', :'migrator', :'bot', :'admin') \gexec
 SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO %I, %I', :'migrator', :'bot', :'admin') \gexec
-SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT SELECT ON TABLES TO %I, %I', :'migrator', :'site', :'backup') \gexec
-SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO %I, %I', :'migrator', :'site', :'backup') \gexec
+SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public REVOKE ALL ON TABLES FROM %I', :'migrator', :'site') \gexec
+SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public REVOKE ALL ON SEQUENCES FROM %I', :'migrator', :'site') \gexec
+SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT SELECT ON TABLES TO %I', :'migrator', :'backup') \gexec
+SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO %I', :'migrator', :'backup') \gexec
 SQL
 
 echo "PostgreSQL application roles and privileges are ready."
