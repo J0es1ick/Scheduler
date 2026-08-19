@@ -12,7 +12,7 @@ RUN npm ci
 COPY web/site/ ./
 RUN npm run build
 
-FROM golang:1.25.12-alpine AS go-builder
+FROM golang:1.25.13-alpine AS go-builder
 ARG VERSION=dev
 ARG COMMIT=local
 ARG BUILD_TIME=unknown
