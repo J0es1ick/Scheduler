@@ -36,6 +36,7 @@ type Lesson struct {
 	Teacher           string         `db:"teacher"`
 	Room              string         `db:"room"`
 	GroupID           string         `db:"group_id"`
+	GroupName         string         `db:"group_name" json:"-"`
 	Subgroup          int            `db:"subgroup"`
 	ValidFrom         *time.Time     `db:"valid_from"` // первая дата действия занятия на сайте источника
 	ValidTo           *time.Time     `db:"valid_to"`   // последняя дата действия занятия на сайте источника

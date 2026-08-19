@@ -50,6 +50,7 @@ func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) e
 	to := now.AddDate(0, 0, 6)
 
 	var days []dto.DaySchedule
+	showGroupNames := false
 
 	switch state.SearchType {
 	case dto.SearchTypeGroup:
@@ -66,6 +67,7 @@ func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) e
 		days = mapToDaySchedule(data)
 
 	case dto.SearchTypeTeacher:
+		showGroupNames = true
 		data, err := h.ScheduleService.GetScheduleForTeacherRange(ctx, state.UniversityID, state.SearchQuery, now, to)
 		if err != nil {
 			return c.Send("Ошибка получения расписания.")
@@ -73,6 +75,7 @@ func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) e
 		days = mapToDaySchedule(data)
 
 	case dto.SearchTypeRoom:
+		showGroupNames = true
 		data, err := h.ScheduleService.GetScheduleForRoomRange(ctx, state.UniversityID, state.SearchQuery, now, to)
 		if err != nil {
 			return c.Send("Ошибка получения расписания.")
@@ -114,6 +117,9 @@ func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) e
 	header := fmt.Sprintf("Результаты поиска: %s", state.SearchQuery)
 	if err := c.Send(header); err != nil {
 		return err
+	}
+	if showGroupNames {
+		return h.sendDaysWithGroupNames(c, days, state.UniversityID)
 	}
 	return h.sendDays(c, days, state.UniversityID)
 }

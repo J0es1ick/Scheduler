@@ -85,6 +85,9 @@ func TestTeacherAndRoomQueriesAreScopedByUniversity(t *testing.T) {
 			if len(lessons) != 1 || lessons[0].UniversityID != firstUniversity {
 				t.Fatalf("lessons = %+v, want only university %s", lessons, firstUniversity)
 			}
+			if lessons[0].GroupName != "TEST" {
+				t.Fatalf("group name = %q, want TEST", lessons[0].GroupName)
+			}
 		})
 	}
 }

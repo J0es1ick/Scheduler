@@ -151,7 +151,8 @@ func (r *LessonRepository) GetLessonsByTeacher(
 ) ([]domain.Lesson, error) {
 	var lessons []domain.Lesson
 	err := r.db.SelectContext(ctx, &lessons,
-		lessonSelect+` WHERE university_id = $1 AND teacher = $2 ORDER BY day_of_week, time_start`,
+		lessonWithGroupSelect+` WHERE lesson.university_id = $1 AND lesson.teacher = $2
+			ORDER BY lesson.day_of_week, lesson.time_start, study_group.name`,
 		universityID, teacher)
 	if err != nil {
 		return nil, fmt.Errorf("get lessons by university=%s teacher=%q: %w", universityID, teacher, err)
@@ -166,7 +167,8 @@ func (r *LessonRepository) GetLessonsByRoom(
 ) ([]domain.Lesson, error) {
 	var lessons []domain.Lesson
 	err := r.db.SelectContext(ctx, &lessons,
-		lessonSelect+` WHERE university_id = $1 AND room = $2 ORDER BY day_of_week, time_start`,
+		lessonWithGroupSelect+` WHERE lesson.university_id = $1 AND lesson.room = $2
+			ORDER BY lesson.day_of_week, lesson.time_start, study_group.name`,
 		universityID, room)
 	if err != nil {
 		return nil, fmt.Errorf("get lessons by university=%s room=%q: %w", universityID, room, err)
@@ -256,6 +258,10 @@ const lessonCols = `id, university_id, semester_id, COALESCE(day_of_week, 0) AS 
 	external_id, fetched_at, source_fingerprint, updated_at`
 
 const lessonSelect = `SELECT ` + lessonCols + ` FROM effective_lessons`
+
+const lessonWithGroupSelect = `SELECT lesson.*, study_group.name AS group_name
+	FROM (` + lessonSelect + `) lesson
+	JOIN groups study_group ON study_group.id=lesson.group_id`
 
 func lessonDayOfWeekDB(lesson domain.Lesson) any {
 	if lesson.WeekType == domain.WeekTypeDate || lesson.SpecialDate != nil {

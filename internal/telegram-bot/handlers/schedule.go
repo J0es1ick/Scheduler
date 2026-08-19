@@ -21,6 +21,14 @@ const tgMaxLen = 4096
 var weekdayNames = []string{"", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"}
 
 func formatDaySchedule(day dto.DaySchedule) string {
+	return formatDayScheduleWithOptions(day, false)
+}
+
+func formatDayScheduleWithGroupNames(day dto.DaySchedule) string {
+	return formatDayScheduleWithOptions(day, true)
+}
+
+func formatDayScheduleWithOptions(day dto.DaySchedule, showGroupNames bool) string {
 	wd := int(day.Date.Weekday())
 	if wd == 0 {
 		wd = 7 // воскресенье
@@ -38,12 +46,25 @@ func formatDaySchedule(day dto.DaySchedule) string {
 		if l.Subgroup > 0 {
 			subgroup = fmt.Sprintf(", подгруппа %d", l.Subgroup)
 		}
+		details := make([]string, 0, 3)
+		if showGroupNames && strings.TrimSpace(l.GroupName) != "" {
+			details = append(details, "группа "+l.GroupName)
+		}
+		if strings.TrimSpace(l.Teacher) != "" {
+			details = append(details, l.Teacher)
+		}
+		if strings.TrimSpace(l.Room) != "" {
+			details = append(details, l.Room)
+		}
 		sb.WriteString(fmt.Sprintf(
-			"  %s–%s | %s (%s%s)\n  %s | %s\n\n",
+			"  %s–%s | %s (%s%s)\n",
 			l.TimeStart, l.TimeEnd,
 			l.Subject, lessonTypeLabel(l.Type), subgroup,
-			l.Teacher, l.Room,
 		))
+		if len(details) > 0 {
+			sb.WriteString("  " + strings.Join(details, " | ") + "\n")
+		}
+		sb.WriteString("\n")
 	}
 	return sb.String()
 }
@@ -73,13 +94,17 @@ func (h *Handler) sendDays(c tgbotapi.Context, days []dto.DaySchedule, universit
 	return h.sendDaysWithMarkup(c, days, universityID, nil)
 }
 
+func (h *Handler) sendDaysWithGroupNames(c tgbotapi.Context, days []dto.DaySchedule, universityID string) error {
+	return h.sendDaysWithOptions(c, days, universityID, nil, "", true)
+}
+
 func (h *Handler) sendDaysWithMarkup(
 	c tgbotapi.Context,
 	days []dto.DaySchedule,
 	universityID string,
 	markup *tgbotapi.ReplyMarkup,
 ) error {
-	return h.sendDaysWithMarkupAndHeader(c, days, universityID, markup, "")
+	return h.sendDaysWithOptions(c, days, universityID, markup, "", false)
 }
 
 func (h *Handler) sendDaysWithMarkupAndHeader(
@@ -88,6 +113,17 @@ func (h *Handler) sendDaysWithMarkupAndHeader(
 	universityID string,
 	markup *tgbotapi.ReplyMarkup,
 	header string,
+) error {
+	return h.sendDaysWithOptions(c, days, universityID, markup, header, false)
+}
+
+func (h *Handler) sendDaysWithOptions(
+	c tgbotapi.Context,
+	days []dto.DaySchedule,
+	universityID string,
+	markup *tgbotapi.ReplyMarkup,
+	header string,
+	showGroupNames bool,
 ) error {
 	header = strings.TrimSpace(header)
 	if header != "" {
@@ -107,7 +143,11 @@ func (h *Handler) sendDaysWithMarkupAndHeader(
 	var full strings.Builder
 	full.WriteString(header)
 	for _, day := range days {
-		full.WriteString(formatDaySchedule(day))
+		if showGroupNames {
+			full.WriteString(formatDayScheduleWithGroupNames(day))
+		} else {
+			full.WriteString(formatDaySchedule(day))
+		}
 		full.WriteString("\n")
 	}
 	full.WriteString(h.sourceFreshnessText(universityID))
