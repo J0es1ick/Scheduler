@@ -36,15 +36,15 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
-	migrationContext, migrationCancel := context.WithTimeout(context.Background(), 45*time.Minute)
-	if err = database.ApplyMigrations(migrationContext, db.DB); err != nil {
+	migrationContext, migrationCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err = database.VerifyMigrations(migrationContext, db.DB); err != nil {
 		migrationCancel()
-		logger.Error("site database migrations failed", "err", err)
+		logger.Error("site database schema verification failed", "err", err)
 		os.Exit(1)
 	}
-	if _, err = repository.NewParserSnapshotRepository(db.DB).ReconcilePendingPublications(migrationContext); err != nil {
+	if err = repository.NewParserSnapshotRepository(db.DB).EnsureNoPendingPublicationReconciliations(migrationContext); err != nil {
 		migrationCancel()
-		logger.Error("site publication reconciliation failed", "err", err)
+		logger.Error("site publication reconciliation verification failed", "err", err)
 		os.Exit(1)
 	}
 	migrationCancel()

@@ -55,9 +55,9 @@ func main() {
 	defer db.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	if err = database.ApplyMigrations(ctx, db.DB); err != nil {
+	if err = database.VerifyMigrations(ctx, db.DB); err != nil {
 		cancel()
-		logger.Error("admin database migrations failed", "err", err)
+		logger.Error("admin database schema verification failed", "err", err)
 		os.Exit(1)
 	}
 	cancel()
@@ -66,16 +66,13 @@ func main() {
 	lessonRepo := repository.NewLessonRepository(db.DB)
 	semesterRepo := repository.NewSemesterRepository(db.DB)
 	snapshotRepo := repository.NewParserSnapshotRepository(db.DB)
-	reconciliationCtx, reconciliationCancel := context.WithTimeout(context.Background(), 45*time.Minute)
-	reconciled, err := snapshotRepo.ReconcilePendingPublications(reconciliationCtx)
-	reconciliationCancel()
-	if err != nil {
-		logger.Error("publication reconciliation failed", "err", err)
+	reconciliationCtx, reconciliationCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err = snapshotRepo.EnsureNoPendingPublicationReconciliations(reconciliationCtx); err != nil {
+		reconciliationCancel()
+		logger.Error("publication reconciliation verification failed", "err", err)
 		os.Exit(1)
 	}
-	if reconciled > 0 {
-		logger.Info("trusted publications restored", "universities", reconciled)
-	}
+	reconciliationCancel()
 	scheduleService := service.NewScheduleService(lessonRepo, semesterRepo, groupRepo)
 	parserService := service.NewParserService(
 		repository.NewDataSourceRepository(db.DB),

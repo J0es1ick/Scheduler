@@ -33,12 +33,12 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
-	if err = database.ApplyMigrations(ctx, db.DB); err != nil {
-		logger.Error("database migrations failed", "err", err)
+	if err = database.VerifyMigrations(ctx, db.DB); err != nil {
+		logger.Error("database schema verification failed", "err", err)
 		os.Exit(1)
 	}
-	if _, err = repository.NewParserSnapshotRepository(db.DB).ReconcilePendingPublications(ctx); err != nil {
-		logger.Error("publication reconciliation failed", "err", err)
+	if err = repository.NewParserSnapshotRepository(db.DB).EnsureNoPendingPublicationReconciliations(ctx); err != nil {
+		logger.Error("publication reconciliation verification failed", "err", err)
 		os.Exit(1)
 	}
 

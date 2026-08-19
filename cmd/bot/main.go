@@ -65,13 +65,13 @@ func main() {
 		slog.Error("database connect failed", "err", err)
 		os.Exit(1)
 	}
-	migrationCtx, migrationCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	if err := database.ApplyMigrations(migrationCtx, db.DB); err != nil {
-		migrationCancel()
-		slog.Error("database migrations failed", "err", err)
+	verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := database.VerifyMigrations(verifyCtx, db.DB); err != nil {
+		verifyCancel()
+		slog.Error("database schema verification failed", "err", err)
 		os.Exit(1)
 	}
-	migrationCancel()
+	verifyCancel()
 	defer func() {
 		if err := db.Close(); err != nil {
 			slog.Error("db close failed", "err", err)
@@ -115,16 +115,13 @@ func main() {
 	notificationRepo := repository.NewNotificationRepository(db.DB)
 	snapshotRepo := repository.NewParserSnapshotRepository(db.DB)
 	diagnosticRepo := repository.NewParserDiagnosticRepository(db.DB)
-	reconciliationCtx, reconciliationCancel := context.WithTimeout(context.Background(), 45*time.Minute)
-	reconciled, err := snapshotRepo.ReconcilePendingPublications(reconciliationCtx)
-	reconciliationCancel()
-	if err != nil {
-		slog.Error("publication reconciliation failed", "err", err)
+	reconciliationCtx, reconciliationCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	if err = snapshotRepo.EnsureNoPendingPublicationReconciliations(reconciliationCtx); err != nil {
+		reconciliationCancel()
+		slog.Error("publication reconciliation verification failed", "err", err)
 		os.Exit(1)
 	}
-	if reconciled > 0 {
-		slog.Info("trusted publications restored", "universities", reconciled)
-	}
+	reconciliationCancel()
 
 	// --- Сервисы ---
 	scheduleService := service.NewScheduleService(lessonRepo, semesterRepo, groupRepo)

@@ -39,6 +39,31 @@ func TestApplyMigrationsWithSingleConnection(t *testing.T) {
 	}
 }
 
+func TestVerifyMigrationsIsReadOnlyAndRejectsDrift(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("TEST_DATABASE_URL is required for integration tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db, cleanup := isolatedMigrationSchema(t, ctx, databaseURL)
+	defer cleanup()
+
+	if err := ApplyMigrations(ctx, db); err != nil {
+		t.Fatalf("apply migrations: %v", err)
+	}
+	if err := VerifyMigrations(ctx, db); err != nil {
+		t.Fatalf("verify current migrations: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`UPDATE schema_migrations SET checksum='drift' WHERE name=(SELECT MIN(name) FROM schema_migrations)`); err != nil {
+		t.Fatalf("tamper migration metadata: %v", err)
+	}
+	if err := VerifyMigrations(ctx, db); err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("verify drift error = %v, want checksum mismatch", err)
+	}
+}
+
 func TestApplyMigrationsRejectsChecksumMismatch(t *testing.T) {
 	databaseURL := os.Getenv("TEST_DATABASE_URL")
 	if databaseURL == "" {

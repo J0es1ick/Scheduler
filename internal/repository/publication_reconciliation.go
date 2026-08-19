@@ -77,6 +77,21 @@ func (r *ParserSnapshotRepository) ReconcilePendingPublications(ctx context.Cont
 	}
 }
 
+func (r *ParserSnapshotRepository) EnsureNoPendingPublicationReconciliations(ctx context.Context) error {
+	var pending int
+	if err := r.db.GetContext(ctx, &pending,
+		`SELECT COUNT(*)::int FROM publication_reconciliation_queue`); err != nil {
+		return fmt.Errorf("count pending publication reconciliations: %w", err)
+	}
+	if pending > 0 {
+		return fmt.Errorf(
+			"%d publication reconciliation(s) are pending; run scheduler-migrate before starting services",
+			pending,
+		)
+	}
+	return nil
+}
+
 func (r *ParserSnapshotRepository) claimPublicationReconciliation(
 	ctx context.Context,
 	claimToken string,

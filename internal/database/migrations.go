@@ -131,6 +131,52 @@ func ApplyMigrations(ctx context.Context, db *sqlx.DB) error {
 	return nil
 }
 
+func VerifyMigrations(ctx context.Context, db *sqlx.DB) error {
+	entries, err := fs.Glob(appmigration.Files, "*.up.sql")
+	if err != nil {
+		return fmt.Errorf("list embedded migrations: %w", err)
+	}
+	sort.Strings(entries)
+
+	var applied []struct {
+		Name     string `db:"name"`
+		Checksum string `db:"checksum"`
+	}
+	if err = db.SelectContext(ctx, &applied,
+		`SELECT name, checksum FROM schema_migrations ORDER BY name`); err != nil {
+		return fmt.Errorf("read schema migrations; run scheduler-migrate first: %w", err)
+	}
+	checksums := make(map[string]string, len(applied))
+	for _, migration := range applied {
+		checksums[migration.Name] = migration.Checksum
+	}
+	expectedNames := make(map[string]struct{}, len(entries))
+	for _, name := range entries {
+		expectedNames[name] = struct{}{}
+		body, readErr := appmigration.Files.ReadFile(name)
+		if readErr != nil {
+			return fmt.Errorf("read migration %s: %w", name, readErr)
+		}
+		stored, ok := checksums[name]
+		if !ok {
+			return fmt.Errorf("migration %s is not applied; run scheduler-migrate first", name)
+		}
+		expected := migrationChecksum(body)
+		if stored != expected {
+			return fmt.Errorf("migration %s checksum mismatch: run scheduler-migrate and verify release artifacts", name)
+		}
+	}
+	for _, migration := range applied {
+		if _, ok := expectedNames[migration.Name]; !ok {
+			return fmt.Errorf(
+				"database contains migration %s that is not present in this release; refusing an unsafe downgrade",
+				migration.Name,
+			)
+		}
+	}
+	return nil
+}
+
 type migrationConnection interface {
 	GetContext(context.Context, any, string, ...any) error
 }

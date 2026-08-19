@@ -14,13 +14,15 @@ x-app-image: &app-image
   tmpfs:
     - /tmp:size=16m,mode=1777
 
-x-app-environment: &app-environment
+x-database-environment: &database-environment
   DATABASE_HOST: postgres
   DATABASE_PORT: 5432
-  DATABASE_USER: ${DATABASE_USER:-postgres}
-  DATABASE_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD is required}
   DATABASE_NAME: ${DATABASE_NAME:-scheduler}
   DATABASE_SSLMODE: disable
+  DATABASE_MAX_OPEN_CONNECTIONS: ${DATABASE_MAX_OPEN_CONNECTIONS:-15}
+  DATABASE_MAX_IDLE_CONNECTIONS: ${DATABASE_MAX_IDLE_CONNECTIONS:-5}
+  DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-10}
+  DATABASE_STATEMENT_TIMEOUT_SECONDS: ${DATABASE_STATEMENT_TIMEOUT_SECONDS:-30}
 
 x-logging: &default-logging
   driver: json-file
@@ -34,8 +36,8 @@ services:
     container_name: scheduler-postgres
     restart: always
     environment:
-      POSTGRES_USER: ${DATABASE_USER:-postgres}
-      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-postgres}
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?POSTGRES_SUPERUSER_PASSWORD is required}
       POSTGRES_DB: ${DATABASE_NAME:-scheduler}
     ports:
       - "127.0.0.1:${POSTGRES_HOST_PORT:-55432}:5432"
@@ -48,16 +50,46 @@ services:
       retries: 12
     logging: *default-logging
 
+  postgres-bootstrap:
+    image: postgres:16
+    container_name: scheduler-postgres-bootstrap
+    restart: "no"
+    environment:
+      POSTGRES_SUPERUSER: ${POSTGRES_SUPERUSER:-postgres}
+      POSTGRES_SUPERUSER_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?POSTGRES_SUPERUSER_PASSWORD is required}
+      DATABASE_NAME: ${DATABASE_NAME:-scheduler}
+      DATABASE_MIGRATOR_USER: ${DATABASE_MIGRATOR_USER:-scheduler_migrator}
+      DATABASE_MIGRATOR_PASSWORD: ${DATABASE_MIGRATOR_PASSWORD:?DATABASE_MIGRATOR_PASSWORD is required}
+      DATABASE_BOT_USER: ${DATABASE_BOT_USER:-scheduler_bot}
+      DATABASE_BOT_PASSWORD: ${DATABASE_BOT_PASSWORD:?DATABASE_BOT_PASSWORD is required}
+      DATABASE_ADMIN_USER: ${DATABASE_ADMIN_USER:-scheduler_admin}
+      DATABASE_ADMIN_PASSWORD: ${DATABASE_ADMIN_PASSWORD:?DATABASE_ADMIN_PASSWORD is required}
+      DATABASE_SITE_USER: ${DATABASE_SITE_USER:-scheduler_site}
+      DATABASE_SITE_PASSWORD: ${DATABASE_SITE_PASSWORD:?DATABASE_SITE_PASSWORD is required}
+      DATABASE_BACKUP_USER: ${DATABASE_BACKUP_USER:-scheduler_backup}
+      DATABASE_BACKUP_PASSWORD: ${DATABASE_BACKUP_PASSWORD:?DATABASE_BACKUP_PASSWORD is required}
+      DATABASE_RESTORE_USER: ${DATABASE_RESTORE_USER:-scheduler_restore}
+      DATABASE_RESTORE_PASSWORD: ${DATABASE_RESTORE_PASSWORD:?DATABASE_RESTORE_PASSWORD is required}
+    volumes:
+      - ./docker/postgres-bootstrap/bootstrap.sh:/usr/local/bin/scheduler-postgres-bootstrap:ro
+    command: ["/bin/sh", "/usr/local/bin/scheduler-postgres-bootstrap"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
+
   migrator:
     <<: *app-image
     container_name: scheduler-migrator
     restart: "no"
     environment:
-      <<: *app-environment
+      <<: *database-environment
+      DATABASE_USER: ${DATABASE_MIGRATOR_USER:-scheduler_migrator}
+      DATABASE_PASSWORD: ${DATABASE_MIGRATOR_PASSWORD:?DATABASE_MIGRATOR_PASSWORD is required}
     command: ["/app/scheduler-migrate"]
     depends_on:
-      postgres:
-        condition: service_healthy
+      postgres-bootstrap:
+        condition: service_completed_successfully
     logging: *default-logging
 
   bot:
@@ -65,17 +97,25 @@ services:
     container_name: scheduler-bot
     restart: unless-stopped
     init: true
-    env_file: .env
     environment:
-      <<: *app-environment
+      <<: *database-environment
+      DATABASE_USER: ${DATABASE_BOT_USER:-scheduler_bot}
+      DATABASE_PASSWORD: ${DATABASE_BOT_PASSWORD:?DATABASE_BOT_PASSWORD is required}
       BOT_TOKEN: ${BOT_TOKEN:?BOT_TOKEN is required}
+      BOT_USERNAME: ${BOT_USERNAME:-schedule_free_bot}
       BOT_TELEGRAM_API_URL: ${BOT_TELEGRAM_API_URL:-}
       BOT_HEALTH_PORT: 8082
+      BOT_MAX_CONCURRENT_HANDLERS: ${BOT_MAX_CONCURRENT_HANDLERS:-32}
+      BOT_MAX_PENDING_PER_SENDER: ${BOT_MAX_PENDING_PER_SENDER:-8}
+      BOT_STATE_TTL_MINUTES: ${BOT_STATE_TTL_MINUTES:-30}
+      PROJECT_URL: ${PROJECT_URL:-https://github.com/J0es1ick/Scheduler}
+      BOT_PUBLIC_URL: ${BOT_PUBLIC_URL:-https://t.me/schedule_free_bot}
+      ADMIN_PUBLIC_URL: ${ADMIN_PUBLIC_URL:-}
     command: ["/app/scheduler-bot"]
     depends_on:
       migrator:
         condition: service_completed_successfully
-    stop_grace_period: 20s
+    stop_grace_period: 45s
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8082/ready >/dev/null || exit 1"]
       interval: 30s
@@ -89,12 +129,17 @@ services:
     container_name: scheduler-admin
     restart: unless-stopped
     init: true
-    env_file: .env
     environment:
-      <<: *app-environment
+      <<: *database-environment
+      DATABASE_USER: ${DATABASE_ADMIN_USER:-scheduler_admin}
+      DATABASE_PASSWORD: ${DATABASE_ADMIN_PASSWORD:?DATABASE_ADMIN_PASSWORD is required}
       BOT_TOKEN: ${BOT_TOKEN:?BOT_TOKEN is required}
       ADMIN_METRICS_TOKEN: ${ADMIN_METRICS_TOKEN:?ADMIN_METRICS_TOKEN is required}
+      ADMIN_ACCESS_TOKEN: ${ADMIN_ACCESS_TOKEN:-}
+      ADMIN_ACCESS_LOGIN_ENABLED: ${ADMIN_ACCESS_LOGIN_ENABLED:-false}
       ADMIN_COOKIE_SECURE: ${ADMIN_COOKIE_SECURE:-true}
+      ADMIN_PUBLIC_URL: ${ADMIN_PUBLIC_URL:-}
+      ADMIN_TRUSTED_PROXY_CIDRS: ${ADMIN_TRUSTED_PROXY_CIDRS:-127.0.0.1/32,::1/128}
       ADMIN_PORT: 8080
     command: ["/app/scheduler-admin"]
     ports:
@@ -107,7 +152,7 @@ services:
       interval: 10s
       timeout: 3s
       retries: 6
-    stop_grace_period: 20s
+    stop_grace_period: 45s
     logging: *default-logging
 
   site:
@@ -115,10 +160,13 @@ services:
     container_name: scheduler-site
     restart: unless-stopped
     init: true
-    env_file: .env
     environment:
-      <<: *app-environment
+      <<: *database-environment
+      DATABASE_USER: ${DATABASE_SITE_USER:-scheduler_site}
+      DATABASE_PASSWORD: ${DATABASE_SITE_PASSWORD:?DATABASE_SITE_PASSWORD is required}
       SITE_PORT: 8080
+      PROJECT_URL: ${PROJECT_URL:-https://github.com/J0es1ick/Scheduler}
+      BOT_PUBLIC_URL: ${BOT_PUBLIC_URL:-https://t.me/schedule_free_bot}
     command: ["/app/scheduler-site"]
     ports:
       - "${SITE_BIND_ADDRESS:-127.0.0.1}:${SITE_HOST_PORT:-18081}:8080"
@@ -130,7 +178,7 @@ services:
       interval: 10s
       timeout: 3s
       retries: 6
-    stop_grace_period: 20s
+    stop_grace_period: 45s
     logging: *default-logging
 
   backup:
@@ -146,7 +194,9 @@ services:
     tmpfs:
       - /tmp:size=16m,mode=1777
     environment:
-      <<: *app-environment
+      <<: *database-environment
+      DATABASE_USER: ${DATABASE_BACKUP_USER:-scheduler_backup}
+      DATABASE_PASSWORD: ${DATABASE_BACKUP_PASSWORD:?DATABASE_BACKUP_PASSWORD is required}
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
       BACKUP_MAX_AGE_SECONDS: ${BACKUP_MAX_AGE_SECONDS:-90000}
       BACKUP_OFFSITE_MAX_AGE_SECONDS: ${BACKUP_OFFSITE_MAX_AGE_SECONDS:-90000}
