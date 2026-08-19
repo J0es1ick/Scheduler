@@ -11,6 +11,7 @@ func TestConfigureIdentityAcceptsMentionedGroupCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create offline bot: %v", err)
 	}
+	telegramBot.Me = &tele.User{Username: "schedule_free_bot"}
 
 	username, err := ConfigureIdentity(
 		telegramBot,
@@ -50,6 +51,7 @@ func TestConfigureIdentityFallsBackToPublicURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create offline bot: %v", err)
 	}
+	telegramBot.Me = &tele.User{Username: "schedule_free_bot"}
 
 	username, err := ConfigureIdentity(telegramBot, "", "https://t.me/schedule_free_bot")
 	if err != nil {
@@ -57,5 +59,17 @@ func TestConfigureIdentityFallsBackToPublicURL(t *testing.T) {
 	}
 	if username != "schedule_free_bot" || telegramBot.Me.Username != username {
 		t.Fatalf("configured username = %q, bot username = %q", username, telegramBot.Me.Username)
+	}
+}
+
+func TestConfigureIdentityRejectsConfiguredUsernameMismatch(t *testing.T) {
+	telegramBot, err := tele.NewBot(tele.Settings{Offline: true})
+	if err != nil {
+		t.Fatalf("create offline bot: %v", err)
+	}
+	telegramBot.Me = &tele.User{Username: "actual_schedule_bot"}
+
+	if _, err = ConfigureIdentity(telegramBot, "configured_schedule_bot", ""); err == nil {
+		t.Fatal("identity mismatch must fail startup")
 	}
 }

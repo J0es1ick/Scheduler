@@ -81,7 +81,6 @@ func main() {
 	bot, err := tgbotapi.NewBot(tgbotapi.Settings{
 		URL:     cfg.BotTelegramAPIURL,
 		Token:   cfg.BotToken,
-		Offline: true,
 		OnError: botpkg.HandleError,
 		Client: &http.Client{
 			Timeout: 25 * time.Second,
@@ -235,7 +234,7 @@ func main() {
 	health.SetPolling(false)
 	handlerTracker.StopAccepting()
 	bot.Stop()
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 	if err := handlerTracker.Wait(shutdownCtx); err != nil {
 		slog.Warn("Telegram handlers did not stop before deadline", "err", err)

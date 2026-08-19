@@ -8,6 +8,7 @@ import (
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	tele "gopkg.in/telebot.v3"
 )
@@ -19,6 +20,13 @@ var ErrSenderBusy = errors.New("sender handler queue is full")
 var handlerActive atomic.Int64
 var handlerWaiting atomic.Int64
 var handlerRejected atomic.Int64
+
+const busyResponseText = "Бот занят обработкой запросов. Попробуйте ещё раз через несколько секунд."
+
+var busyNotices = struct {
+	sync.Mutex
+	last map[int64]time.Time
+}{last: make(map[int64]time.Time)}
 
 func HandlerLoad() (active, waiting, rejected int64) {
 	return handlerActive.Load(), handlerWaiting.Load(), handlerRejected.Load()
@@ -45,10 +53,15 @@ func RecoverPanics() tele.MiddlewareFunc {
 
 func HandleError(err error, c tele.Context) {
 	if errors.Is(err, ErrBotBusy) || errors.Is(err, ErrSenderBusy) {
-		if c != nil && c.Callback() != nil {
+		if c == nil {
+			return
+		}
+		if c.Callback() != nil {
 			_ = c.Respond(&tele.CallbackResponse{
-				Text: "Бот занят обработкой запросов. Попробуйте ещё раз через несколько секунд.",
+				Text: busyResponseText,
 			})
+		} else if shouldSendBusyNotice(serializationID(c), time.Now()) {
+			_ = c.Send(busyResponseText)
 		}
 		return
 	}
@@ -89,7 +102,7 @@ func SerializeBySender(maxPending ...int) tele.MiddlewareFunc {
 
 	return func(next tele.HandlerFunc) tele.HandlerFunc {
 		return func(c tele.Context) error {
-			id := senderID(c)
+			id := serializationID(c)
 			if id == 0 {
 				return next(c)
 			}
@@ -191,4 +204,34 @@ func senderID(c tele.Context) int64 {
 		return 0
 	}
 	return c.Sender().ID
+}
+
+func serializationID(c tele.Context) int64 {
+	if c == nil {
+		return 0
+	}
+	if chat := c.Chat(); chat != nil && chat.Type != tele.ChatPrivate {
+		return chat.ID
+	}
+	return senderID(c)
+}
+
+func shouldSendBusyNotice(id int64, now time.Time) bool {
+	if id == 0 {
+		return false
+	}
+	busyNotices.Lock()
+	defer busyNotices.Unlock()
+	if previous := busyNotices.last[id]; now.Sub(previous) < 10*time.Second {
+		return false
+	}
+	busyNotices.last[id] = now
+	if len(busyNotices.last) > 1024 {
+		for key, seenAt := range busyNotices.last {
+			if now.Sub(seenAt) >= time.Minute {
+				delete(busyNotices.last, key)
+			}
+		}
+	}
+	return true
 }

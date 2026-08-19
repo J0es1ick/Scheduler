@@ -13,10 +13,15 @@ import (
 type senderContext struct {
 	tele.Context
 	sender *tele.User
+	chat   *tele.Chat
 }
 
 func (c senderContext) Sender() *tele.User {
 	return c.sender
+}
+
+func (c senderContext) Chat() *tele.Chat {
+	return c.chat
 }
 
 func TestRecoverPanicsConvertsPanicToError(t *testing.T) {
@@ -121,6 +126,44 @@ func TestSerializeBySenderRejectsAfterQueueCapacity(t *testing.T) {
 	for range 2 {
 		if err := <-done; err != nil {
 			t.Fatalf("queued handler error = %v", err)
+		}
+	}
+}
+
+func TestSerializeBySenderSerializesWholeGroupChat(t *testing.T) {
+	firstEntered := make(chan struct{})
+	secondEntered := make(chan struct{})
+	release := make(chan struct{})
+	var calls atomic.Int32
+	handler := SerializeBySender(1)(func(tele.Context) error {
+		if calls.Add(1) == 1 {
+			close(firstEntered)
+		} else {
+			close(secondEntered)
+		}
+		<-release
+		return nil
+	})
+	chat := &tele.Chat{ID: -100123, Type: tele.ChatGroup}
+	done := make(chan error, 2)
+	go func() {
+		done <- handler(senderContext{sender: &tele.User{ID: 1}, chat: chat})
+	}()
+	<-firstEntered
+	go func() {
+		done <- handler(senderContext{sender: &tele.User{ID: 2}, chat: chat})
+	}()
+
+	select {
+	case <-secondEntered:
+		close(release)
+		t.Fatal("handlers from one group chat ran concurrently")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatalf("handler error = %v", err)
 		}
 	}
 }

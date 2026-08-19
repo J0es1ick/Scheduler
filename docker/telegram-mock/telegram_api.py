@@ -10,7 +10,14 @@ class TelegramAPIHandler(BaseHTTPRequestHandler):
             self.rfile.read(length)
 
         method = self.path.rsplit("/", 1)[-1]
-        if method == "getUpdates":
+        if method == "getMe":
+            result = {
+                "id": 123456,
+                "is_bot": True,
+                "first_name": "Scheduler CI",
+                "username": "schedule_free_bot",
+            }
+        elif method == "getUpdates":
             time.sleep(0.25)
             result = []
         else:

@@ -14,22 +14,33 @@ func ConfigureIdentity(bot *tele.Bot, configuredUsername, publicURL string) (str
 		return "", errors.New("bot is nil")
 	}
 
-	username := normalizeUsername(configuredUsername)
-	if username == "" {
-		username = usernameFromPublicURL(publicURL)
+	actualUsername := ""
+	if bot.Me != nil {
+		actualUsername = normalizeUsername(bot.Me.Username)
 	}
-	if username == "" {
-		return "", errors.New("BOT_USERNAME is empty and cannot be inferred from BOT_PUBLIC_URL")
+	if actualUsername == "" {
+		return "", errors.New("Telegram getMe response does not contain a bot username")
 	}
-	if err := validateUsername(username); err != nil {
-		return "", fmt.Errorf("invalid BOT_USERNAME: %w", err)
+	if err := validateUsername(actualUsername); err != nil {
+		return "", fmt.Errorf("invalid Telegram bot username: %w", err)
 	}
 
-	if bot.Me == nil {
-		bot.Me = &tele.User{}
+	expectedUsername := normalizeUsername(configuredUsername)
+	if expectedUsername == "" {
+		expectedUsername = usernameFromPublicURL(publicURL)
 	}
-	bot.Me.Username = username
-	return username, nil
+	if expectedUsername != "" {
+		if err := validateUsername(expectedUsername); err != nil {
+			return "", fmt.Errorf("invalid BOT_USERNAME: %w", err)
+		}
+		if !strings.EqualFold(expectedUsername, actualUsername) {
+			return "", fmt.Errorf(
+				"configured bot username %q does not match Telegram identity %q",
+				expectedUsername, actualUsername,
+			)
+		}
+	}
+	return actualUsername, nil
 }
 
 func usernameFromPublicURL(rawURL string) string {
