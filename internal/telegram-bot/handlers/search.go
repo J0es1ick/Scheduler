@@ -66,14 +66,14 @@ func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) e
 		days = mapToDaySchedule(data)
 
 	case dto.SearchTypeTeacher:
-		data, err := h.ScheduleService.GetScheduleForTeacherRange(ctx, state.SearchQuery, now, to)
+		data, err := h.ScheduleService.GetScheduleForTeacherRange(ctx, state.UniversityID, state.SearchQuery, now, to)
 		if err != nil {
 			return c.Send("Ошибка получения расписания.")
 		}
 		days = mapToDaySchedule(data)
 
 	case dto.SearchTypeRoom:
-		data, err := h.ScheduleService.GetScheduleForRoomRange(ctx, state.SearchQuery, now, to)
+		data, err := h.ScheduleService.GetScheduleForRoomRange(ctx, state.UniversityID, state.SearchQuery, now, to)
 		if err != nil {
 			return c.Send("Ошибка получения расписания.")
 		}
@@ -109,7 +109,7 @@ func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) e
 	state.Step = "done"
 	h.StateManager.Set(c.Sender().ID, state)
 
-	slog.Info("search completed", "type", state.SearchType, "query", state.SearchQuery, "days", len(days))
+	slog.Info("search completed", "type", state.SearchType, "days", len(days))
 
 	header := fmt.Sprintf("Результаты поиска: %s", state.SearchQuery)
 	if err := c.Send(header); err != nil {

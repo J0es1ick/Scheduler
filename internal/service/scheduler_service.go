@@ -57,32 +57,32 @@ func (s *ScheduleService) GetScheduleForGroupRange(ctx context.Context, groupID 
 	return s.lessonsForRange(ctx, lessons, from, to)
 }
 
-func (s *ScheduleService) GetScheduleForTeacher(ctx context.Context, teacherName string, date time.Time) ([]domain.Lesson, error) {
-	lessons, err := s.lessonRepo.GetLessonsByTeacher(ctx, teacherName)
+func (s *ScheduleService) GetScheduleForTeacher(ctx context.Context, universityID, teacherName string, date time.Time) ([]domain.Lesson, error) {
+	lessons, err := s.lessonRepo.GetLessonsByTeacher(ctx, universityID, teacherName)
 	if err != nil {
 		return nil, err
 	}
 	return s.lessonsForDate(ctx, lessons, date)
 }
 
-func (s *ScheduleService) GetScheduleForTeacherRange(ctx context.Context, teacherName string, from, to time.Time) (map[time.Time][]domain.Lesson, error) {
-	lessons, err := s.lessonRepo.GetLessonsByTeacher(ctx, teacherName)
+func (s *ScheduleService) GetScheduleForTeacherRange(ctx context.Context, universityID, teacherName string, from, to time.Time) (map[time.Time][]domain.Lesson, error) {
+	lessons, err := s.lessonRepo.GetLessonsByTeacher(ctx, universityID, teacherName)
 	if err != nil {
 		return nil, err
 	}
 	return s.lessonsForRange(ctx, lessons, from, to)
 }
 
-func (s *ScheduleService) GetScheduleForRoom(ctx context.Context, room string, date time.Time) ([]domain.Lesson, error) {
-	lessons, err := s.lessonRepo.GetLessonsByRoom(ctx, room)
+func (s *ScheduleService) GetScheduleForRoom(ctx context.Context, universityID, room string, date time.Time) ([]domain.Lesson, error) {
+	lessons, err := s.lessonRepo.GetLessonsByRoom(ctx, universityID, room)
 	if err != nil {
 		return nil, err
 	}
 	return s.lessonsForDate(ctx, lessons, date)
 }
 
-func (s *ScheduleService) GetScheduleForRoomRange(ctx context.Context, room string, from, to time.Time) (map[time.Time][]domain.Lesson, error) {
-	lessons, err := s.lessonRepo.GetLessonsByRoom(ctx, room)
+func (s *ScheduleService) GetScheduleForRoomRange(ctx context.Context, universityID, room string, from, to time.Time) (map[time.Time][]domain.Lesson, error) {
+	lessons, err := s.lessonRepo.GetLessonsByRoom(ctx, universityID, room)
 	if err != nil {
 		return nil, err
 	}

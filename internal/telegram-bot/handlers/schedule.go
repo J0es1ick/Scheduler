@@ -79,17 +79,33 @@ func (h *Handler) sendDaysWithMarkup(
 	universityID string,
 	markup *tgbotapi.ReplyMarkup,
 ) error {
+	return h.sendDaysWithMarkupAndHeader(c, days, universityID, markup, "")
+}
+
+func (h *Handler) sendDaysWithMarkupAndHeader(
+	c tgbotapi.Context,
+	days []dto.DaySchedule,
+	universityID string,
+	markup *tgbotapi.ReplyMarkup,
+	header string,
+) error {
+	header = strings.TrimSpace(header)
+	if header != "" {
+		header += "\n\n"
+	}
 	if len(days) == 0 {
+		text := header + "Занятий нет." + h.sourceFreshnessText(universityID)
 		if c.Callback() != nil && markup != nil {
-			return editOrSend(c, "Занятий нет.", markup)
+			return editOrSend(c, text, markup)
 		}
 		if markup != nil {
-			return sendScheduleMessage(c, "Занятий нет.", markup)
+			return sendScheduleMessage(c, text, markup)
 		}
-		return c.Send("Занятий нет.", markup)
+		return c.Send(text, markup)
 	}
 
 	var full strings.Builder
+	full.WriteString(header)
 	for _, day := range days {
 		full.WriteString(formatDaySchedule(day))
 		full.WriteString("\n")
@@ -312,17 +328,37 @@ func (h *Handler) sendTargetWeek(
 	from time.Time,
 	daysCount int,
 ) error {
+	from = scheduleWeekStart(from)
 	markup := keyboards.ScheduleWeekNavigation(from, target.GroupName, isGroupChat(c))
 	days, err := h.getScheduleForTarget(ctx, target, from, from.AddDate(0, 0, daysCount-1))
 	if err != nil {
 		return sendScheduleLoadError(c, err)
 	}
-	return h.sendDaysWithMarkup(
+	return h.sendDaysWithMarkupAndHeader(
 		c,
 		days,
 		target.UniversityID,
 		markup,
+		formatSchedulePeriod(from, daysCount),
 	)
+}
+
+func scheduleWeekStart(date time.Time) time.Time {
+	weekday := int(date.Weekday())
+	if weekday == 0 {
+		weekday = 7
+	}
+	date = time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+	return date.AddDate(0, 0, -(weekday - 1))
+}
+
+func formatSchedulePeriod(from time.Time, daysCount int) string {
+	to := from.AddDate(0, 0, daysCount-1)
+	label := "Период"
+	if daysCount == 7 {
+		label = "Неделя"
+	}
+	return fmt.Sprintf("%s: %s–%s", label, from.Format("02.01.2006"), to.Format("02.01.2006"))
 }
 
 func (h *Handler) HandleWeekDay(c tgbotapi.Context) error {

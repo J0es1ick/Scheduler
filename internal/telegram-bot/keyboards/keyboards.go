@@ -386,7 +386,7 @@ func ScheduleWeekNavigation(from time.Time, groupName string, groupChat bool) *t
 	rows := []tgbotapi.Row{
 		menu.Row(
 			menu.Data("← Неделя", "schedule_week", from.AddDate(0, 0, -7).Format("2006-01-02")),
-			menu.Data("Текущая", "schedule_week", time.Now().Format("2006-01-02")),
+			menu.Data("Текущая", "schedule_week", time.Now().In(from.Location()).Format("2006-01-02")),
 			menu.Data("Неделя →", "schedule_week", from.AddDate(0, 0, 7).Format("2006-01-02")),
 		),
 		menu.Row(

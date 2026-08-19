@@ -144,22 +144,32 @@ func (r *LessonRepository) GetLessonsByUniversityID(
 	return lessons, nil
 }
 
-func (r *LessonRepository) GetLessonsByTeacher(ctx context.Context, teacher string) ([]domain.Lesson, error) {
+func (r *LessonRepository) GetLessonsByTeacher(
+	ctx context.Context,
+	universityID string,
+	teacher string,
+) ([]domain.Lesson, error) {
 	var lessons []domain.Lesson
 	err := r.db.SelectContext(ctx, &lessons,
-		lessonSelect+` WHERE teacher = $1 ORDER BY day_of_week, time_start`, teacher)
+		lessonSelect+` WHERE university_id = $1 AND teacher = $2 ORDER BY day_of_week, time_start`,
+		universityID, teacher)
 	if err != nil {
-		return nil, fmt.Errorf("get lessons by teacher %q: %w", teacher, err)
+		return nil, fmt.Errorf("get lessons by university=%s teacher=%q: %w", universityID, teacher, err)
 	}
 	return lessons, nil
 }
 
-func (r *LessonRepository) GetLessonsByRoom(ctx context.Context, room string) ([]domain.Lesson, error) {
+func (r *LessonRepository) GetLessonsByRoom(
+	ctx context.Context,
+	universityID string,
+	room string,
+) ([]domain.Lesson, error) {
 	var lessons []domain.Lesson
 	err := r.db.SelectContext(ctx, &lessons,
-		lessonSelect+` WHERE room = $1 ORDER BY day_of_week, time_start`, room)
+		lessonSelect+` WHERE university_id = $1 AND room = $2 ORDER BY day_of_week, time_start`,
+		universityID, room)
 	if err != nil {
-		return nil, fmt.Errorf("get lessons by room %q: %w", room, err)
+		return nil, fmt.Errorf("get lessons by university=%s room=%q: %w", universityID, room, err)
 	}
 	return lessons, nil
 }
