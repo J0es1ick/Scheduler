@@ -30,6 +30,14 @@ func TestValidateAcceptsVersionOneSnapshot(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsOtherLessonType(t *testing.T) {
+	snapshot := validSnapshot()
+	snapshot.Groups[0].Lessons[0].Type = "other"
+	if err := Validate(snapshot); err != nil {
+		t.Fatalf("Validate() rejected neutral lesson type: %v", err)
+	}
+}
+
 func TestValidateRejectsInvalidCycle(t *testing.T) {
 	snapshot := validSnapshot()
 	snapshot.Groups[0].Lessons[0].Schedule.Recurrence = Recurrence{

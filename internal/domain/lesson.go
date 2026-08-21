@@ -13,6 +13,7 @@ const (
 	LessonTypeExam         LessonType = "exam"
 	LessonTypeCredit       LessonType = "credit"
 	LessonTypeConsultation LessonType = "consultation"
+	LessonTypeOther        LessonType = "other"
 )
 
 const (

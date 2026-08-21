@@ -45,7 +45,7 @@ var (
 		"type-pz":   domain.LessonTypePractice,
 		"type-lab":  domain.LessonTypeLab,
 		"type-sem":  domain.LessonTypeSeminar,
-		"type-kons": domain.LessonTypeSeminar,
+		"type-kons": domain.LessonTypeConsultation,
 	}
 	colToDayOfWeek = []int{1, 2, 3, 4, 5, 6}
 
@@ -506,15 +506,19 @@ func parseScheduleTable(htmlBody, gid, semesterID string) ([]domain.Lesson, erro
 				break
 			}
 			cell := cells.Eq(cellIndex)
-			cssClass := lessonCSSClass(cell)
-			if cssClass == "" {
+			rawText := cellText(cell)
+			if strings.TrimSpace(strings.ReplaceAll(rawText, "\u00a0", "")) == "" {
 				continue
 			}
-			subject, teacher, room, validFrom, validTo, ok := parseCell(cellText(cell), cssClass)
+			cssClass := lessonCSSClass(cell)
+			lessonType := domain.LessonTypeOther
+			if cssClass != "" {
+				lessonType = cssToLessonType[cssClass]
+			}
+			subject, teacher, room, validFrom, validTo, ok := parseCell(rawText, cssClass)
 			if !ok || subject == "" {
 				continue
 			}
-			lessonType := cssToLessonType[cssClass]
 			from, to := validFrom, validTo
 			lessons = append(lessons, domain.Lesson{
 				ID:           lessonStableID(gid, colToDayOfWeek[col], timeStart, subject, teacher, room, string(currentWeekType), validFrom, validTo),

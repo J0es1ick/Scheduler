@@ -29,6 +29,7 @@ export const lessonTypes = [
   ["exam", "Экзамен"],
   ["credit", "Зачёт"],
   ["consultation", "Консультация"],
+  ["other", "Другое"],
 ] as const;
 
 export const lessonTypeLabels: Record<string, string> = Object.fromEntries(lessonTypes);

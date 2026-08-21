@@ -7,7 +7,7 @@ import re
 SCHEMA_VERSION = "1.0"
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$")
 _TIME = re.compile(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
-_TYPES = {"lecture", "practice", "lab", "seminar", "exam", "credit", "consultation"}
+_TYPES = {"lecture", "practice", "lab", "seminar", "exam", "credit", "consultation", "other"}
 _RECURRENCES = {"every", "odd", "even", "date", "cycle"}
 MAX_GROUPS = 5_000
 MAX_LESSONS = 50_000

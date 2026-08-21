@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,6 +102,34 @@ func TestParseScheduleTableLiveStructure(t *testing.T) {
 	}
 }
 
+func TestParseScheduleTableKeepsUntypedResearchWork(t *testing.T) {
+	html := `<table class="schedule">
+		<tr><td rowspan="2" class="week">нед</td><td rowspan="2" class="time">Время</td><td colspan="6">Занятия</td></tr>
+		<tr><td>Пн</td><td>Вт</td><td>Ср</td><td>Чт</td><td>Пт</td><td>Сб</td></tr>
+		<tr><td rowspan="1">1</td><td class="time">08:00-17:25</td>
+			<td>Научно-исследовательская работа - - - <br />с 07.09.2026 по 28.12.2026</td>
+			<td>&nbsp;</td><td>&nbsp;</td>
+			<td>Научно-исследовательская работа - - - <br />с 10.09.2026 по 17.12.2026</td>
+			<td>&nbsp;</td><td>&nbsp;</td></tr>
+	</table>`
+
+	lessons, err := parseScheduleTable(html, "isuct:group:20901", "isuct-current")
+	if err != nil {
+		t.Fatalf("parseScheduleTable() error = %v", err)
+	}
+	if len(lessons) != 2 {
+		t.Fatalf("len(lessons) = %d, want 2: %#v", len(lessons), lessons)
+	}
+	if lessons[0].DayOfWeek != 1 || lessons[1].DayOfWeek != 4 {
+		t.Fatalf("unexpected research work days: %d and %d", lessons[0].DayOfWeek, lessons[1].DayOfWeek)
+	}
+	for _, lesson := range lessons {
+		if lesson.Type != domain.LessonTypeOther || lesson.Subject != "Научно-исследовательская работа - - -" {
+			t.Fatalf("unexpected untyped lesson: %#v", lesson)
+		}
+	}
+}
+
 func TestLiveISUCTAdapter(t *testing.T) {
 	if os.Getenv("ISUCT_INTEGRATION_TEST") != "1" {
 		t.Skip("set ISUCT_INTEGRATION_TEST=1 to call the live ISUCT website")
@@ -117,15 +146,19 @@ func TestLiveISUCTAdapter(t *testing.T) {
 		t.Fatalf("FetchGroups() returned only %d groups", len(groups))
 	}
 
+	groupName := strings.TrimSpace(os.Getenv("ISUCT_TEST_GROUP"))
+	if groupName == "" {
+		groupName = "1/0"
+	}
 	var selected *domain.Group
 	for i := range groups {
-		if groups[i].Name == "1/0" {
+		if groups[i].Name == groupName {
 			selected = &groups[i]
 			break
 		}
 	}
 	if selected == nil {
-		t.Fatal("live group 1/0 was not discovered")
+		t.Fatalf("live group %s was not discovered", groupName)
 	}
 	lessons, err := adapter.FetchSchedule(ctx, selected.ID)
 	if err != nil {
@@ -133,6 +166,18 @@ func TestLiveISUCTAdapter(t *testing.T) {
 	}
 	if len(lessons) == 0 {
 		t.Fatalf("FetchSchedule(%s) returned no lessons", selected.Name)
+	}
+	for _, lesson := range lessons {
+		if lesson.Type == domain.LessonTypeOther {
+			t.Logf(
+				"live untyped lesson: day=%d week=%s time=%s-%s subject=%q",
+				lesson.DayOfWeek,
+				lesson.WeekType,
+				lesson.TimeStart,
+				lesson.TimeEnd,
+				lesson.Subject,
+			)
+		}
 	}
 	t.Logf("live ISUCT: %d groups, %d lessons for %s", len(groups), len(lessons), selected.Name)
 }

@@ -32,6 +32,7 @@ export const snapshotLessonTypeLabels: Record<string, string> = {
   exam: "Экзамен",
   credit: "Зачёт",
   consultation: "Консультация",
+  other: "Другое",
 };
 
 export function snapshotLessonDay(lesson: SnapshotLesson) {

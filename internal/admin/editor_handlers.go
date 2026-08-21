@@ -158,7 +158,7 @@ func (r lessonMutationRequest) lesson(requireGroup bool) (LessonMutation, error)
 	if !oneOf(r.WeekType, "every", "odd", "even", "date") {
 		return LessonMutation{}, errors.New("выберите режим повторения занятия")
 	}
-	if !oneOf(r.Type, "lecture", "practice", "lab", "seminar", "exam", "credit", "consultation") {
+	if !oneOf(r.Type, "lecture", "practice", "lab", "seminar", "exam", "credit", "consultation", "other") {
 		return LessonMutation{}, errors.New("выберите тип занятия")
 	}
 	start, startErr := time.Parse("15:04", r.TimeStart)

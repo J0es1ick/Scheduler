@@ -41,6 +41,11 @@ class ValidationTest(unittest.TestCase):
     def test_valid_snapshot(self) -> None:
         validate_snapshot(valid_snapshot())
 
+    def test_other_lesson_type_is_supported(self) -> None:
+        snapshot = valid_snapshot()
+        snapshot["groups"][0]["lessons"][0]["type"] = "other"
+        validate_snapshot(snapshot)
+
     def test_duplicate_lesson_is_rejected(self) -> None:
         snapshot = valid_snapshot()
         snapshot["groups"][0]["lessons"].append(snapshot["groups"][0]["lessons"][0].copy())

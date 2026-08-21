@@ -348,6 +348,10 @@
   border-left-color: var(--red);
 }
 
+.board-lesson.type-other {
+  border-left-color: var(--muted);
+}
+
 .board-lesson.is-manual {
   background: #fffaf0;
 }
@@ -973,5 +977,4 @@
 .ledger-list strong {
   font-size: 13px;
 }
-
 

@@ -29,6 +29,7 @@ const lessonLabels: Record<string, string> = {
   exam: "Экзамен",
   credit: "Зачёт",
   consultation: "Консультация",
+  other: "Другое",
 };
 
 export function DataPage() {

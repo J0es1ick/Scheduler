@@ -66,7 +66,7 @@
       "properties": {
         "external_id": { "$ref": "#/$defs/externalId" },
         "subject": { "type": "string", "minLength": 1 },
-        "type": { "enum": ["lecture", "practice", "lab", "seminar", "exam", "credit", "consultation"] },
+        "type": { "enum": ["lecture", "practice", "lab", "seminar", "exam", "credit", "consultation", "other"] },
         "teachers": { "type": "array", "items": { "type": "string" } },
         "rooms": { "type": "array", "items": { "type": "string" } },
         "subgroup": { "type": "integer", "minimum": 0, "maximum": 100 },

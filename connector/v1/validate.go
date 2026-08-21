@@ -151,7 +151,7 @@ func validateLesson(
 	if strings.TrimSpace(lesson.Subject) == "" {
 		add("%s.subject is required", path)
 	}
-	allowedTypes := []string{"lecture", "practice", "lab", "seminar", "exam", "credit", "consultation"}
+	allowedTypes := []string{"lecture", "practice", "lab", "seminar", "exam", "credit", "consultation", "other"}
 	if !slices.Contains(allowedTypes, lesson.Type) {
 		add("%s.type is not supported", path)
 	}
