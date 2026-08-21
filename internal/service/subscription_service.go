@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
@@ -39,4 +40,16 @@ func (s *SubscriptionService) GetGroupSubscriptions(ctx context.Context, userID 
 
 func (s *SubscriptionService) HasGroupSubscription(ctx context.Context, userID, groupID string) (bool, error) {
 	return s.subRepo.HasGroupSubscription(ctx, userID, groupID)
+}
+
+func (s *SubscriptionService) SetGroupScheduleView(
+	ctx context.Context,
+	userID string,
+	groupID string,
+	format domain.ScheduleViewFormat,
+) error {
+	if format != domain.ScheduleViewCompact && format != domain.ScheduleViewVisual {
+		return fmt.Errorf("unsupported schedule view format %q", format)
+	}
+	return s.subRepo.SetGroupScheduleView(ctx, userID, groupID, format)
 }

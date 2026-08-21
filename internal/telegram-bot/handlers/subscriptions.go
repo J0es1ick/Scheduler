@@ -47,11 +47,76 @@ func (h *Handler) HandleOpenSubscription(c tele.Context) error {
 	if item.IsDefault {
 		status = "Основная группа"
 	}
+	viewLabel := "Компактный текст"
+	if item.ScheduleViewFormat == domain.ScheduleViewVisual {
+		viewLabel = "Визуальная таблица"
+	}
 	return editOrSend(
 		c,
-		fmt.Sprintf("%s · %s\n\n%s", item.UniversityName, item.GroupName, status),
+		fmt.Sprintf("%s · %s\n\n%s\nФормат расписания: %s", item.UniversityName, item.GroupName, status, viewLabel),
 		keyboards.SubscriptionActions(item, page),
 	)
+}
+
+func (h *Handler) HandleScheduleViewSettings(c tele.Context) error {
+	groupID, ok := callbackArgument(c)
+	if !ok {
+		return respondStaleCallback(c)
+	}
+	ctx, cancel := reqCtx()
+	defer cancel()
+	items, err := h.SubscriptionService.GetGroupSubscriptions(ctx, fmt.Sprint(c.Sender().ID))
+	if err != nil {
+		return h.settingsError(c, "load schedule view", err)
+	}
+	item, ok := findGroupSubscription(items, groupID)
+	if !ok {
+		return c.Respond(&tele.CallbackResponse{Text: "Подписка уже удалена"})
+	}
+	_ = c.Respond()
+	return editOrSend(
+		c,
+		fmt.Sprintf(
+			"Формат расписания для %s · %s\n\nКомпактный — текстом в сообщении.\nТаблица — цветным изображением, похожим на расписание вуза.",
+			item.UniversityName,
+			item.GroupName,
+		),
+		keyboards.ScheduleViewSettings(item, callbackPage(c, 1)),
+	)
+}
+
+func (h *Handler) HandleSetScheduleView(c tele.Context) error {
+	args := callbackArguments(c)
+	if len(args) < 2 {
+		return respondStaleCallback(c)
+	}
+	format := domain.ScheduleViewFormat(args[1])
+	if format != domain.ScheduleViewCompact && format != domain.ScheduleViewVisual {
+		return respondStaleCallback(c)
+	}
+	ctx, cancel := reqCtx()
+	defer cancel()
+	userID := fmt.Sprint(c.Sender().ID)
+	if err := h.SubscriptionService.SetGroupScheduleView(ctx, userID, args[0], format); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return c.Respond(&tele.CallbackResponse{Text: "Подписка уже удалена"})
+		}
+		return h.settingsError(c, "set schedule view", err)
+	}
+	_ = c.Respond(&tele.CallbackResponse{Text: "Формат сохранён"})
+	items, err := h.SubscriptionService.GetGroupSubscriptions(ctx, userID)
+	if err != nil {
+		return h.settingsError(c, "reload schedule view", err)
+	}
+	item, ok := findGroupSubscription(items, args[0])
+	if !ok {
+		return respondStaleCallback(c)
+	}
+	return editOrSend(c, fmt.Sprintf(
+		"Формат расписания для %s · %s сохранён.",
+		item.UniversityName,
+		item.GroupName,
+	), keyboards.ScheduleViewSettings(item, callbackPage(c, 2)))
 }
 
 func (h *Handler) HandleRequestDeleteSubscription(c tele.Context) error {

@@ -355,6 +355,16 @@ func TestPostgresRepositoryFlow(t *testing.T) {
 	if len(items) != 1 || items[0].GroupID != groupID || !items[0].IsDefault {
 		t.Fatalf("unexpected subscriptions: %+v", items)
 	}
+	if items[0].ScheduleViewFormat != domain.ScheduleViewCompact {
+		t.Fatalf("new subscription view = %q, want compact", items[0].ScheduleViewFormat)
+	}
+	if err = subscriptions.SetGroupScheduleView(ctx, userID, groupID, domain.ScheduleViewVisual); err != nil {
+		t.Fatalf("set visual subscription view: %v", err)
+	}
+	items, err = subscriptions.GetGroupSubscriptions(ctx, userID)
+	if err != nil || len(items) != 1 || items[0].ScheduleViewFormat != domain.ScheduleViewVisual {
+		t.Fatalf("visual subscription view was not saved: items=%+v err=%v", items, err)
+	}
 	recipients, err := reminders.ActiveRecipientsPage(ctx, "", 10_000)
 	if err != nil {
 		t.Fatalf("get reminder recipients: %v", err)

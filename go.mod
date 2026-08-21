@@ -8,6 +8,7 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/spf13/viper v1.21.0
+	golang.org/x/image v0.35.0
 	gopkg.in/telebot.v3 v3.3.8
 )
 

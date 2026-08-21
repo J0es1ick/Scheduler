@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"html"
 	"strings"
 	"time"
 
@@ -48,13 +49,14 @@ func (h *Handler) HandleInlineQuery(c tele.Context) error {
 		if len(days) == 0 {
 			continue
 		}
-		text := fmt.Sprintf("Группа: %s\n\n%s%s", group.Name, formatDaySchedule(days[0]), h.sourceFreshnessText(group.UniversityID))
+		text := fmt.Sprintf("Группа: %s\n\n%s%s", html.EscapeString(group.Name), formatDaySchedule(days[0]), h.sourceFreshnessText(group.UniversityID))
 		article := &tele.ArticleResult{
 			Title:       inlineDateTitle(date, now),
 			Description: fmt.Sprintf("%s · %d занятий", group.Name, len(days[0].Lessons)),
 			Text:        text,
 		}
 		article.SetResultID(date.Format("20060102"))
+		article.SetParseMode(tele.ModeHTML)
 		results = append(results, article)
 	}
 

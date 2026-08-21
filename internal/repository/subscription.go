@@ -38,6 +38,7 @@ func (r *SubscriptionRepository) GetGroupSubscriptions(ctx context.Context, user
 		SELECT s.id, s.user_id, g.id AS group_id, g.name AS group_name,
 			g.university_id, u.name AS university_name,
 			(users.default_group_id = g.id) AS is_default,
+			s.schedule_view_format,
 			s.created_at, s.updated_at
 		FROM subscriptions s
 		JOIN users ON users.id = s.user_id
@@ -49,6 +50,29 @@ func (r *SubscriptionRepository) GetGroupSubscriptions(ctx context.Context, user
 		return nil, fmt.Errorf("get group subscriptions for user %s: %w", userID, err)
 	}
 	return items, nil
+}
+
+func (r *SubscriptionRepository) SetGroupScheduleView(
+	ctx context.Context,
+	userID string,
+	groupID string,
+	format domain.ScheduleViewFormat,
+) error {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE subscriptions
+		SET schedule_view_format=$3, updated_at=NOW()
+		WHERE user_id=$1 AND object_id=$2 AND object_type='group'`,
+		userID, groupID, format,
+	)
+	if err != nil {
+		return fmt.Errorf("set schedule view user=%s group=%s: %w", userID, groupID, err)
+	}
+	if rows, rowsErr := result.RowsAffected(); rowsErr != nil {
+		return fmt.Errorf("set schedule view user=%s group=%s: rows affected: %w", userID, groupID, rowsErr)
+	} else if rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (r *SubscriptionRepository) HasGroupSubscription(ctx context.Context, userID, groupID string) (bool, error) {
@@ -67,7 +91,7 @@ func (r *SubscriptionRepository) HasGroupSubscription(ctx context.Context, userI
 func (r *SubscriptionRepository) GetSubscriptionByID(ctx context.Context, id string) (*domain.Subscription, error) {
 	var sub domain.Subscription
 	err := r.db.GetContext(ctx, &sub,
-		`SELECT id, user_id, object_id, object_type, created_at, updated_at FROM subscriptions WHERE id = $1`, id)
+		`SELECT id, user_id, object_id, object_type, schedule_view_format, created_at, updated_at FROM subscriptions WHERE id = $1`, id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -80,7 +104,7 @@ func (r *SubscriptionRepository) GetSubscriptionByID(ctx context.Context, id str
 func (r *SubscriptionRepository) GetSubscriptionsByUserID(ctx context.Context, userID string) ([]domain.Subscription, error) {
 	var subs []domain.Subscription
 	err := r.db.SelectContext(ctx, &subs,
-		`SELECT id, user_id, object_id, object_type, created_at, updated_at
+		`SELECT id, user_id, object_id, object_type, schedule_view_format, created_at, updated_at
 		 FROM subscriptions WHERE user_id = $1`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get subscriptions for user %s: %w", userID, err)

@@ -1,6 +1,7 @@
 package keyboards
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"time"
 
@@ -23,24 +24,30 @@ func UniversitySelector(unis []domain.University) *tgbotapi.ReplyMarkup {
 }
 
 func ScheduleCalendar(month time.Time) *tgbotapi.ReplyMarkup {
-	return scheduleCalendar(month, "", time.Time{})
+	return scheduleCalendar(month, "", time.Time{}, "")
 }
 
 func ScheduleCalendarWithBack(
 	month time.Time,
 	backAction string,
 	backDate time.Time,
+	backArgument ...string,
 ) *tgbotapi.ReplyMarkup {
 	if backAction != "schedule_date" && backAction != "schedule_week" {
 		return ScheduleCalendar(month)
 	}
-	return scheduleCalendar(month, backAction, backDate)
+	extra := ""
+	if len(backArgument) > 0 {
+		extra = backArgument[0]
+	}
+	return scheduleCalendar(month, backAction, backDate, extra)
 }
 
 func scheduleCalendar(
 	month time.Time,
 	backAction string,
 	backDate time.Time,
+	backArgument string,
 ) *tgbotapi.ReplyMarkup {
 	menu := &tgbotapi.ReplyMarkup{}
 	month = time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, month.Location())
@@ -108,8 +115,13 @@ func scheduleCalendar(
 	nextButton := menu.Data("›", "calendar_month", next)
 	if backAction != "" {
 		backValue := backDate.Format("2006-01-02")
-		previousButton = menu.Data("‹", "calendar_month", previous, backAction, backValue)
-		nextButton = menu.Data("›", "calendar_month", next, backAction, backValue)
+		if backArgument == "" {
+			previousButton = menu.Data("‹", "calendar_month", previous, backAction, backValue)
+			nextButton = menu.Data("›", "calendar_month", next, backAction, backValue)
+		} else {
+			previousButton = menu.Data("‹", "calendar_month", previous, backAction, backValue, backArgument)
+			nextButton = menu.Data("›", "calendar_month", next, backAction, backValue, backArgument)
+		}
 	}
 	rows = append(rows, menu.Row(
 		previousButton,
@@ -119,11 +131,11 @@ func scheduleCalendar(
 	if backAction == "" {
 		rows = append(rows, menu.Row(menu.Data("Закрыть", "close_inline")))
 	} else {
-		rows = append(rows, menu.Row(menu.Data(
-			"Назад",
-			backAction,
-			backDate.Format("2006-01-02"),
-		)))
+		if backArgument == "" {
+			rows = append(rows, menu.Row(menu.Data("Назад", backAction, backDate.Format("2006-01-02"))))
+		} else {
+			rows = append(rows, menu.Row(menu.Data("Назад", backAction, backDate.Format("2006-01-02"), backArgument)))
+		}
 	}
 	menu.Inline(rows...)
 	return menu
@@ -267,11 +279,34 @@ func SubscriptionActions(item domain.GroupSubscription, page int) *tgbotapi.Repl
 	if item.IsDefault {
 		rows = append(rows, menu.Row(menu.Data("Настроить напоминания", "show_reminder_settings", fmt.Sprint(page))))
 	}
+	formatLabel := "Формат: компактный"
+	if item.ScheduleViewFormat == domain.ScheduleViewVisual {
+		formatLabel = "Формат: таблица"
+	}
+	rows = append(rows, menu.Row(menu.Data(formatLabel, "schedule_view_settings", item.GroupID, fmt.Sprint(page))))
 	rows = append(rows,
 		menu.Row(menu.Data("Удалить подписку", "request_delete_subscription", item.GroupID, fmt.Sprint(page))),
 		menu.Row(menu.Data("Назад к группам", "subscription_page", fmt.Sprint(page))),
 	)
 	menu.Inline(rows...)
+	return menu
+}
+
+func ScheduleViewSettings(item domain.GroupSubscription, page int) *tgbotapi.ReplyMarkup {
+	menu := &tgbotapi.ReplyMarkup{}
+	compactLabel := "Компактный текст"
+	visualLabel := "Визуальная таблица"
+	if item.ScheduleViewFormat == domain.ScheduleViewCompact {
+		compactLabel = "● " + compactLabel
+	}
+	if item.ScheduleViewFormat == domain.ScheduleViewVisual {
+		visualLabel = "● " + visualLabel
+	}
+	menu.Inline(
+		menu.Row(menu.Data(compactLabel, "set_schedule_view", item.GroupID, string(domain.ScheduleViewCompact), fmt.Sprint(page))),
+		menu.Row(menu.Data(visualLabel, "set_schedule_view", item.GroupID, string(domain.ScheduleViewVisual), fmt.Sprint(page))),
+		menu.Row(menu.Data("Назад", "open_subscription", item.GroupID, fmt.Sprint(page))),
+	)
 	return menu
 }
 
@@ -341,7 +376,7 @@ func BackToMoreMenu() *tgbotapi.ReplyMarkup {
 	return menu
 }
 
-func ScheduleDayNavigation(date time.Time, groupName string, groupChat bool) *tgbotapi.ReplyMarkup {
+func ScheduleDayNavigation(date time.Time, groupName string, groupChat bool, groupID string) *tgbotapi.ReplyMarkup {
 	menu := &tgbotapi.ReplyMarkup{}
 	today := time.Now().In(date.Location())
 	groupLabel := "Группа: " + groupName
@@ -365,6 +400,13 @@ func ScheduleDayNavigation(date time.Time, groupName string, groupChat bool) *tg
 			),
 		),
 	}
+	if groupID != "" {
+		token := GroupToken(groupID)
+		rows = append(rows, menu.Row(
+			menu.Data("Скачать PNG", "download_schedule_png", token, date.Format("2006-01-02"), "1"),
+			menu.Data("Календарь .ics", "download_schedule_ics", token, date.Format("2006-01-02"), "1"),
+		))
+	}
 	if groupChat {
 		rows = append(rows, menu.Row(menu.Data(groupLabel, "open_schedule_group")))
 	} else {
@@ -377,7 +419,7 @@ func ScheduleDayNavigation(date time.Time, groupName string, groupChat bool) *tg
 	return menu
 }
 
-func ScheduleWeekNavigation(from time.Time, groupName string, groupChat bool) *tgbotapi.ReplyMarkup {
+func ScheduleWeekNavigation(from time.Time, groupName string, groupChat bool, groupID string, daysCount int) *tgbotapi.ReplyMarkup {
 	menu := &tgbotapi.ReplyMarkup{}
 	groupLabel := "Группа: " + groupName
 	if groupChat {
@@ -385,9 +427,9 @@ func ScheduleWeekNavigation(from time.Time, groupName string, groupChat bool) *t
 	}
 	rows := []tgbotapi.Row{
 		menu.Row(
-			menu.Data("← Неделя", "schedule_week", from.AddDate(0, 0, -7).Format("2006-01-02")),
-			menu.Data("Текущая", "schedule_week", time.Now().In(from.Location()).Format("2006-01-02")),
-			menu.Data("Неделя →", "schedule_week", from.AddDate(0, 0, 7).Format("2006-01-02")),
+			menu.Data("← Неделя", "schedule_week", from.AddDate(0, 0, -7).Format("2006-01-02"), fmt.Sprint(daysCount)),
+			menu.Data("Текущая", "schedule_week", time.Now().In(from.Location()).Format("2006-01-02"), fmt.Sprint(daysCount)),
+			menu.Data("Неделя →", "schedule_week", from.AddDate(0, 0, 7).Format("2006-01-02"), fmt.Sprint(daysCount)),
 		),
 		menu.Row(
 			menu.Data("Выбрать день", "open_weekday", from.Format("2006-01-02")),
@@ -397,8 +439,16 @@ func ScheduleWeekNavigation(from time.Time, groupName string, groupChat bool) *t
 				from.Format("2006-01"),
 				"schedule_week",
 				from.Format("2006-01-02"),
+				fmt.Sprint(daysCount),
 			),
 		),
+	}
+	if groupID != "" {
+		token := GroupToken(groupID)
+		rows = append(rows, menu.Row(
+			menu.Data("Скачать PNG", "download_schedule_png", token, from.Format("2006-01-02"), fmt.Sprint(daysCount)),
+			menu.Data("Календарь .ics", "download_schedule_ics", token, from.Format("2006-01-02"), fmt.Sprint(daysCount)),
+		))
 	}
 	if groupChat {
 		rows = append(rows, menu.Row(menu.Data(groupLabel, "open_schedule_group")))
@@ -410,6 +460,11 @@ func ScheduleWeekNavigation(from time.Time, groupName string, groupChat bool) *t
 	}
 	menu.Inline(rows...)
 	return menu
+}
+
+func GroupToken(groupID string) string {
+	digest := sha256.Sum256([]byte(groupID))
+	return fmt.Sprintf("%x", digest[:8])
 }
 
 func ChatSettings(groupName string, isAdmin bool) *tgbotapi.ReplyMarkup {

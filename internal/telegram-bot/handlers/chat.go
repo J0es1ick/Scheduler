@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	tele "gopkg.in/telebot.v3"
 )
@@ -18,6 +19,7 @@ type scheduleTarget struct {
 	GroupName    string
 	UniversityID string
 	University   string
+	ViewFormat   domain.ScheduleViewFormat
 }
 
 func isGroupChat(c tele.Context) bool {
@@ -257,6 +259,7 @@ func (h *Handler) scheduleTarget(
 			GroupName:    profile.GroupName,
 			UniversityID: profile.UniversityID,
 			University:   profile.UniversityName,
+			ViewFormat:   domain.ScheduleViewCompact,
 		}
 	}
 
@@ -274,11 +277,26 @@ func (h *Handler) scheduleTarget(
 		_ = telegramContext.Send("Для начала работы используйте /start")
 		return nil
 	}
+	viewFormat := domain.ScheduleViewCompact
+	if subscriptions, loadErr := h.SubscriptionService.GetGroupSubscriptions(
+		requestContext,
+		fmt.Sprint(telegramContext.Sender().ID),
+	); loadErr != nil {
+		slog.Warn("load schedule view preference failed", "user_id", telegramContext.Sender().ID, "err", loadErr)
+	} else {
+		for _, subscription := range subscriptions {
+			if subscription.GroupID == state.GroupID {
+				viewFormat = subscription.ScheduleViewFormat
+				break
+			}
+		}
+	}
 	return &scheduleTarget{
 		GroupID:      state.GroupID,
 		GroupName:    state.Query,
 		UniversityID: state.UniversityID,
 		University:   state.University,
+		ViewFormat:   viewFormat,
 	}
 }
 

@@ -69,7 +69,7 @@ func TestSubscriptionSettingsPaginatesAndDoesNotDeleteImmediately(t *testing.T) 
 
 func TestScheduleNavigationContainsDateAndGroupActions(t *testing.T) {
 	date := time.Date(2026, time.September, 2, 0, 0, 0, 0, time.Local)
-	menu := ScheduleDayNavigation(date, "3/147", false)
+	menu := ScheduleDayNavigation(date, "3/147", false, "isuct:group:3/147")
 	seen := map[string]bool{}
 	for _, row := range menu.InlineKeyboard {
 		for _, button := range row {
@@ -81,11 +81,30 @@ func TestScheduleNavigationContainsDateAndGroupActions(t *testing.T) {
 			t.Errorf("schedule navigation has no %s action", action)
 		}
 	}
-	if len(menu.InlineKeyboard) != 3 {
-		t.Fatalf("daily schedule navigation has %d rows, want 3", len(menu.InlineKeyboard))
+	if len(menu.InlineKeyboard) != 4 {
+		t.Fatalf("daily schedule navigation has %d rows, want 4", len(menu.InlineKeyboard))
 	}
 	if menu.InlineKeyboard[1][1].Text != "Выбрать дату" {
 		t.Fatalf("calendar action label = %q", menu.InlineKeyboard[1][1].Text)
+	}
+}
+
+func TestScheduleDownloadCallbackUsesBoundedGroupToken(t *testing.T) {
+	groupID := strings.Repeat("external-connector-group-", 5)
+	menu := ScheduleDayNavigation(time.Now(), "Длинная группа", false, groupID)
+	var data string
+	for _, row := range menu.InlineKeyboard {
+		for _, button := range row {
+			if button.Unique == "download_schedule_png" {
+				data = button.Data
+			}
+		}
+	}
+	if data == "" || !strings.HasPrefix(data, GroupToken(groupID)) {
+		t.Fatalf("download callback does not contain the group token: %q", data)
+	}
+	if len(GroupToken(groupID)) != 16 {
+		t.Fatalf("group token has unexpected length: %q", GroupToken(groupID))
 	}
 }
 

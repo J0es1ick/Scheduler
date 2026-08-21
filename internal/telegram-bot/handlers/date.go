@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	tele "gopkg.in/telebot.v3"
 )
@@ -95,6 +96,9 @@ func scheduleCalendarMarkup(month time.Time, args []string) *tele.ReplyMarkup {
 	if err != nil {
 		return keyboards.ScheduleCalendar(month)
 	}
+	if len(args) > 3 {
+		return keyboards.ScheduleCalendarWithBack(month, args[1], backDate, args[3])
+	}
 	return keyboards.ScheduleCalendarWithBack(month, args[1], backDate)
 }
 
@@ -151,16 +155,8 @@ func (h *Handler) sendEmptyTargetDate(
 	target *scheduleTarget,
 	date time.Time,
 ) error {
-	text := fmt.Sprintf(
-		"%s, %s\nЗанятий нет.",
-		weekdayNames[weekdayNumber(date)],
-		date.Format("02.01.2006"),
-	)
-	markup := keyboards.ScheduleDayNavigation(date, target.GroupName, isGroupChat(c))
-	if c.Callback() != nil {
-		return editOrSend(c, text, markup)
-	}
-	return sendScheduleMessage(c, text, markup)
+	markup := keyboards.ScheduleDayNavigation(date, target.GroupName, isGroupChat(c), target.GroupID)
+	return h.sendScheduleView(c, []dto.DaySchedule{{Date: date}}, target, date, 1, markup, "")
 }
 
 func parseScheduleDate(value string, location *time.Location) (time.Time, error) {

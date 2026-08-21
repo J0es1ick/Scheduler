@@ -56,7 +56,7 @@ func TestSendScheduleMessageRemovesReplyKeyboardWithoutReencodingCallbacks(t *te
 	}
 	bot.Handle("/schedule", func(c tele.Context) error {
 		date := time.Date(2026, time.September, 2, 0, 0, 0, 0, time.Local)
-		return sendScheduleMessage(c, "Расписание", keyboards.ScheduleDayNavigation(date, "3/147", false))
+		return sendScheduleMessage(c, "Расписание", keyboards.ScheduleDayNavigation(date, "3/147", false, "group-id"))
 	})
 
 	bot.ProcessUpdate(tele.Update{Message: &tele.Message{

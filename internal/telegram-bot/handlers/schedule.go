@@ -1,14 +1,18 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
+	"github.com/J0es1ick/Scheduler/internal/scheduleview"
 	"github.com/J0es1ick/Scheduler/internal/service"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
@@ -33,7 +37,7 @@ func formatDayScheduleWithOptions(day dto.DaySchedule, showGroupNames bool) stri
 	if wd == 0 {
 		wd = 7 // воскресенье
 	}
-	header := fmt.Sprintf("%s, %s\n", weekdayNames[wd], day.Date.Format("02.01.2006"))
+	header := fmt.Sprintf("<b>%s, %s</b>\n", weekdayNames[wd], day.Date.Format("02.01.2006"))
 
 	if len(day.Lessons) == 0 {
 		return header + "Занятий нет.\n"
@@ -48,25 +52,45 @@ func formatDayScheduleWithOptions(day dto.DaySchedule, showGroupNames bool) stri
 		}
 		details := make([]string, 0, 3)
 		if showGroupNames && strings.TrimSpace(l.GroupName) != "" {
-			details = append(details, "группа "+l.GroupName)
+			details = append(details, "группа "+html.EscapeString(l.GroupName))
 		}
 		if strings.TrimSpace(l.Teacher) != "" {
-			details = append(details, l.Teacher)
+			details = append(details, html.EscapeString(l.Teacher))
 		}
 		if strings.TrimSpace(l.Room) != "" {
-			details = append(details, l.Room)
+			details = append(details, html.EscapeString(l.Room))
 		}
 		sb.WriteString(fmt.Sprintf(
-			"  %s–%s | %s (%s%s)\n",
+			"%s <b>%s–%s</b> · %s\n<i>%s%s</i>\n",
+			lessonTypeMarker(l.Type),
 			l.TimeStart, l.TimeEnd,
-			l.Subject, lessonTypeLabel(l.Type), subgroup,
+			html.EscapeString(l.Subject), lessonTypeLabel(l.Type), html.EscapeString(subgroup),
 		))
 		if len(details) > 0 {
-			sb.WriteString("  " + strings.Join(details, " | ") + "\n")
+			sb.WriteString("  " + strings.Join(details, " · ") + "\n")
 		}
 		sb.WriteString("\n")
 	}
 	return sb.String()
+}
+
+func lessonTypeMarker(lessonType domain.LessonType) string {
+	switch lessonType {
+	case domain.LessonTypeLecture:
+		return "🟩"
+	case domain.LessonTypePractice:
+		return "🩷"
+	case domain.LessonTypeLab:
+		return "🟦"
+	case domain.LessonTypeSeminar:
+		return "🟨"
+	case domain.LessonTypeExam, domain.LessonTypeCredit:
+		return "🟥"
+	case domain.LessonTypeConsultation:
+		return "🟪"
+	default:
+		return "⬜"
+	}
 }
 
 func lessonTypeLabel(lessonType domain.LessonType) string {
@@ -83,6 +107,8 @@ func lessonTypeLabel(lessonType domain.LessonType) string {
 		return "зачёт"
 	case domain.LessonTypeConsultation:
 		return "консультация"
+	case domain.LessonTypeOther:
+		return "занятие"
 	default:
 		return "семинар"
 	}
@@ -132,12 +158,12 @@ func (h *Handler) sendDaysWithOptions(
 	if len(days) == 0 {
 		text := header + "Занятий нет." + h.sourceFreshnessText(universityID)
 		if c.Callback() != nil && markup != nil {
-			return editOrSend(c, text, markup)
+			return editOrSendHTML(c, text, markup)
 		}
 		if markup != nil {
 			return sendScheduleMessage(c, text, markup)
 		}
-		return c.Send(text, markup)
+		return c.Send(text, markup, tgbotapi.ModeHTML)
 	}
 
 	var full strings.Builder
@@ -154,14 +180,14 @@ func (h *Handler) sendDaysWithOptions(
 
 	parts := service.SplitMessage(full.String(), tgMaxLen)
 	if len(parts) == 1 && c.Callback() != nil && markup != nil {
-		return editOrSend(c, parts[0], markup)
+		return editOrSendHTML(c, parts[0], markup)
 	}
 	for index, part := range parts {
 		var err error
 		if index == len(parts)-1 && markup != nil {
 			err = sendScheduleMessage(c, part, markup)
 		} else {
-			err = c.Send(part)
+			err = c.Send(part, tgbotapi.ModeHTML)
 		}
 		if err != nil {
 			return err
@@ -177,7 +203,7 @@ func (h *Handler) sourceFreshnessText(universityID string) string {
 	if err != nil || freshness == nil {
 		return "\nИсточник: данные сервиса; время обновления недоступно."
 	}
-	result := "\nИсточник: " + freshness.ScheduleURL
+	result := "\nИсточник: " + html.EscapeString(freshness.ScheduleURL)
 	if freshness.LastSuccess == nil {
 		return result + "\nПоследнее успешное обновление ещё не зафиксировано."
 	}
@@ -205,12 +231,8 @@ func (h *Handler) sendSingleDayForTarget(
 	day dto.DaySchedule,
 	target *scheduleTarget,
 ) error {
-	text := formatDaySchedule(day) + h.sourceFreshnessText(target.UniversityID)
-	markup := keyboards.ScheduleDayNavigation(day.Date, target.GroupName, isGroupChat(c))
-	if c.Callback() != nil {
-		return editOrSend(c, text, markup)
-	}
-	return sendScheduleMessage(c, text, markup)
+	markup := keyboards.ScheduleDayNavigation(day.Date, target.GroupName, isGroupChat(c), target.GroupID)
+	return h.sendScheduleView(c, []dto.DaySchedule{day}, target, day.Date, 1, markup, "")
 }
 
 func sendScheduleMessage(
@@ -219,7 +241,7 @@ func sendScheduleMessage(
 	markup *tgbotapi.ReplyMarkup,
 ) error {
 	if isGroupChat(c) {
-		return c.Send(text, markup)
+		return c.Send(text, markup, tgbotapi.ModeHTML)
 	}
 
 	keyboardNotice, err := c.Bot().Send(
@@ -236,7 +258,7 @@ func sendScheduleMessage(
 		}
 	}()
 
-	if _, err = c.Bot().Send(c.Recipient(), text, markup); err != nil {
+	if _, err = c.Bot().Send(c.Recipient(), text, markup, tgbotapi.ModeHTML); err != nil {
 		return err
 	}
 	return nil
@@ -343,8 +365,8 @@ func (h *Handler) HandleTwoWeeks(c tgbotapi.Context) error {
 }
 
 func (h *Handler) HandleScheduleWeekSelect(c tgbotapi.Context) error {
-	value, ok := callbackArgument(c)
-	if !ok {
+	args := callbackArguments(c)
+	if len(args) == 0 {
 		return respondStaleCallback(c)
 	}
 	_ = c.Respond()
@@ -354,11 +376,15 @@ func (h *Handler) HandleScheduleWeekSelect(c tgbotapi.Context) error {
 	if target == nil {
 		return nil
 	}
-	from, err := parseScheduleDate(value, h.universityLocation(ctx, target.UniversityID))
+	from, err := parseScheduleDate(args[0], h.universityLocation(ctx, target.UniversityID))
 	if err != nil {
 		return respondStaleCallback(c)
 	}
-	return h.sendTargetWeek(ctx, c, target, from, 7)
+	daysCount := 7
+	if len(args) > 1 && args[1] == "14" {
+		daysCount = 14
+	}
+	return h.sendTargetWeek(ctx, c, target, from, daysCount)
 }
 
 func (h *Handler) sendTargetWeek(
@@ -369,18 +395,189 @@ func (h *Handler) sendTargetWeek(
 	daysCount int,
 ) error {
 	from = scheduleWeekStart(from)
-	markup := keyboards.ScheduleWeekNavigation(from, target.GroupName, isGroupChat(c))
+	markup := keyboards.ScheduleWeekNavigation(from, target.GroupName, isGroupChat(c), target.GroupID, daysCount)
 	days, err := h.getScheduleForTarget(ctx, target, from, from.AddDate(0, 0, daysCount-1))
 	if err != nil {
 		return sendScheduleLoadError(c, err)
 	}
-	return h.sendDaysWithMarkupAndHeader(
-		c,
-		days,
-		target.UniversityID,
-		markup,
-		formatSchedulePeriod(from, daysCount),
+	return h.sendScheduleView(c, days, target, from, daysCount, markup, formatSchedulePeriod(from, daysCount))
+}
+
+func editOrSendHTML(c tgbotapi.Context, text string, markup *tgbotapi.ReplyMarkup) error {
+	if err := c.Edit(text, markup, tgbotapi.ModeHTML); err == nil ||
+		strings.Contains(err.Error(), "message is not modified") {
+		return nil
+	}
+	return c.Send(text, markup, tgbotapi.ModeHTML)
+}
+
+func (h *Handler) sendScheduleView(
+	c tgbotapi.Context,
+	days []dto.DaySchedule,
+	target *scheduleTarget,
+	from time.Time,
+	daysCount int,
+	markup *tgbotapi.ReplyMarkup,
+	header string,
+) error {
+	if target.ViewFormat != domain.ScheduleViewVisual || isGroupChat(c) {
+		return h.sendDaysWithMarkupAndHeader(c, days, target.UniversityID, markup, header)
+	}
+	payload, err := schedulePNG(target, days, from, daysCount)
+	if err != nil {
+		slog.Error("render visual schedule failed", "group_id", target.GroupID, "err", err)
+		return h.sendDaysWithMarkupAndHeader(c, days, target.UniversityID, markup, header)
+	}
+	photo := &tgbotapi.Photo{
+		File:    tgbotapi.FromReader(bytes.NewReader(payload)),
+		Caption: formatSchedulePeriod(from, daysCount) + h.sourceFreshnessText(target.UniversityID),
+	}
+	if c.Callback() != nil {
+		if err = c.Delete(); err != nil {
+			slog.Debug("delete previous schedule message failed", "err", err)
+		}
+		return c.Send(photo, markup, tgbotapi.ModeHTML)
+	}
+	return sendScheduleMedia(c, photo, markup)
+}
+
+func sendScheduleMedia(c tgbotapi.Context, media tgbotapi.Sendable, markup *tgbotapi.ReplyMarkup) error {
+	if isGroupChat(c) {
+		return c.Send(media, markup, tgbotapi.ModeHTML)
+	}
+	notice, err := c.Bot().Send(c.Recipient(), "Открываю расписание…", &tgbotapi.ReplyMarkup{RemoveKeyboard: true})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = c.Bot().Delete(notice) }()
+	_, err = c.Bot().Send(c.Recipient(), media, markup, tgbotapi.ModeHTML)
+	return err
+}
+
+func schedulePNG(target *scheduleTarget, days []dto.DaySchedule, from time.Time, daysCount int) ([]byte, error) {
+	return scheduleview.RenderPNG(scheduleRenderRequest(target, days, from, daysCount))
+}
+
+func scheduleRenderRequest(
+	target *scheduleTarget,
+	days []dto.DaySchedule,
+	from time.Time,
+	daysCount int,
+) scheduleview.Request {
+	renderDays := make([]scheduleview.Day, len(days))
+	for index, day := range days {
+		renderDays[index] = scheduleview.Day{Date: day.Date, Lessons: day.Lessons}
+	}
+	return scheduleview.Request{
+		University: target.University,
+		Group:      target.GroupName,
+		From:       from,
+		Days:       daysCount,
+		Schedule:   renderDays,
+	}
+}
+
+func scheduleFileName(groupName string, from time.Time, daysCount int, extension string) string {
+	replacer := strings.NewReplacer("/", "-", "\\", "-", " ", "-")
+	return fmt.Sprintf(
+		"schedule-%s-%s-%dd%s",
+		replacer.Replace(groupName),
+		from.Format("2006-01-02"),
+		daysCount,
+		extension,
 	)
+}
+
+func (h *Handler) HandleDownloadSchedulePNG(c tgbotapi.Context) error {
+	return h.handleDownloadSchedule(c, true)
+}
+
+func (h *Handler) HandleDownloadScheduleICS(c tgbotapi.Context) error {
+	return h.handleDownloadSchedule(c, false)
+}
+
+func (h *Handler) handleDownloadSchedule(c tgbotapi.Context, pngFormat bool) error {
+	args := callbackArguments(c)
+	if len(args) < 3 {
+		return respondStaleCallback(c)
+	}
+	daysCount, err := strconv.Atoi(args[2])
+	if err != nil || daysCount < 1 || daysCount > 14 {
+		return respondStaleCallback(c)
+	}
+	_ = c.Respond(&tgbotapi.CallbackResponse{Text: "Готовлю файл…"})
+	ctx, cancel := reqCtx()
+	defer cancel()
+	target, err := h.downloadTarget(ctx, c, args[0])
+	if err != nil || target == nil {
+		return c.Send("Не удалось подтвердить доступ к этой группе. Откройте актуальное расписание заново.")
+	}
+	from, err := parseScheduleDate(args[1], h.universityLocation(ctx, target.UniversityID))
+	if err != nil {
+		return respondStaleCallback(c)
+	}
+	days, err := h.getScheduleForTarget(ctx, target, from, from.AddDate(0, 0, daysCount-1))
+	if err != nil {
+		return sendScheduleLoadError(c, err)
+	}
+	request := scheduleRenderRequest(target, days, from, daysCount)
+	var payload []byte
+	extension := ".ics"
+	if pngFormat {
+		payload, err = scheduleview.RenderPNG(request)
+		extension = ".png"
+	} else {
+		university, loadErr := h.UniversityService.GetByID(ctx, target.UniversityID)
+		if loadErr != nil || university == nil {
+			return c.Send("Не удалось определить часовой пояс расписания.")
+		}
+		payload = scheduleview.RenderICS(request, university.Timezone)
+	}
+	if err != nil {
+		slog.Error("render schedule download failed", "group_id", target.GroupID, "err", err)
+		return c.Send("Не удалось подготовить файл. Попробуйте позже.")
+	}
+	document := &tgbotapi.Document{
+		File:     tgbotapi.FromReader(bytes.NewReader(payload)),
+		FileName: scheduleFileName(target.GroupName, from, daysCount, extension),
+		Caption: fmt.Sprintf(
+			"%s · %s\n%s",
+			target.University,
+			target.GroupName,
+			formatSchedulePeriod(from, daysCount),
+		),
+	}
+	return c.Send(document)
+}
+
+func (h *Handler) downloadTarget(
+	ctx context.Context,
+	c tgbotapi.Context,
+	groupToken string,
+) (*scheduleTarget, error) {
+	if isGroupChat(c) {
+		target := h.scheduleTarget(ctx, c)
+		if target == nil || keyboards.GroupToken(target.GroupID) != groupToken {
+			return nil, errors.New("chat group does not match export")
+		}
+		return target, nil
+	}
+	items, err := h.SubscriptionService.GetGroupSubscriptions(ctx, fmt.Sprint(c.Sender().ID))
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		if keyboards.GroupToken(item.GroupID) == groupToken {
+			return &scheduleTarget{
+				GroupID:      item.GroupID,
+				GroupName:    item.GroupName,
+				UniversityID: item.UniversityID,
+				University:   item.UniversityName,
+				ViewFormat:   item.ScheduleViewFormat,
+			}, nil
+		}
+	}
+	return nil, errors.New("subscription not found")
 }
 
 func scheduleWeekStart(date time.Time) time.Time {
