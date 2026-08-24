@@ -94,6 +94,14 @@ func (h *Handler) HandleBackUniversitySelection(c tele.Context) error {
 	_ = c.Respond()
 	ctx, cancel := reqCtx()
 	defer cancel()
+	state, _, err := h.restoreProfile(ctx, c.Sender().ID)
+	if err != nil {
+		slog.Error("restore profile before university selection failed", "user_id", c.Sender().ID, "err", err)
+		return c.Send("Не удалось восстановить текущую группу. Попробуйте ещё раз позже.")
+	}
+	if state == nil {
+		h.StateManager.Delete(c.Sender().ID)
+	}
 	universities, err := h.UniversityService.GetAll(ctx)
 	if err != nil {
 		slog.Error("load universities for back navigation failed", "err", err)

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/J0es1ick/Scheduler/internal/domain"
+	"github.com/J0es1ick/Scheduler/internal/service"
+	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
+	"github.com/J0es1ick/Scheduler/internal/telegram-bot/state"
 	tele "gopkg.in/telebot.v3"
 )
 
@@ -164,5 +169,141 @@ func TestCloseInlineRestoresPersistentMainMenuInPrivateChat(t *testing.T) {
 	}
 	if !menu.IsPersistent || len(menu.ReplyKeyboard) == 0 {
 		t.Fatalf("close did not restore persistent main menu: %#v", menu)
+	}
+}
+
+type navigationUserService struct {
+	*service.UserService
+	user domain.User
+}
+
+func (s *navigationUserService) GetUser(context.Context, string) (*domain.User, error) {
+	user := s.user
+	return &user, nil
+}
+
+type navigationGroupService struct {
+	*service.GroupService
+	group       domain.Group
+	nameLookups int
+}
+
+func (s *navigationGroupService) GetGroupByID(context.Context, string) (*domain.Group, error) {
+	group := s.group
+	return &group, nil
+}
+
+func (s *navigationGroupService) GetGroupByName(context.Context, string, string) (*domain.Group, error) {
+	s.nameLookups++
+	return nil, nil
+}
+
+type navigationUniversityService struct {
+	*service.UniversityService
+	universities map[string]domain.University
+}
+
+func (s *navigationUniversityService) GetAll(context.Context) ([]domain.University, error) {
+	result := make([]domain.University, 0, len(s.universities))
+	for _, university := range s.universities {
+		result = append(result, university)
+	}
+	return result, nil
+}
+
+func (s *navigationUniversityService) GetByID(_ context.Context, id string) (*domain.University, error) {
+	university, ok := s.universities[id]
+	if !ok {
+		return nil, nil
+	}
+	return &university, nil
+}
+
+func TestUniversitySelectionBackAndCloseRestoreCompletedState(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+		w.Header().Set("Content-Type", "application/json")
+		if method == "answerCallbackQuery" || method == "deleteMessage" {
+			_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":8,"date":0,"chat":{"id":42,"type":"private"},"text":"ok"}}`))
+	}))
+	defer server.Close()
+
+	bot, err := tele.NewBot(tele.Settings{
+		URL:         server.URL,
+		Token:       "test-token",
+		Client:      server.Client(),
+		Offline:     true,
+		Synchronous: true,
+	})
+	if err != nil {
+		t.Fatalf("create offline bot: %v", err)
+	}
+
+	manager := state.NewManager()
+	userService := &navigationUserService{user: domain.User{ID: "42", DefaultGroupID: "old-group"}}
+	groupService := &navigationGroupService{group: domain.Group{
+		ID: "old-group", UniversityID: "old-university", Name: "OLD-1", IsActive: true,
+	}}
+	universityService := &navigationUniversityService{universities: map[string]domain.University{
+		"old-university": {ID: "old-university", Name: "Старый вуз", IsActive: true},
+		"new-university": {ID: "new-university", Name: "Новый вуз", IsActive: true},
+	}}
+	handler := &Handler{
+		StateManager:      manager,
+		UserService:       userService,
+		GroupService:      groupService,
+		UniversityService: universityService,
+	}
+	manager.Set(42, &dto.UserState{
+		UniversityID: "old-university", University: "Старый вуз", GroupID: "old-group", Query: "OLD-1", Step: "done",
+	})
+
+	bot.Handle(&tele.Btn{Unique: "select_university"}, handler.HandleUniversitySelect)
+	bot.Handle(&tele.Btn{Unique: "back_university_selection"}, handler.HandleBackUniversitySelection)
+	bot.Handle(&tele.Btn{Unique: "close_inline"}, handler.HandleCloseInline)
+	bot.Handle(tele.OnText, handler.HandleTextInput)
+
+	callback := func(userID int64, data string) {
+		bot.ProcessUpdate(tele.Update{Callback: &tele.Callback{
+			ID: "callback-id", Data: data, Sender: &tele.User{ID: userID},
+			Message: &tele.Message{ID: 7, Chat: &tele.Chat{ID: userID, Type: tele.ChatPrivate}},
+		}})
+	}
+
+	callback(42, "\fselect_university|new-university")
+	selected := manager.Get(42)
+	if selected == nil || selected.Step != "awaiting_query" || selected.UniversityID != "new-university" {
+		t.Fatalf("selected university state = %#v", selected)
+	}
+
+	callback(42, "\fback_university_selection")
+	restored := manager.Get(42)
+	if restored == nil || restored.Step != "done" || restored.GroupID != "old-group" {
+		t.Fatalf("restored state = %#v", restored)
+	}
+
+	callback(42, "\fclose_inline")
+	bot.ProcessUpdate(tele.Update{Message: &tele.Message{
+		Text: "NEW-1", Chat: &tele.Chat{ID: 42, Type: tele.ChatPrivate}, Sender: &tele.User{ID: 42},
+	}})
+
+	if groupService.nameLookups != 0 {
+		t.Fatalf("ordinary text triggered %d group lookups after navigation closed", groupService.nameLookups)
+	}
+	completed := manager.Get(42)
+	if completed == nil || completed.Step != "done" || completed.GroupID != "old-group" {
+		t.Fatalf("completed state after close = %#v", completed)
+	}
+
+	userService.user = domain.User{ID: "43"}
+	manager.Set(43, &dto.UserState{
+		UniversityID: "new-university", University: "Новый вуз", Step: "awaiting_query",
+	})
+	callback(43, "\fback_university_selection")
+	if remaining := manager.Get(43); remaining != nil {
+		t.Fatalf("state without a durable group = %#v", remaining)
 	}
 }

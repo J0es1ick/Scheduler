@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/service"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/state"
 )
@@ -27,15 +28,40 @@ func reqCtx() (context.Context, context.CancelFunc) {
 type Handler struct {
 	ScheduleService       *service.ScheduleService
 	StateManager          *state.Manager
-	UniversityService     *service.UniversityService
-	UserService           *service.UserService
-	GroupService          *service.GroupService
+	UniversityService     universityService
+	UserService           userService
+	GroupService          groupService
 	SubscriptionService   *service.SubscriptionService
 	SupportRequestService *service.SupportRequestService
 	MetricsService        *service.MetricsService
 	ChatProfileService    *service.ChatProfileService
 	AdminPublicURL        string
 	ProjectURL            string
+}
+
+type universityService interface {
+	GetAll(context.Context) ([]domain.University, error)
+	GetByID(context.Context, string) (*domain.University, error)
+	GetSourceFreshness(context.Context, string) (*domain.SourceFreshness, error)
+}
+
+type userService interface {
+	RegisterOrGetUser(context.Context, string, string) (*domain.User, error)
+	GetUser(context.Context, string) (*domain.User, error)
+	IsAdmin(context.Context, string) (bool, error)
+	MarkTelegramMenuConfigured(context.Context, string, string) error
+	SetDefaultGroup(context.Context, string, string) error
+	SetNotificationsEnabled(context.Context, string, bool) error
+	SetLessonReminder(context.Context, string, bool, int) error
+	SetQuietHours(context.Context, string, bool, string, string) error
+	ExportData(context.Context, string) (*domain.UserDataExport, error)
+	DeleteOwnData(context.Context, string) error
+}
+
+type groupService interface {
+	GetGroupByID(context.Context, string) (*domain.Group, error)
+	GetGroupByName(context.Context, string, string) (*domain.Group, error)
+	FindActiveByName(context.Context, string, string) ([]domain.Group, error)
 }
 
 func NewHandler(
