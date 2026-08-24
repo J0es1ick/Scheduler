@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"log/slog"
 
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
@@ -26,6 +27,10 @@ func (h *Handler) HandleChangeUniversity(c tele.Context) error {
 }
 
 func (h *Handler) HandleChangeGroup(c tele.Context) error {
+	return h.beginGroupChange(c, "main", 0)
+}
+
+func (h *Handler) beginGroupChange(c tele.Context, destination string, page int) error {
 	ctx, cancel := reqCtx()
 	defer cancel()
 	state, err := h.readyState(ctx, c.Sender().ID)
@@ -38,11 +43,16 @@ func (h *Handler) HandleChangeGroup(c tele.Context) error {
 	}
 	state.Step = "awaiting_query"
 	state.SearchType = dto.SearchTypeGroup
-	state.Query = ""
-	state.GroupID = ""
 	h.StateManager.Set(c.Sender().ID, state)
 
 	remove := &tele.ReplyMarkup{RemoveKeyboard: true}
 	_ = c.Send("Введите новую основную группу. Прежняя останется в подписках.", remove)
-	return c.Send(groupInputPrompt(state.UniversityID))
+	backArguments := []string{destination}
+	if destination == "subscriptions" {
+		backArguments = append(backArguments, fmt.Sprint(page))
+	}
+	return c.Send(
+		groupInputPrompt(state.UniversityID),
+		keyboards.BackButton("cancel_group_change", backArguments...),
+	)
 }

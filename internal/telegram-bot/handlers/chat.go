@@ -202,7 +202,7 @@ func (h *Handler) HandleSetChatGroup(c tele.Context) error {
 			"Теперь участники могут использовать /today, /tomorrow, /week и /date.",
 		university.Name,
 		group.Name,
-	))
+	), keyboards.ChatSettings(group.Name, true))
 }
 
 func (h *Handler) HandleUnsetChatGroup(c tele.Context) error {
@@ -259,7 +259,7 @@ func (h *Handler) scheduleTarget(
 			GroupName:    profile.GroupName,
 			UniversityID: profile.UniversityID,
 			University:   profile.UniversityName,
-			ViewFormat:   domain.ScheduleViewCompact,
+			ViewFormat:   domain.ScheduleViewVisual,
 		}
 	}
 
@@ -277,7 +277,7 @@ func (h *Handler) scheduleTarget(
 		_ = telegramContext.Send("Для начала работы используйте /start")
 		return nil
 	}
-	viewFormat := domain.ScheduleViewCompact
+	viewFormat := domain.ScheduleViewVisual
 	if subscriptions, loadErr := h.SubscriptionService.GetGroupSubscriptions(
 		requestContext,
 		fmt.Sprint(telegramContext.Sender().ID),

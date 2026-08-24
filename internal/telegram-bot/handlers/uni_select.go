@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
+	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	tgbotapi "gopkg.in/telebot.v3"
 )
 
@@ -37,5 +38,8 @@ func (h *Handler) HandleUniversitySelect(c tgbotapi.Context) error {
 	}
 	h.StateManager.Set(userID, state)
 
-	return c.Edit(groupInputPrompt(selected.ID))
+	return c.Edit(
+		groupInputPrompt(selected.ID),
+		keyboards.BackButton("back_university_selection"),
+	)
 }

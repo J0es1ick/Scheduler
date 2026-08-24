@@ -162,7 +162,7 @@ func SearchTypeSelector() *tgbotapi.ReplyMarkup {
 		menu.Row(btnTeacher),
 		menu.Row(btnRoom),
 		menu.Row(btnDiscipline),
-		menu.Row(menu.Data("Закрыть", "close_inline")),
+		menu.Row(menu.Data("Назад", "close_inline")),
 	)
 
 	return menu
@@ -172,6 +172,12 @@ func CancelButton() *tgbotapi.ReplyMarkup {
 	menu := &tgbotapi.ReplyMarkup{}
 	btnCancel := menu.Data("Назад", "cancel_search")
 	menu.Inline(menu.Row(btnCancel))
+	return menu
+}
+
+func BackButton(action string, arguments ...string) *tgbotapi.ReplyMarkup {
+	menu := &tgbotapi.ReplyMarkup{}
+	menu.Inline(menu.Row(menu.Data("Назад", action, arguments...)))
 	return menu
 }
 
@@ -264,7 +270,7 @@ func SubscriptionSettings(
 		reminderLabel = fmt.Sprintf("Напоминания: за %d мин.", reminderMinutes)
 	}
 	rows = append(rows, menu.Row(menu.Data(reminderLabel, "show_reminder_settings", fmt.Sprint(page))))
-	rows = append(rows, menu.Row(menu.Data("Добавить группу", "add_subscription")))
+	rows = append(rows, menu.Row(menu.Data("Добавить группу", "add_subscription", fmt.Sprint(page))))
 	rows = append(rows, menu.Row(menu.Data("Закрыть", "close_inline")))
 	menu.Inline(rows...)
 	return menu
@@ -349,7 +355,7 @@ func HotlineTypeSelector() *tgbotapi.ReplyMarkup {
 	menu.Inline(
 		menu.Row(menu.Data("Обновить подключённое расписание", "select_hotline_type", domain.SupportRequestUpdateExisting)),
 		menu.Row(menu.Data("Добавить учебное заведение", "select_hotline_type", domain.SupportRequestNewInstitution)),
-		menu.Row(menu.Data("Отмена", "cancel_hotline")),
+		menu.Row(menu.Data("Назад", "back_more")),
 	)
 	return menu
 }
@@ -402,10 +408,13 @@ func ScheduleDayNavigation(date time.Time, groupName string, groupChat bool, gro
 	}
 	if groupID != "" {
 		token := GroupToken(groupID)
-		rows = append(rows, menu.Row(
-			menu.Data("Скачать PNG", "download_schedule_png", token, date.Format("2006-01-02"), "1"),
-			menu.Data("Календарь .ics", "download_schedule_ics", token, date.Format("2006-01-02"), "1"),
-		))
+		rows = append(rows, menu.Row(menu.Data(
+			"Скачать расписание",
+			"open_schedule_exports",
+			token,
+			date.Format("2006-01-02"),
+			"1",
+		)))
 	}
 	if groupChat {
 		rows = append(rows, menu.Row(menu.Data(groupLabel, "open_schedule_group")))
@@ -445,10 +454,13 @@ func ScheduleWeekNavigation(from time.Time, groupName string, groupChat bool, gr
 	}
 	if groupID != "" {
 		token := GroupToken(groupID)
-		rows = append(rows, menu.Row(
-			menu.Data("Скачать PNG", "download_schedule_png", token, from.Format("2006-01-02"), fmt.Sprint(daysCount)),
-			menu.Data("Календарь .ics", "download_schedule_ics", token, from.Format("2006-01-02"), fmt.Sprint(daysCount)),
-		))
+		rows = append(rows, menu.Row(menu.Data(
+			"Скачать расписание",
+			"open_schedule_exports",
+			token,
+			from.Format("2006-01-02"),
+			fmt.Sprint(daysCount),
+		)))
 	}
 	if groupChat {
 		rows = append(rows, menu.Row(menu.Data(groupLabel, "open_schedule_group")))
@@ -459,6 +471,36 @@ func ScheduleWeekNavigation(from time.Time, groupName string, groupChat bool, gr
 		))
 	}
 	menu.Inline(rows...)
+	return menu
+}
+
+func ScheduleExportFormats(groupToken, from string, daysCount int) *tgbotapi.ReplyMarkup {
+	menu := &tgbotapi.ReplyMarkup{}
+	days := fmt.Sprint(daysCount)
+	backAction := "schedule_week"
+	backArguments := []string{from, days}
+	if daysCount == 1 {
+		backAction = "schedule_date"
+		backArguments = []string{from}
+	}
+	menu.Inline(
+		menu.Row(menu.Data("Изображение PNG", "download_schedule", "png", groupToken, from, days)),
+		menu.Row(menu.Data("Данные JSON", "download_schedule", "json", groupToken, from, days)),
+		menu.Row(menu.Data("Таблица CSV", "download_schedule", "csv", groupToken, from, days)),
+		menu.Row(menu.Data("Назад к расписанию", backAction, backArguments...)),
+	)
+	return menu
+}
+
+func ScheduleExportResultNavigation(groupToken, from string, daysCount int) *tgbotapi.ReplyMarkup {
+	menu := &tgbotapi.ReplyMarkup{}
+	menu.Inline(menu.Row(menu.Data(
+		"Назад к форматам",
+		"open_schedule_exports",
+		groupToken,
+		from,
+		fmt.Sprint(daysCount),
+	)))
 	return menu
 }
 

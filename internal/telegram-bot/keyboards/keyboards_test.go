@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
+	tele "gopkg.in/telebot.v3"
 )
 
 func TestMainMenuKeepsOnlyFrequentActions(t *testing.T) {
@@ -95,7 +96,7 @@ func TestScheduleDownloadCallbackUsesBoundedGroupToken(t *testing.T) {
 	var data string
 	for _, row := range menu.InlineKeyboard {
 		for _, button := range row {
-			if button.Unique == "download_schedule_png" {
+			if button.Unique == "open_schedule_exports" {
 				data = button.Data
 			}
 		}
@@ -105,6 +106,42 @@ func TestScheduleDownloadCallbackUsesBoundedGroupToken(t *testing.T) {
 	}
 	if len(GroupToken(groupID)) != 16 {
 		t.Fatalf("group token has unexpected length: %q", GroupToken(groupID))
+	}
+}
+
+func TestScheduleExportMenuListsFilesAndReturnsToSchedule(t *testing.T) {
+	menu := ScheduleExportFormats("group-token", "2026-09-07", 7)
+	want := []string{"download_schedule", "download_schedule", "download_schedule", "schedule_week"}
+	if len(menu.InlineKeyboard) != len(want) {
+		t.Fatalf("export rows = %d, want %d", len(menu.InlineKeyboard), len(want))
+	}
+	for index, unique := range want {
+		if len(menu.InlineKeyboard[index]) != 1 || menu.InlineKeyboard[index][0].Unique != unique {
+			t.Fatalf("export row %d = %#v, want %s", index, menu.InlineKeyboard[index], unique)
+		}
+	}
+	if strings.Contains(fmt.Sprint(menu.InlineKeyboard), "ics") {
+		t.Fatal("calendar export must not be exposed")
+	}
+}
+
+func TestNestedMenusExposeBackNavigation(t *testing.T) {
+	tests := []struct {
+		name   string
+		menu   *tele.ReplyMarkup
+		unique string
+	}{
+		{name: "search type", menu: SearchTypeSelector(), unique: "close_inline"},
+		{name: "hotline type", menu: HotlineTypeSelector(), unique: "back_more"},
+		{name: "group input", menu: BackButton("cancel_group_change", "main"), unique: "cancel_group_change"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			lastRow := test.menu.InlineKeyboard[len(test.menu.InlineKeyboard)-1]
+			if len(lastRow) != 1 || lastRow[0].Text != "Назад" || lastRow[0].Unique != test.unique {
+				t.Fatalf("last row = %#v, want back action %s", lastRow, test.unique)
+			}
+		})
 	}
 }
 

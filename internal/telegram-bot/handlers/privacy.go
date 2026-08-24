@@ -81,7 +81,7 @@ func (h *Handler) HandleConfirmDeleteProfile(c tele.Context) error {
 
 func (h *Handler) HandleCancelDeleteProfile(c tele.Context) error {
 	_ = c.Respond()
-	return c.Send("Удаление отменено.")
+	return c.Send("Удаление отменено. Главное меню восстановлено.", keyboards.MainMenu())
 }
 
 func (h *Handler) HandleSourcesInfo(c tele.Context) error {

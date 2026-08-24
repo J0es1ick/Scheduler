@@ -60,7 +60,46 @@ func (h *Handler) HandleOpenScheduleGroup(c tele.Context) error {
 
 func (h *Handler) HandleAddSubscription(c tele.Context) error {
 	_ = c.Respond()
-	return h.HandleChangeGroup(c)
+	return h.beginGroupChange(c, "subscriptions", callbackPage(c, 0))
+}
+
+func (h *Handler) HandleCancelGroupChange(c tele.Context) error {
+	args := callbackArguments(c)
+	destination := "main"
+	if len(args) > 0 && args[0] == "subscriptions" {
+		destination = "subscriptions"
+	}
+	_ = c.Respond()
+	ctx, cancel := reqCtx()
+	defer cancel()
+	state, _, err := h.restoreProfile(ctx, c.Sender().ID)
+	if err != nil {
+		slog.Error("restore profile after cancelled group change failed", "user_id", c.Sender().ID, "err", err)
+		return c.Send("Не удалось восстановить текущую группу. Используйте /start.")
+	}
+	if state == nil {
+		h.StateManager.Delete(c.Sender().ID)
+		return editOrSend(c, "Настройка группы отменена. Для продолжения используйте /start.", nil)
+	}
+	if destination == "subscriptions" {
+		return h.showSubscriptionSettingsPage(c, true, callbackPage(c, 1))
+	}
+	if err = c.Delete(); err != nil {
+		_ = c.Edit("Смена группы отменена.")
+	}
+	return h.HandleMenu(c)
+}
+
+func (h *Handler) HandleBackUniversitySelection(c tele.Context) error {
+	_ = c.Respond()
+	ctx, cancel := reqCtx()
+	defer cancel()
+	universities, err := h.UniversityService.GetAll(ctx)
+	if err != nil {
+		slog.Error("load universities for back navigation failed", "err", err)
+		return c.Send("Не удалось загрузить список вузов. Попробуйте позже.")
+	}
+	return editOrSend(c, "Доступные вузы:", keyboards.UniversitySelector(universities))
 }
 
 func (h *Handler) HandleShowSources(c tele.Context) error {

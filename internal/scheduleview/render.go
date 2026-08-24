@@ -49,7 +49,14 @@ type faces struct {
 	small  font.Face
 }
 
+const maxConcurrentPNGRenders = 4
+
+var pngRenderSlots = make(chan struct{}, maxConcurrentPNGRenders)
+
 func RenderPNG(request Request) ([]byte, error) {
+	pngRenderSlots <- struct{}{}
+	defer func() { <-pngRenderSlots }()
+
 	if request.Days <= 0 {
 		request.Days = 1
 	}

@@ -26,7 +26,6 @@ func (h *Handler) HandleSearch(c tgbotapi.Context) error {
 	return c.Send("Выберите критерий поиска:", keyboards.SearchTypeSelector())
 }
 
-// HandleCancelSearch — возврат в главное меню из режима поиска.
 func (h *Handler) HandleCancelSearch(c tgbotapi.Context) error {
 	userID := c.Sender().ID
 	state := h.StateManager.Get(userID)
@@ -36,8 +35,7 @@ func (h *Handler) HandleCancelSearch(c tgbotapi.Context) error {
 		h.StateManager.Set(userID, state)
 	}
 	_ = c.Respond()
-	_ = c.Edit("Поиск отменён.")
-	return c.Send("Главное меню:", keyboards.MainMenu())
+	return editOrSend(c, "Выберите критерий поиска:", keyboards.SearchTypeSelector())
 }
 
 // HandleSearchResult выполняет поиск расписания по заданному в state.SearchQuery критерию.

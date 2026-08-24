@@ -52,15 +52,21 @@ func (h *Handler) HandleHotlineType(c tele.Context) error {
 }
 
 func (h *Handler) HandleCancelHotline(c tele.Context) error {
-	defer c.Respond()
+	_ = c.Respond()
 	ctx, cancel := reqCtx()
 	defer cancel()
-	_, _, err := h.restoreProfile(ctx, c.Sender().ID)
+	state, _, err := h.restoreProfile(ctx, c.Sender().ID)
 	if err != nil {
 		return c.Send("Не удалось восстановить профиль.")
 	}
-	_ = c.Edit("Обращение отменено.")
-	return c.Send("Главное меню:", keyboards.MainMenu())
+	if state == nil {
+		h.StateManager.Delete(c.Sender().ID)
+	}
+	return editOrSend(
+		c,
+		"Сообщить о расписании\n\nВыберите тип обращения:",
+		keyboards.HotlineTypeSelector(),
+	)
 }
 
 func (h *Handler) HandleHotlineSubmission(c tele.Context, input string) error {
@@ -81,11 +87,11 @@ func (h *Handler) HandleHotlineSubmission(c tele.Context, input string) error {
 	defer cancel()
 	id, err := h.SupportRequestService.Submit(ctx, fmt.Sprint(c.Sender().ID), state.HotlineType, details)
 	if errors.Is(err, repository.ErrSupportRequestLimit) {
-		return c.Send("У вас уже есть три открытых обращения. Дождитесь решения администратора.")
+		return c.Send("У вас уже есть три открытых обращения. Дождитесь решения администратора.", hotlineCancelButton())
 	}
 	if err != nil {
 		slog.Error("submit hotline request failed", "user_id", c.Sender().ID, "err", err)
-		return c.Send("Не удалось сохранить обращение. Попробуйте позже.")
+		return c.Send("Не удалось сохранить обращение. Попробуйте позже.", hotlineCancelButton())
 	}
 	restored, _, restoreErr := h.restoreProfile(ctx, c.Sender().ID)
 	if restoreErr != nil || restored == nil {
@@ -118,6 +124,6 @@ func hotlineTemplate(requestType string) string {
 
 func hotlineCancelButton() *tele.ReplyMarkup {
 	menu := &tele.ReplyMarkup{}
-	menu.Inline(menu.Row(menu.Data("Отмена", "cancel_hotline")))
+	menu.Inline(menu.Row(menu.Data("Назад", "cancel_hotline")))
 	return menu
 }

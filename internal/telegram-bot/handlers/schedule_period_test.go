@@ -34,7 +34,7 @@ func TestFormatDayScheduleShowsGroupOnlyWhenRequested(t *testing.T) {
 	}
 }
 
-func TestFormatDayScheduleUsesSafeHTMLAndTypeMarker(t *testing.T) {
+func TestFormatDayScheduleUsesSafeHTMLWithoutDecorativeMarkers(t *testing.T) {
 	day := dto.DaySchedule{
 		Date: time.Date(2026, time.August, 10, 0, 0, 0, 0, time.UTC),
 		Lessons: []domain.Lesson{{
@@ -44,13 +44,17 @@ func TestFormatDayScheduleUsesSafeHTMLAndTypeMarker(t *testing.T) {
 	}
 	formatted := formatDaySchedule(day)
 	for _, expected := range []string{
-		"<b>Понедельник, 10.08.2026</b>",
-		"🟦 <b>08:00–09:35</b>",
-		"Математика &lt;часть 1&gt;",
+		"<i>Понедельник, 10.08.2026</i>",
+		"08:00–09:35 · <b>Математика &lt;часть 1&gt;</b>",
 		"Иванов &amp; Петров",
 	} {
 		if !strings.Contains(formatted, expected) {
 			t.Fatalf("formatted schedule does not contain %q: %q", expected, formatted)
+		}
+	}
+	for _, marker := range []string{"🟩", "🩷", "🟦", "🟨", "🟥", "🟪", "⬜"} {
+		if strings.Contains(formatted, marker) {
+			t.Fatalf("formatted schedule contains decorative marker %q: %q", marker, formatted)
 		}
 	}
 }

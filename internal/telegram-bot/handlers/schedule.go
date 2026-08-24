@@ -37,7 +37,7 @@ func formatDayScheduleWithOptions(day dto.DaySchedule, showGroupNames bool) stri
 	if wd == 0 {
 		wd = 7 // воскресенье
 	}
-	header := fmt.Sprintf("<b>%s, %s</b>\n", weekdayNames[wd], day.Date.Format("02.01.2006"))
+	header := fmt.Sprintf("<i>%s, %s</i>\n", weekdayNames[wd], day.Date.Format("02.01.2006"))
 
 	if len(day.Lessons) == 0 {
 		return header + "Занятий нет.\n"
@@ -61,8 +61,7 @@ func formatDayScheduleWithOptions(day dto.DaySchedule, showGroupNames bool) stri
 			details = append(details, html.EscapeString(l.Room))
 		}
 		sb.WriteString(fmt.Sprintf(
-			"%s <b>%s–%s</b> · %s\n<i>%s%s</i>\n",
-			lessonTypeMarker(l.Type),
+			"%s–%s · <b>%s</b>\n<i>%s%s</i>\n",
 			l.TimeStart, l.TimeEnd,
 			html.EscapeString(l.Subject), lessonTypeLabel(l.Type), html.EscapeString(subgroup),
 		))
@@ -72,25 +71,6 @@ func formatDayScheduleWithOptions(day dto.DaySchedule, showGroupNames bool) stri
 		sb.WriteString("\n")
 	}
 	return sb.String()
-}
-
-func lessonTypeMarker(lessonType domain.LessonType) string {
-	switch lessonType {
-	case domain.LessonTypeLecture:
-		return "🟩"
-	case domain.LessonTypePractice:
-		return "🩷"
-	case domain.LessonTypeLab:
-		return "🟦"
-	case domain.LessonTypeSeminar:
-		return "🟨"
-	case domain.LessonTypeExam, domain.LessonTypeCredit:
-		return "🟥"
-	case domain.LessonTypeConsultation:
-		return "🟪"
-	default:
-		return "⬜"
-	}
 }
 
 func lessonTypeLabel(lessonType domain.LessonType) string {
@@ -400,7 +380,7 @@ func (h *Handler) sendTargetWeek(
 	if err != nil {
 		return sendScheduleLoadError(c, err)
 	}
-	return h.sendScheduleView(c, days, target, from, daysCount, markup, formatSchedulePeriod(from, daysCount))
+	return h.sendScheduleView(c, days, target, from, daysCount, markup, formatSchedulePeriodHTML(from, daysCount))
 }
 
 func editOrSendHTML(c tgbotapi.Context, text string, markup *tgbotapi.ReplyMarkup) error {
@@ -420,7 +400,7 @@ func (h *Handler) sendScheduleView(
 	markup *tgbotapi.ReplyMarkup,
 	header string,
 ) error {
-	if target.ViewFormat != domain.ScheduleViewVisual || isGroupChat(c) {
+	if target.ViewFormat != domain.ScheduleViewVisual {
 		return h.sendDaysWithMarkupAndHeader(c, days, target.UniversityID, markup, header)
 	}
 	payload, err := schedulePNG(target, days, from, daysCount)
@@ -430,7 +410,7 @@ func (h *Handler) sendScheduleView(
 	}
 	photo := &tgbotapi.Photo{
 		File:    tgbotapi.FromReader(bytes.NewReader(payload)),
-		Caption: formatSchedulePeriod(from, daysCount) + h.sourceFreshnessText(target.UniversityID),
+		Caption: formatSchedulePeriodHTML(from, daysCount) + h.sourceFreshnessText(target.UniversityID),
 	}
 	if c.Callback() != nil {
 		if err = c.Delete(); err != nil {
@@ -489,16 +469,46 @@ func scheduleFileName(groupName string, from time.Time, daysCount int, extension
 }
 
 func (h *Handler) HandleDownloadSchedulePNG(c tgbotapi.Context) error {
-	return h.handleDownloadSchedule(c, true)
+	return h.handleDownloadSchedule(c, "png", callbackArguments(c))
 }
 
-func (h *Handler) HandleDownloadScheduleICS(c tgbotapi.Context) error {
-	return h.handleDownloadSchedule(c, false)
+func (h *Handler) HandleDeprecatedScheduleICS(c tgbotapi.Context) error {
+	return c.Respond(&tgbotapi.CallbackResponse{
+		Text:      "Экспорт в календарь отключён. Откройте новое меню скачивания.",
+		ShowAlert: true,
+	})
 }
 
-func (h *Handler) handleDownloadSchedule(c tgbotapi.Context, pngFormat bool) error {
+func (h *Handler) HandleOpenScheduleExports(c tgbotapi.Context) error {
 	args := callbackArguments(c)
 	if len(args) < 3 {
+		return respondStaleCallback(c)
+	}
+	daysCount, err := strconv.Atoi(args[2])
+	if err != nil || daysCount < 1 || daysCount > 14 {
+		return respondStaleCallback(c)
+	}
+	if _, err = parseScheduleDate(args[1], time.Local); err != nil {
+		return respondStaleCallback(c)
+	}
+	_ = c.Respond()
+	return editOrSend(
+		c,
+		"Выберите формат файла:",
+		keyboards.ScheduleExportFormats(args[0], args[1], daysCount),
+	)
+}
+
+func (h *Handler) HandleDownloadSchedule(c tgbotapi.Context) error {
+	args := callbackArguments(c)
+	if len(args) < 4 {
+		return respondStaleCallback(c)
+	}
+	return h.handleDownloadSchedule(c, args[0], args[1:])
+}
+
+func (h *Handler) handleDownloadSchedule(c tgbotapi.Context, format string, args []string) error {
+	if len(args) < 3 || (format != "png" && format != "json" && format != "csv") {
 		return respondStaleCallback(c)
 	}
 	daysCount, err := strconv.Atoi(args[2])
@@ -521,17 +531,20 @@ func (h *Handler) handleDownloadSchedule(c tgbotapi.Context, pngFormat bool) err
 		return sendScheduleLoadError(c, err)
 	}
 	request := scheduleRenderRequest(target, days, from, daysCount)
-	var payload []byte
-	extension := ".ics"
-	if pngFormat {
+	var (
+		payload   []byte
+		extension string
+	)
+	switch format {
+	case "png":
 		payload, err = scheduleview.RenderPNG(request)
 		extension = ".png"
-	} else {
-		university, loadErr := h.UniversityService.GetByID(ctx, target.UniversityID)
-		if loadErr != nil || university == nil {
-			return c.Send("Не удалось определить часовой пояс расписания.")
-		}
-		payload = scheduleview.RenderICS(request, university.Timezone)
+	case "json":
+		payload, err = scheduleview.RenderJSON(request)
+		extension = ".json"
+	case "csv":
+		payload, err = scheduleview.RenderCSV(request)
+		extension = ".csv"
 	}
 	if err != nil {
 		slog.Error("render schedule download failed", "group_id", target.GroupID, "err", err)
@@ -547,7 +560,10 @@ func (h *Handler) handleDownloadSchedule(c tgbotapi.Context, pngFormat bool) err
 			formatSchedulePeriod(from, daysCount),
 		),
 	}
-	return c.Send(document)
+	return c.Send(
+		document,
+		keyboards.ScheduleExportResultNavigation(args[0], args[1], daysCount),
+	)
 }
 
 func (h *Handler) downloadTarget(
@@ -596,6 +612,10 @@ func formatSchedulePeriod(from time.Time, daysCount int) string {
 		label = "Неделя"
 	}
 	return fmt.Sprintf("%s: %s–%s", label, from.Format("02.01.2006"), to.Format("02.01.2006"))
+}
+
+func formatSchedulePeriodHTML(from time.Time, daysCount int) string {
+	return "<b>" + html.EscapeString(formatSchedulePeriod(from, daysCount)) + "</b>"
 }
 
 func (h *Handler) HandleWeekDay(c tgbotapi.Context) error {
