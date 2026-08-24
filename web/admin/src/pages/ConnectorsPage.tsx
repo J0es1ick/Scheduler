@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import {
+  DialogPortal,
   EmptyBlock,
   ErrorBlock,
   formatDateTime,
@@ -701,7 +702,8 @@ function IntegrationWizard({
   }
 
   return (
-    <div className="dialog-backdrop" role="presentation">
+    <DialogPortal>
+      <div className="dialog-backdrop" role="presentation">
       <section
         className="connector-wizard"
         role="dialog"
@@ -942,7 +944,8 @@ function IntegrationWizard({
           )}
         </footer>
       </section>
-    </div>
+      </div>
+    </DialogPortal>
   );
 }
 
@@ -979,7 +982,8 @@ function CredentialsDialog({
     URL.revokeObjectURL(link.href);
   }
   return (
-    <div className="dialog-backdrop" role="presentation">
+    <DialogPortal>
+      <div className="dialog-backdrop" role="presentation">
       <section className="credentials-dialog" role="dialog" aria-modal="true">
         <span className="credentials-icon">
           <KeyRound size={20} />
@@ -1002,7 +1006,8 @@ function CredentialsDialog({
           </button>
         </div>
       </section>
-    </div>
+      </div>
+    </DialogPortal>
   );
 }
 
@@ -1061,7 +1066,8 @@ function QualityPolicyDialog({
     }
   }
   return (
-    <div className="dialog-backdrop" role="presentation">
+    <DialogPortal>
+      <div className="dialog-backdrop" role="presentation">
       <section
         className="connector-wizard quality-policy-dialog"
         role="dialog"
@@ -1134,6 +1140,7 @@ function QualityPolicyDialog({
           </button>
         </footer>
       </section>
-    </div>
+      </div>
+    </DialogPortal>
   );
 }

@@ -25,7 +25,14 @@ export function useScheduleEditor(
 
   const universities = useRemote(() => api.universities(), []);
   const groups = useRemote(
-    () => api.groups({ page: 1, pageSize: 20, q: debouncedGroupQuery, university }),
+    () => api.groups({
+      page: 1,
+      pageSize: 20,
+      q: debouncedGroupQuery,
+      university,
+      status: "active",
+      selector: true,
+    }),
     [debouncedGroupQuery, university],
     { enabled: debouncedGroupQuery.trim().length > 0 },
   );

@@ -51,6 +51,20 @@ async function mockAuthenticated(page: Page) {
   await page.route("**/api/client-errors", (route) => route.fulfill({ status: 204 }));
 }
 
+async function expectViewportDialog(page: Page) {
+  const backdrop = page.locator(".dialog-backdrop").last();
+  await expect(backdrop).toBeVisible();
+  expect(await backdrop.evaluate((element) => element.parentElement === document.body)).toBe(true);
+  const box = await backdrop.boundingBox();
+  const viewport = page.viewportSize();
+  expect(box).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(box!.x).toBe(0);
+  expect(box!.y).toBe(0);
+  expect(box!.width).toBe(viewport!.width);
+  expect(box!.height).toBe(viewport!.height);
+}
+
 test("access-key bootstrap login remains available only when enabled", async ({ page }) => {
   await page.route("**/api/auth/config", (route) => json(route, { access_key_enabled: true }));
   await page.route("**/api/auth/me", (route) => json(route, { error: "auth", status: 401 }, 401));
@@ -180,6 +194,7 @@ test("group search keeps the editor visible and confirms a manual change", async
   await expect(page.getByRole("heading", { name: "Нечётная неделя", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Чётная неделя", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Редактировать" }).first().click();
+  await expectViewportDialog(page);
   await page.getByLabel("Предмет").fill("Обновлённый предмет");
   await page.getByRole("button", { name: "Проверить изменения" }).click();
   await page.getByRole("button", { name: "Подтвердить и применить" }).click();
@@ -330,6 +345,7 @@ test("quarantined snapshot can be inspected group by group before publication", 
   await page.getByRole("button", { name: "Изучить данные" }).click();
 
   await expect(page.getByRole("heading", { name: "Содержимое нового снимка" })).toBeVisible();
+  await expectViewportDialog(page);
   await expect(page.getByRole("button", { name: /3\/147/ })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Опубликовано сейчас" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Получено с сайта" })).toBeVisible();
@@ -480,4 +496,190 @@ test("backend outage is shown instead of a blank screen", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Вход в админку" })).toBeVisible();
   await expect(page.getByRole("alert")).toContainText("Сервис временно недоступен");
+});
+
+test("group identity conflict is resolved explicitly before source retry", async ({ page }) => {
+  await mockAuthenticated(page);
+  let resolution = "";
+  let syncRequests = 0;
+  const conflict = {
+    id: "identity-conflict-1",
+    data_source_id: "ispu-main",
+    university_id: "ispu",
+    external_group_id: "ispu:group:101016",
+    existing_group_id: "ispu:group:101016",
+    existing_name: "2-ЭЭ-В",
+    incoming_name: "1-ЭЭ-В",
+    status: "pending",
+    resolution: "",
+    first_seen_at: "2026-08-24T08:00:00Z",
+    last_seen_at: "2026-08-24T08:10:00Z",
+    occurrences: 3,
+    subscription_count: 0,
+    default_group_count: 0,
+    chat_count: 0,
+    lesson_count: 18,
+  };
+  await page.route("**/api/sources/ispu-main/group-identity-conflicts/identity-conflict-1/resolve", async (route) => {
+    resolution = (route.request().postDataJSON() as { resolution: string }).resolution;
+    await json(route, { ...conflict, status: "resolved", resolution });
+  });
+  await page.route("**/api/sources/ispu-main/sync", async (route) => {
+    syncRequests += 1;
+    await json(route, { status: "started", source_id: "ispu-main" }, 202);
+  });
+  await page.route("**/api/sources", (route) =>
+    json(route, {
+      items: [{
+        id: "ispu-main",
+        university_id: "ispu",
+        university_name: "ИГЭУ",
+        university_full_name: "Ивановский государственный энергетический университет",
+        schedule_url: "http://schedule.ispu.ru",
+        adapter_type: "ispu",
+        lifecycle_status: "active",
+        archived_at: null,
+        allow_empty: false,
+        insecure_transport: true,
+        is_enabled: true,
+        update_interval: 3600,
+        last_run_at: "2026-08-24T08:10:00Z",
+        last_success_at: "2026-08-23T08:10:00Z",
+        next_run_at: "2026-08-24T08:22:00Z",
+        last_error: "group identity conflict",
+        consecutive_failures: 3,
+        next_retry_at: "2026-08-24T08:22:00Z",
+        current_snapshot_id: "snapshot-old",
+        quarantined_count: 0,
+        latest_status: "failed",
+        latest_started_at: "2026-08-24T08:10:00Z",
+        latest_finished_at: "2026-08-24T08:10:02Z",
+        latest_records: 0,
+        group_count: 10,
+        lesson_count: 120,
+        identity_conflicts: [conflict],
+        running: false,
+        health: "error",
+      }],
+    }),
+  );
+  await page.route("**/api/parser-snapshots?**", (route) => json(route, { items: [] }));
+
+  await page.goto("/#/sources");
+  await expect(page.getByText("Сайт изменил принадлежность ID группы")).toBeVisible();
+  await expect(page.getByText("2-ЭЭ-В", { exact: true })).toBeVisible();
+  await expect(page.getByText("1-ЭЭ-В", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Считать переименованием" }).click();
+  await expectViewportDialog(page);
+  await expect(page.getByText(/Все её подписки.*останутся привязаны/)).toBeVisible();
+  await page.getByRole("button", { name: "Отмена" }).click();
+
+  await page.getByRole("button", { name: "Создать новую группу" }).click();
+  await expectViewportDialog(page);
+  await page.getByRole("button", { name: "Да, создать новую" }).click();
+
+  await expect.poll(() => resolution).toBe("new_group");
+  await expect.poll(() => syncRequests).toBe(1);
+  await expect(page.getByText(/создана отдельная группа/)).toBeVisible();
+});
+
+test("group directory manages active and archived groups safely", async ({ page }) => {
+  await mockAuthenticated(page);
+  let activeGroup = {
+    id: "ispu-active",
+    name: "1-ЭЭ-В",
+    university_id: "ispu",
+    university_name: "ИГЭУ",
+    is_active: true,
+    source_active: true,
+    manually_disabled: false,
+    lesson_count: 18,
+    subscription_count: 2,
+    default_group_count: 1,
+    chat_count: 1,
+    override_count: 0,
+    created_at: "2026-08-24T08:00:00Z",
+    updated_at: "2026-08-24T08:10:00Z",
+  };
+  const archivedGroup = {
+    id: "ispu-archived",
+    name: "2-ЭЭ-В",
+    university_id: "ispu",
+    university_name: "ИГЭУ",
+    is_active: false,
+    source_active: false,
+    manually_disabled: false,
+    lesson_count: 0,
+    subscription_count: 1,
+    default_group_count: 1,
+    chat_count: 0,
+    override_count: 2,
+    created_at: "2025-08-24T08:00:00Z",
+    updated_at: "2026-08-23T08:10:00Z",
+  };
+  let deleted = false;
+  let requestedActive: boolean | null = null;
+  let requestedOrder = "";
+
+  await page.route("**/api/universities", (route) =>
+    json(route, {
+      items: [{
+        id: "ispu",
+        name: "ИГЭУ",
+        full_name: "Ивановский государственный энергетический университет",
+        schedule_url: "http://schedule.ispu.ru",
+        is_active: true,
+      }],
+    }),
+  );
+  await page.route("**/api/groups?**", (route) => {
+    const parameters = new URL(route.request().url()).searchParams;
+    const status = parameters.get("status") ?? "active";
+    requestedOrder = parameters.get("order") ?? "name";
+    const candidates = [activeGroup, ...(deleted ? [] : [archivedGroup])];
+    const items = candidates.filter((group) =>
+      status === "all" ? true : status === "active" ? group.is_active : !group.is_active,
+    );
+    return json(route, {
+      items,
+      pagination: { page: 1, page_size: 30, total: items.length },
+    });
+  });
+  await page.route("**/api/groups/ispu-active", async (route) => {
+    requestedActive = (route.request().postDataJSON() as { is_active: boolean }).is_active;
+    activeGroup = {
+      ...activeGroup,
+      is_active: requestedActive,
+      manually_disabled: !requestedActive,
+    };
+    await json(route, activeGroup);
+  });
+  await page.route("**/api/groups/ispu-archived", async (route) => {
+    deleted = true;
+    await json(route, archivedGroup);
+  });
+
+  await page.goto("/#/data");
+  await expect(page.getByRole("heading", { name: "Учебные группы" })).toBeVisible();
+  await expect(page.getByText("1-ЭЭ-В", { exact: true })).toBeVisible();
+
+  await page.getByLabel("Сортировка групп").selectOption("oldest");
+  await expect.poll(() => requestedOrder).toBe("oldest");
+
+  await page.getByRole("button", { name: "Отключить" }).click();
+  await expectViewportDialog(page);
+  await expect(page.getByText(/подписки, ручные правки.*сохранятся/)).toBeVisible();
+  await page.getByRole("button", { name: "Отключить", exact: true }).last().click();
+  await expect.poll(() => requestedActive).toBe(false);
+
+  await page.getByLabel("Состояние групп").selectOption("inactive");
+  const archivedRow = page.locator(".group-directory-row").filter({ hasText: "2-ЭЭ-В" });
+  await archivedRow.getByRole("button", { name: "Удалить" }).click();
+  await expectViewportDialog(page);
+  await expect(page.getByText("1 подписок", { exact: true })).toBeVisible();
+  await expect(page.getByText("2 ручных правок", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Удалить навсегда" }).click();
+  await expect.poll(() => deleted).toBe(true);
+  await expect(page.getByText("Группа 2-ЭЭ-В удалена")).toBeVisible();
 });

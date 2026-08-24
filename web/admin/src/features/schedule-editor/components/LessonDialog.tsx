@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { Check, X } from "lucide-react";
+import { DialogPortal } from "../../../components";
 import type { EditorLesson, SemesterOption } from "../../../types";
 import { days, formFromLesson, lessonTypes, type LessonForm, weekLabels } from "../model";
 
@@ -47,7 +48,8 @@ export function LessonDialog({
   }
 
   return (
-    <div className="dialog-backdrop" role="presentation">
+    <DialogPortal>
+      <div className="dialog-backdrop" role="presentation">
       <section className="lesson-dialog" role="dialog" aria-modal="true" aria-labelledby="lesson-dialog-title">
         <header>
           <div>
@@ -142,7 +144,8 @@ export function LessonDialog({
           </form>
         )}
       </section>
-    </div>
+      </div>
+    </DialogPortal>
   );
 }
 

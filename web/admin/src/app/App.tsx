@@ -170,7 +170,7 @@ export default function App() {
       case "logs":
         return <LogsPage />;
       case "data":
-        return <DataPage />;
+        return <DataPage notify={notify} />;
       case "support":
         return <SupportPage notify={notify} />;
       case "users":

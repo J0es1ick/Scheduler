@@ -8,6 +8,7 @@ import {
   Trash2,
 } from "lucide-react";
 import {
+  DialogPortal,
   EmptyBlock,
   ErrorBlock,
   LoadingBlock,
@@ -311,7 +312,8 @@ function ConfirmDelete({
   onConfirm: () => void;
 }) {
   return (
-    <div className="dialog-backdrop" role="presentation">
+    <DialogPortal>
+      <div className="dialog-backdrop" role="presentation">
       <section
         className="confirm-dialog"
         role="dialog"
@@ -348,7 +350,8 @@ function ConfirmDelete({
           </button>
         </div>
       </section>
-    </div>
+      </div>
+    </DialogPortal>
   );
 }
 
@@ -364,7 +367,8 @@ function ConfirmRestore({
   onConfirm: () => void;
 }) {
   return (
-    <div className="dialog-backdrop" role="presentation">
+    <DialogPortal>
+      <div className="dialog-backdrop" role="presentation">
       <section
         className="confirm-dialog"
         role="dialog"
@@ -395,6 +399,7 @@ function ConfirmRestore({
           </button>
         </div>
       </section>
-    </div>
+      </div>
+    </DialogPortal>
   );
 }

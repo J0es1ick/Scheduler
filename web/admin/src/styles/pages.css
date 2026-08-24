@@ -91,6 +91,10 @@
   gap: 10px;
 }
 
+.data-toolbar.has-group-status {
+  grid-template-columns: auto minmax(220px, 1fr) 190px 170px 160px;
+}
+
 .segmented-control,
 .week-switch {
   display: inline-flex;
@@ -185,7 +189,13 @@
 
 .groups-table .table-head,
 .groups-table .table-row {
-  grid-template-columns: 1.4fr 1fr 0.65fr 0.8fr 25px;
+  grid-template-columns:
+    minmax(185px, 1.25fr)
+    minmax(150px, 0.9fr)
+    minmax(105px, 0.65fr)
+    minmax(215px, 1.2fr)
+    minmax(92px, 0.55fr)
+    minmax(150px, 0.9fr);
 }
 
 .groups-table .table-row > div:first-child {
@@ -194,13 +204,103 @@
   gap: 10px;
 }
 
-.groups-table .table-row > div:first-child > div {
+.groups-table .table-row > div:first-child > * {
   min-width: 0;
 }
 
 .groups-table .table-row strong,
 .groups-table .table-row span {
   white-space: nowrap;
+}
+
+.group-directory-row.is-inactive {
+  background: color-mix(in srgb, var(--surface-muted) 72%, var(--surface));
+}
+
+.group-name-button {
+  display: grid;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+}
+
+.group-name-button:hover strong {
+  color: var(--olive-dark);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.group-lifecycle {
+  display: grid;
+  gap: 4px;
+}
+
+.groups-table .group-lifecycle strong,
+.groups-table .group-lifecycle span {
+  white-space: normal;
+}
+
+.group-lifecycle strong::before {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--muted-light);
+  content: "";
+}
+
+.group-lifecycle.is-active strong::before {
+  background: var(--olive);
+}
+
+.group-lifecycle.is-manual strong::before {
+  background: var(--ochre);
+}
+
+.group-lifecycle.is-archived strong::before {
+  background: var(--muted-light);
+}
+
+.group-row-actions {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.group-row-actions .button {
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 9px;
+}
+
+.directory-count {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.group-lifecycle-dialog {
+  width: min(100%, 520px);
+}
+
+.group-impact-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.group-impact-summary span {
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-size: 10px;
 }
 
 .lesson-browser {

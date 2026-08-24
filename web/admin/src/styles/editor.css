@@ -819,6 +819,25 @@
   color: var(--red);
 }
 
+.dialog-warning-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid #d3b07d;
+  border-radius: 9px;
+  background: #f8f0e2;
+  color: #93562c;
+}
+
+.identity-conflict-dialog {
+  width: min(100%, 520px);
+}
+
+.identity-conflict-dialog strong {
+  color: var(--ink);
+}
+
 .confirm-dialog h2 {
   margin-top: 20px;
 }
@@ -977,4 +996,3 @@
 .ledger-list strong {
   font-size: 13px;
 }
-

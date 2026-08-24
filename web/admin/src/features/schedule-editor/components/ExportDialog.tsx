@@ -1,5 +1,5 @@
 import { CalendarRange, Download, FileJson, FileSpreadsheet, X } from "lucide-react";
-import type { ToastMessage } from "../../../components";
+import { DialogPortal, type ToastMessage } from "../../../components";
 import type { EditorSchedule } from "../../../types";
 import { downloadSchedule, type ScheduleExportFormat } from "../exportSchedule";
 import { pluralLessons } from "../model";
@@ -30,7 +30,8 @@ export function ExportDialog({
   }
 
   return (
-    <div className="dialog-backdrop" role="presentation">
+    <DialogPortal>
+      <div className="dialog-backdrop" role="presentation">
       <section className="export-dialog" role="dialog" aria-modal="true" aria-labelledby="export-title">
         <header>
           <div>
@@ -52,6 +53,7 @@ export function ExportDialog({
           ))}
         </div>
       </section>
-    </div>
+      </div>
+    </DialogPortal>
   );
 }

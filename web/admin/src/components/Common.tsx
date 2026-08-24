@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertCircle,
   ArrowLeft,
@@ -13,6 +14,18 @@ import {
 import type { Pagination, SourceHealth } from "../types";
 
 export const number = new Intl.NumberFormat("ru-RU");
+
+export function DialogPortal({ children }: { children: ReactNode }) {
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  return createPortal(children, document.body);
+}
 
 export function formatDateTime(value?: string | null) {
   if (!value) return "ещё не запускался";

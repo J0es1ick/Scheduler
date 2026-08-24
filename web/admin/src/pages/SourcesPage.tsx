@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   ArchiveRestore,
+  ArrowRight,
   Check,
   Eye,
   ExternalLink,
@@ -12,10 +13,12 @@ import {
   RotateCcw,
   ShieldAlert,
   Trash2,
+  Users,
   X,
 } from "lucide-react";
 import { api } from "../api";
 import {
+  DialogPortal,
   EmptyBlock,
   ErrorBlock,
   formatDateTime,
@@ -30,7 +33,11 @@ import {
 } from "../components";
 import { SnapshotReviewDialog } from "../features/snapshot-review/SnapshotReviewDialog";
 import { useRemote } from "../hooks";
-import type { ParserSnapshot, SourceView } from "../types";
+import type {
+  GroupIdentityConflict,
+  ParserSnapshot,
+  SourceView,
+} from "../types";
 
 const adapterLabels: Record<string, string> = {
   isuct: "ISUCT",
@@ -62,6 +69,11 @@ export function SourcesPage({
     approvalOnly: boolean;
   } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SourceView | null>(null);
+  const [identityResolution, setIdentityResolution] = useState<{
+    source: SourceView;
+    conflict: GroupIdentityConflict;
+    resolution: "rename" | "new_group";
+  } | null>(null);
   const [listView, setListView] = useState<"active" | "archived">("active");
 
   const allSources = data?.sources ?? [];
@@ -253,6 +265,46 @@ export function SourcesPage({
     } catch (caught) {
       notify(
         caught instanceof Error ? caught.message : "Не удалось выполнить откат",
+        "error",
+      );
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function resolveIdentityConflict() {
+    if (!identityResolution) return;
+    const { source, conflict, resolution } = identityResolution;
+    setBusy(conflict.id);
+    let resolved = false;
+    try {
+      await api.resolveGroupIdentityConflict(source.id, conflict.id, resolution);
+      resolved = true;
+      setIdentityResolution(null);
+      try {
+        await api.syncSource(source.id);
+      } catch (syncError) {
+        notify(
+          `Решение сохранено, но обновление не запустилось: ${
+            syncError instanceof Error ? syncError.message : "неизвестная ошибка"
+          }. Запустите источник вручную.`,
+          "error",
+        );
+        await reload();
+        return;
+      }
+      notify(
+        resolution === "rename"
+          ? `Группа переименована в ${conflict.incoming_name}. Обновление источника запущено`
+          : `Для ${conflict.incoming_name} создана отдельная группа. Обновление источника запущено`,
+      );
+      window.setTimeout(() => void reload(), 900);
+    } catch (caught) {
+      if (resolved) return;
+      notify(
+        caught instanceof Error
+          ? caught.message
+          : "Не удалось разрешить конфликт группы",
         "error",
       );
     } finally {
@@ -544,6 +596,83 @@ export function SourcesPage({
                 )}
               </div>
 
+              {!archived &&
+                (source.identity_conflicts ?? []).map((conflict) => (
+                  <div className="identity-conflict" key={conflict.id}>
+                    <div className="identity-conflict-heading">
+                      <ShieldAlert size={20} />
+                      <div>
+                        <strong>Сайт изменил принадлежность ID группы</strong>
+                        <span>
+                          Требуется решение администратора перед следующим
+                          обновлением.
+                        </span>
+                      </div>
+                    </div>
+                    <div
+                      className="identity-conflict-transition"
+                      aria-label={`${conflict.existing_name} изменено на ${conflict.incoming_name}`}
+                    >
+                      <div>
+                        <span>Сейчас в базе</span>
+                        <strong>{conflict.existing_name}</strong>
+                      </div>
+                      <ArrowRight size={18} />
+                      <div>
+                        <span>Пришло с сайта</span>
+                        <strong>{conflict.incoming_name}</strong>
+                      </div>
+                    </div>
+                    <div className="identity-conflict-meta">
+                      <span>ID источника: {conflict.external_group_id}</span>
+                      <span>
+                        Обнаружено: {formatDateTime(conflict.first_seen_at)}
+                      </span>
+                      <span>
+                        Повторений: {number.format(conflict.occurrences)}
+                      </span>
+                    </div>
+                    <div className="identity-conflict-impact">
+                      <Users size={15} />
+                      <span>
+                        {number.format(conflict.subscription_count)} подписок ·{" "}
+                        {number.format(conflict.default_group_count)} основных
+                        групп · {number.format(conflict.chat_count)} групповых
+                        чатов · {number.format(conflict.lesson_count)} старых
+                        занятий
+                      </span>
+                    </div>
+                    <div className="identity-conflict-actions">
+                      <button
+                        className="button button-ghost"
+                        disabled={busy === conflict.id || source.running}
+                        onClick={() =>
+                          setIdentityResolution({
+                            source,
+                            conflict,
+                            resolution: "new_group",
+                          })
+                        }
+                      >
+                        Создать новую группу
+                      </button>
+                      <button
+                        className="button button-primary"
+                        disabled={busy === conflict.id || source.running}
+                        onClick={() =>
+                          setIdentityResolution({
+                            source,
+                            conflict,
+                            resolution: "rename",
+                          })
+                        }
+                      >
+                        Считать переименованием
+                      </button>
+                    </div>
+                  </div>
+                ))}
+
               {!archived && source.last_error && (
                 <div className="source-error">
                   <strong>Последняя ошибка</strong>
@@ -696,7 +825,95 @@ export function SourcesPage({
           onConfirm={() => void removeSource(deleteTarget)}
         />
       )}
+      {identityResolution && (
+        <IdentityConflictDialog
+          source={identityResolution.source}
+          conflict={identityResolution.conflict}
+          resolution={identityResolution.resolution}
+          busy={busy === identityResolution.conflict.id}
+          onCancel={() => setIdentityResolution(null)}
+          onConfirm={() => void resolveIdentityConflict()}
+        />
+      )}
     </div>
+  );
+}
+
+function IdentityConflictDialog({
+  source,
+  conflict,
+  resolution,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  source: SourceView;
+  conflict: GroupIdentityConflict;
+  resolution: "rename" | "new_group";
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const rename = resolution === "rename";
+  return (
+    <DialogPortal>
+      <div className="dialog-backdrop" role="presentation">
+        <section
+          className="confirm-dialog identity-conflict-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="identity-conflict-title"
+        >
+          <span className="dialog-warning-icon">
+            <ShieldAlert size={19} />
+          </span>
+          <h2 id="identity-conflict-title">
+            {rename ? "Подтвердить переименование?" : "Создать новую группу?"}
+          </h2>
+          <p>
+            Источник {source.university_name} использовал ID{" "}
+            <strong>{conflict.external_group_id}</strong> сначала для «
+            {conflict.existing_name}», а теперь для «{conflict.incoming_name}».
+          </p>
+          {rename ? (
+            <p className="dialog-note">
+              Название существующей группы изменится. Все её подписки,
+              настройки чатов, ручные правки и история останутся привязаны к
+              той же группе.
+            </p>
+          ) : (
+            <p className="dialog-note">
+              «{conflict.existing_name}» сохранится как отдельная старая группа
+              вместе с подписками и ручными правками. Для «
+              {conflict.incoming_name}» будет создана новая группа.
+            </p>
+          )}
+          <p>
+            После подтверждения Scheduler сразу повторит обновление источника.
+          </p>
+          <div className="dialog-actions">
+            <button
+              className="button button-ghost"
+              disabled={busy}
+              onClick={onCancel}
+            >
+              Отмена
+            </button>
+            <button
+              className="button button-primary"
+              disabled={busy}
+              onClick={onConfirm}
+            >
+              {busy
+                ? "Применение…"
+                : rename
+                  ? "Да, это переименование"
+                  : "Да, создать новую"}
+            </button>
+          </div>
+        </section>
+      </div>
+    </DialogPortal>
   );
 }
 
@@ -712,7 +929,8 @@ function DeleteSourceDialog({
   onConfirm: () => void;
 }) {
   return (
-    <div className="dialog-backdrop" role="presentation">
+    <DialogPortal>
+      <div className="dialog-backdrop" role="presentation">
       <section
         className="confirm-dialog"
         role="dialog"
@@ -751,6 +969,7 @@ function DeleteSourceDialog({
           </button>
         </div>
       </section>
-    </div>
+      </div>
+    </DialogPortal>
   );
 }

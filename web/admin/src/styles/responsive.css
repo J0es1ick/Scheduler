@@ -448,8 +448,9 @@
     text-transform: uppercase;
   }
 
-  .groups-table .table-row > div:last-child {
-    display: none;
+  .groups-table .group-row-actions {
+    grid-column: 1 / -1;
+    display: flex;
   }
 
   .groups-table .table-row > div:first-child {

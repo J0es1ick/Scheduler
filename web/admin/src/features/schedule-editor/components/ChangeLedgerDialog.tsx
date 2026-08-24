@@ -1,4 +1,5 @@
 import { Check, History, RotateCcw, X } from "lucide-react";
+import { DialogPortal } from "../../../components";
 import type { EditorLesson } from "../../../types";
 import { days, lessonDay } from "../model";
 
@@ -20,7 +21,8 @@ export function ChangeLedgerDialog({
   const empty = !manualLessons.length && !deletedLessons.length;
 
   return (
-    <div className="dialog-backdrop" role="presentation">
+    <DialogPortal>
+      <div className="dialog-backdrop" role="presentation">
       <section className="ledger-dialog" role="dialog" aria-modal="true" aria-labelledby="ledger-title">
         <header>
           <div className="change-ledger-head">
@@ -78,6 +80,7 @@ export function ChangeLedgerDialog({
           <span>Бот использует только уже подтверждённые изменения из этого списка.</span>
         </footer>
       </section>
-    </div>
+      </div>
+    </DialogPortal>
   );
 }

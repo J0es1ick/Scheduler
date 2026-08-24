@@ -33,6 +33,26 @@ export type SourceHealth =
   | "empty"
   | "disabled";
 
+export interface GroupIdentityConflict {
+  id: string;
+  data_source_id: string;
+  university_id: string;
+  external_group_id: string;
+  existing_group_id: string;
+  existing_name: string;
+  incoming_name: string;
+  status: "pending" | "resolved";
+  resolution: "" | "rename" | "new_group";
+  resolved_group_id?: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  occurrences: number;
+  subscription_count: number;
+  default_group_count: number;
+  chat_count: number;
+  lesson_count: number;
+}
+
 export interface SourceView {
   id: string;
   university_id: string;
@@ -71,6 +91,7 @@ export interface SourceView {
   diagnostic_response_preview: string;
   diagnostic_occurrences: number;
   diagnostic_created_at: string | null;
+  identity_conflicts: GroupIdentityConflict[];
   running: boolean;
   health: SourceHealth;
 }
@@ -245,8 +266,26 @@ export interface GroupView {
   university_id: string;
   university_name: string;
   is_active: boolean;
+  source_active: boolean;
+  manually_disabled: boolean;
   lesson_count: number;
+  subscription_count: number;
+  default_group_count: number;
+  chat_count: number;
+  override_count: number;
+  created_at: string;
   updated_at: string;
+}
+
+export interface GroupDeletionResult {
+  id: string;
+  name: string;
+  university_id: string;
+  subscription_count: number;
+  default_group_count: number;
+  chat_count: number;
+  lesson_count: number;
+  override_count: number;
 }
 
 export interface LessonView {

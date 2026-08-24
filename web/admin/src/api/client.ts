@@ -4,7 +4,9 @@ import type {
   Dashboard,
   EditorSchedule,
   EditorLesson,
+  GroupDeletionResult,
   GroupView,
+  GroupIdentityConflict,
   LessonView,
   LessonMutationPayload,
   Page,
@@ -141,6 +143,18 @@ export const api = {
     }),
   syncSource: (id: string) =>
     request(`/api/sources/${encodeURIComponent(id)}/sync`, { method: "POST" }),
+  resolveGroupIdentityConflict: (
+    sourceID: string,
+    conflictID: string,
+    resolution: "rename" | "new_group",
+  ) =>
+    request<GroupIdentityConflict>(
+      `/api/sources/${encodeURIComponent(sourceID)}/group-identity-conflicts/${encodeURIComponent(conflictID)}/resolve`,
+      {
+        method: "POST",
+        body: JSON.stringify({ resolution }),
+      },
+    ),
   rollbackSource: (id: string) =>
     request<ParserSnapshot>(`/api/sources/${encodeURIComponent(id)}/rollback`, {
       method: "POST",
@@ -194,6 +208,8 @@ export const api = {
     page: number;
     q?: string;
     university?: string;
+    status?: "active" | "inactive" | "all";
+    order?: "name" | "newest" | "oldest";
     pageSize?: number;
     selector?: boolean;
   }) => {
@@ -203,10 +219,21 @@ export const api = {
     });
     if (params.q) query.set("q", params.q);
     if (params.university) query.set("university", params.university);
+    if (params.status) query.set("status", params.status);
+    if (params.order && params.order !== "name") query.set("order", params.order);
     if (params.selector) query.set("selector", "true");
     const page = await request<Page<GroupView>>(`/api/groups?${query}`);
     return { ...page, items: page.items ?? [] };
   },
+  updateGroup: (id: string, isActive: boolean) =>
+    request<GroupView>(`/api/groups/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_active: isActive }),
+    }),
+  deleteGroup: (id: string) =>
+    request<GroupDeletionResult>(`/api/groups/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
   lessons: async (params: {
     page: number;
     q?: string;

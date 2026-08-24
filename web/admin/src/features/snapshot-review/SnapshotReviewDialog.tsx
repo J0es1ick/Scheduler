@@ -9,7 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { api } from "../../api";
-import { formatDateTime, number } from "../../components";
+import { DialogPortal, formatDateTime, number } from "../../components";
 import type {
   ParserSnapshot,
   SnapshotGroupDiff,
@@ -153,10 +153,11 @@ export function SnapshotReviewDialog({
   }
 
   return (
-    <div
-      className="dialog-backdrop snapshot-review-backdrop"
-      role="presentation"
-    >
+    <DialogPortal>
+      <div
+        className="dialog-backdrop snapshot-review-backdrop"
+        role="presentation"
+      >
       <section
         className="snapshot-review-dialog"
         role="dialog"
@@ -336,7 +337,8 @@ export function SnapshotReviewDialog({
           </div>
         </footer>
       </section>
-    </div>
+      </div>
+    </DialogPortal>
   );
 }
 
