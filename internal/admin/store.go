@@ -129,9 +129,41 @@ func (s *Store) Sources(ctx context.Context, includeArchived bool) ([]SourceView
 	if err != nil {
 		return nil, fmt.Errorf("admin list sources: %w", err)
 	}
+	var conflicts []domain.GroupIdentityConflict
+	if err = s.db.SelectContext(ctx, &conflicts, `
+		SELECT conflict.id, conflict.data_source_id, conflict.university_id,
+			conflict.external_group_id, conflict.existing_group_id,
+			conflict.existing_name, conflict.incoming_name, conflict.status,
+			conflict.resolution, conflict.resolved_group_id, conflict.resolved_by,
+			conflict.first_seen_at, conflict.last_seen_at, conflict.resolved_at,
+			conflict.occurrences,
+			(SELECT COUNT(*)::int FROM subscriptions subscription
+				WHERE subscription.object_type='group'
+				  AND subscription.object_id=conflict.existing_group_id) AS subscription_count,
+			(SELECT COUNT(*)::int FROM users app_user
+				WHERE app_user.default_group_id=conflict.existing_group_id) AS default_group_count,
+			(SELECT COUNT(*)::int FROM chat_schedule_profiles chat
+				WHERE chat.default_group_id=conflict.existing_group_id) AS chat_count,
+			(SELECT COUNT(*)::int FROM lessons lesson
+				WHERE lesson.group_id=conflict.existing_group_id) AS lesson_count
+		FROM group_identity_conflicts conflict
+		WHERE conflict.status='pending'
+		ORDER BY conflict.last_seen_at DESC`); err != nil {
+		return nil, fmt.Errorf("admin list group identity conflicts: %w", err)
+	}
+	conflictsBySource := make(map[string][]domain.GroupIdentityConflict)
+	for _, conflict := range conflicts {
+		conflictsBySource[conflict.DataSourceID] = append(
+			conflictsBySource[conflict.DataSourceID], conflict,
+		)
+	}
 	now := time.Now()
 	for i := range sources {
 		source := &sources[i]
+		source.IdentityConflicts = conflictsBySource[source.ID]
+		if source.IdentityConflicts == nil {
+			source.IdentityConflicts = []domain.GroupIdentityConflict{}
+		}
 		source.LastError = compactParserError(source.LastError)
 		if !source.IsEnabled {
 			source.NextRunAt = nil
@@ -298,7 +330,12 @@ func (s *Store) Universities(ctx context.Context) ([]UniversityOption, error) {
 	return result, nil
 }
 
-func (s *Store) Groups(ctx context.Context, page, pageSize int, universityID, queryText string, selector bool) (*Page[GroupView], error) {
+func (s *Store) Groups(
+	ctx context.Context,
+	page, pageSize int,
+	universityID, queryText, status, order string,
+	selector bool,
+) (*Page[GroupView], error) {
 	page = clamp(page, 1, 100000)
 	pageSize = clamp(pageSize, 10, 100)
 	where := []string{"TRUE"}
@@ -311,6 +348,17 @@ func (s *Store) Groups(ctx context.Context, page, pageSize int, universityID, qu
 		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(queryText)
 		args = append(args, "%"+escaped+"%")
 		where = append(where, fmt.Sprintf("(g.name ILIKE $%d ESCAPE '\\' OR g.id ILIKE $%d ESCAPE '\\')", len(args), len(args)))
+	}
+	if selector {
+		where = append(where, "g.is_active")
+	} else {
+		switch status {
+		case "inactive":
+			where = append(where, "NOT g.is_active")
+		case "all":
+		default:
+			where = append(where, "g.is_active")
+		}
 	}
 	whereSQL := strings.Join(where, " AND ")
 	var total int
@@ -333,12 +381,24 @@ func (s *Store) Groups(ctx context.Context, page, pageSize int, universityID, qu
 			u.name,
 			CASE WHEN g.name ~ '^[0-9]+' THEN substring(g.name from '^[0-9]+')::int ELSE 2147483647 END,
 			g.name`
+	} else if order == "newest" {
+		orderBy = `g.created_at DESC, u.name, g.name`
+	} else if order == "oldest" {
+		orderBy = `g.created_at ASC, u.name, g.name`
 	}
 	rowsQuery := fmt.Sprintf(`
 		SELECT g.id, g.name, g.university_id, u.name AS university_name,
-			g.is_active,
+			g.is_active, g.source_active, g.manually_disabled,
 			(SELECT COUNT(*)::int FROM effective_lessons l WHERE l.group_id=g.id) AS lesson_count,
-			g.updated_at
+			(SELECT COUNT(*)::int FROM subscriptions subscription
+				WHERE subscription.object_type='group' AND subscription.object_id=g.id) AS subscription_count,
+			(SELECT COUNT(*)::int FROM users app_user
+				WHERE app_user.default_group_id=g.id) AS default_group_count,
+			(SELECT COUNT(*)::int FROM chat_schedule_profiles chat
+				WHERE chat.default_group_id=g.id) AS chat_count,
+			(SELECT COUNT(*)::int FROM lesson_overrides override_row
+				WHERE override_row.group_id=g.id) AS override_count,
+			g.created_at, g.updated_at
 		FROM groups g JOIN universities u ON u.id=g.university_id
 		WHERE %s
 		ORDER BY %s

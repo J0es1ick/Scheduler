@@ -22,7 +22,9 @@ func (r *GroupRepository) CreateGroup(ctx context.Context, id string, university
 	createdAt := time.Now()
 	updatedAt := time.Now()
 
-	query := `INSERT INTO groups (id, university_id, name, is_active, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)`
+	query := `INSERT INTO groups (
+		id, university_id, name, is_active, source_active, created_at, updated_at
+	) VALUES ($1, $2, $3, $4, $4, $5, $6)`
 	_, err := r.db.ExecContext(ctx, query, id, universityID, name, isActive, createdAt, updatedAt)
 	if err != nil {
 		return "", fmt.Errorf("failed to create group: %w", err)
@@ -32,7 +34,8 @@ func (r *GroupRepository) CreateGroup(ctx context.Context, id string, university
 
 func (r *GroupRepository) GetGroupByID(ctx context.Context, id string) (*domain.Group, error) {
 	var group domain.Group
-	query := `SELECT id, university_id, name, is_active, created_at, updated_at FROM groups WHERE id = $1`
+	query := `SELECT id, university_id, name, is_active, source_active,
+		manually_disabled, created_at, updated_at FROM groups WHERE id = $1`
 	err := r.db.GetContext(ctx, &group, query, id)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -45,7 +48,8 @@ func (r *GroupRepository) GetGroupByID(ctx context.Context, id string) (*domain.
 
 func (r *GroupRepository) GetGroupsByUniversityID(ctx context.Context, universityID string) ([]domain.Group, error) {
 	var groups []domain.Group
-	query := `SELECT id, university_id, name, is_active, created_at, updated_at
+	query := `SELECT id, university_id, name, is_active, source_active,
+		manually_disabled, created_at, updated_at
 		FROM groups WHERE university_id = $1 AND is_active = TRUE ORDER BY name`
 	err := r.db.SelectContext(ctx, &groups, query, universityID)
 	if err != nil {
@@ -54,9 +58,21 @@ func (r *GroupRepository) GetGroupsByUniversityID(ctx context.Context, universit
 	return groups, nil
 }
 
+func (r *GroupRepository) GetAllGroupsByUniversityID(ctx context.Context, universityID string) ([]domain.Group, error) {
+	var groups []domain.Group
+	query := `SELECT id, university_id, name, is_active, source_active,
+		manually_disabled, created_at, updated_at
+		FROM groups WHERE university_id = $1 ORDER BY name`
+	if err := r.db.SelectContext(ctx, &groups, query, universityID); err != nil {
+		return nil, fmt.Errorf("failed to get all groups by university id: %w", err)
+	}
+	return groups, nil
+}
+
 func (r *GroupRepository) GetGroupByName(ctx context.Context, universityID string, name string) (*domain.Group, error) {
 	var group domain.Group
-	query := `SELECT id, university_id, name, is_active, created_at, updated_at
+	query := `SELECT id, university_id, name, is_active, source_active,
+		manually_disabled, created_at, updated_at
 		FROM groups WHERE university_id = $1 AND name = $2 AND is_active = TRUE`
 	err := r.db.GetContext(ctx, &group, query, universityID, name)
 	if err != nil {
@@ -81,7 +97,8 @@ func (r *GroupRepository) FindActiveByName(
 		args = append(args, universityID)
 	}
 	if err := r.db.SelectContext(ctx, &groups, `
-		SELECT id, university_id, name, is_active, created_at, updated_at
+		SELECT id, university_id, name, is_active, source_active,
+			manually_disabled, created_at, updated_at
 		FROM groups
 		WHERE `+where+`
 		ORDER BY university_id, name`,
@@ -97,7 +114,8 @@ func (r *GroupRepository) FindActiveByName(
 
 func (r *GroupRepository) GetAllGroups(ctx context.Context) ([]domain.Group, error) {
 	var groups []domain.Group
-	query := `SELECT id, university_id, name, is_active, created_at, updated_at FROM groups`
+	query := `SELECT id, university_id, name, is_active, source_active,
+		manually_disabled, created_at, updated_at FROM groups`
 	err := r.db.SelectContext(ctx, &groups, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all groups: %w", err)
@@ -107,7 +125,8 @@ func (r *GroupRepository) GetAllGroups(ctx context.Context) ([]domain.Group, err
 
 func (r *GroupRepository) UpdateGroup(ctx context.Context, id string, name string, isActive bool) error {
 	updatedAt := time.Now()
-	query := `UPDATE groups SET name = $1, is_active = $2, updated_at = $3 WHERE id = $4`
+	query := `UPDATE groups SET name=$1, source_active=$2,
+		is_active=$2 AND NOT manually_disabled, updated_at=$3 WHERE id=$4`
 	_, err := r.db.ExecContext(ctx, query, name, isActive, updatedAt, id)
 	if err != nil {
 		return fmt.Errorf("failed to update group: %w", err)
@@ -127,14 +146,15 @@ func (r *GroupRepository) DeleteGroup(ctx context.Context, id string) error {
 func (r *GroupRepository) DeactivateGroupsExcept(ctx context.Context, universityID string, activeIDs []string) error {
 	if len(activeIDs) == 0 {
 		_, err := r.db.ExecContext(ctx,
-			`UPDATE groups SET is_active = FALSE, updated_at = NOW() WHERE university_id = $1`,
+			`UPDATE groups SET source_active=FALSE, is_active=FALSE, updated_at=NOW()
+			 WHERE university_id=$1`,
 			universityID,
 		)
 		return err
 	}
 	query, args, err := sqlx.In(
-		`UPDATE groups SET is_active = FALSE, updated_at = NOW()
-		 WHERE university_id = ? AND id NOT IN (?) AND is_active = TRUE`,
+		`UPDATE groups SET source_active=FALSE, is_active=FALSE, updated_at=NOW()
+		 WHERE university_id=? AND id NOT IN (?) AND (source_active OR is_active)`,
 		universityID, activeIDs,
 	)
 	if err != nil {

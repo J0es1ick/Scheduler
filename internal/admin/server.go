@@ -122,6 +122,11 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService, o
 	server.protected(mux, "POST /api/sources/{id}/restore", server.handleRestoreSource)
 	server.protected(mux, "POST /api/sources/{id}/sync", server.handleSyncSource)
 	server.protected(mux, "POST /api/sources/{id}/rollback", server.handleRollbackSource)
+	server.protected(
+		mux,
+		"POST /api/sources/{id}/group-identity-conflicts/{conflict}/resolve",
+		server.handleResolveGroupIdentityConflict,
+	)
 	server.protected(mux, "GET /api/connectors", server.handleConnectors)
 	server.protected(mux, "GET /api/connectors/catalog", server.handleConnectorCatalog)
 	server.protected(mux, "POST /api/connectors", server.handleCreateConnector)
@@ -137,6 +142,8 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService, o
 	server.protected(mux, "GET /api/logs", server.handleLogs)
 	server.protected(mux, "GET /api/universities", server.handleUniversities)
 	server.protected(mux, "GET /api/groups", server.handleGroups)
+	server.protected(mux, "PATCH /api/groups/{id}", server.handleUpdateGroup)
+	server.protected(mux, "DELETE /api/groups/{id}", server.handleDeleteGroup)
 	server.protected(mux, "GET /api/lessons", server.handleLessons)
 	server.protected(mux, "GET /api/editor/schedule", server.handleEditorSchedule)
 	server.protected(mux, "POST /api/editor/lessons", server.handleCreateEditorLesson)
@@ -871,6 +878,65 @@ func (s *Server) handleSyncSource(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "started", "source_id": sourceID})
 }
 
+func (s *Server) handleResolveGroupIdentityConflict(w http.ResponseWriter, r *http.Request) {
+	sourceID := strings.TrimSpace(r.PathValue("id"))
+	conflictID := strings.TrimSpace(r.PathValue("conflict"))
+	if sourceID == "" || conflictID == "" {
+		writeAPIError(w, http.StatusBadRequest, "Конфликт группы не указан")
+		return
+	}
+	var request struct {
+		Resolution string `json:"resolution"`
+	}
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "Некорректный запрос")
+		return
+	}
+	request.Resolution = strings.TrimSpace(request.Resolution)
+	if request.Resolution != "rename" && request.Resolution != "new_group" {
+		writeAPIError(w, http.StatusBadRequest, "Выберите способ разрешения конфликта")
+		return
+	}
+	identity := identityFromContext(r.Context())
+	conflict, err := s.store.ResolveGroupIdentityConflict(
+		r.Context(), sourceID, conflictID, request.Resolution, identity.ID,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotFound):
+			writeAPIError(w, http.StatusNotFound, "Конфликт группы не найден")
+		case errors.Is(err, ErrIdentityConflictChanged):
+			writeAPIError(w, http.StatusConflict, "Данные группы уже изменились. Обновите страницу")
+		case errors.Is(err, ErrIdentityNameExists):
+			writeAPIError(w, http.StatusConflict, "Группа с новым названием уже существует")
+		default:
+			slog.Error(
+				"admin resolve group identity conflict failed",
+				"source", sourceID,
+				"conflict", conflictID,
+				"resolution", request.Resolution,
+				"err", err,
+			)
+			writeAPIError(w, http.StatusInternalServerError, "Не удалось разрешить конфликт группы")
+		}
+		return
+	}
+	s.writeAudit(
+		r.Context(), identity, "resolve_group_identity_conflict", "group_identity_conflict", conflictID,
+		map[string]any{
+			"source_id":         sourceID,
+			"resolution":        request.Resolution,
+			"external_group_id": conflict.ExternalGroupID,
+			"existing_group_id": conflict.ExistingGroupID,
+			"resolved_group_id": conflict.ResolvedGroupID,
+			"existing_name":     conflict.ExistingName,
+			"incoming_name":     conflict.IncomingName,
+		},
+		s.requestIP(r),
+	)
+	writeJSON(w, http.StatusOK, conflict)
+}
+
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	logs, err := s.store.Logs(r.Context(), queryInt(r, "limit", 100), r.URL.Query().Get("source"), r.URL.Query().Get("status"))
 	if err != nil {
@@ -892,11 +958,80 @@ func (s *Server) handleUniversities(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 	result, err := s.store.Groups(r.Context(), queryInt(r, "page", 1), queryInt(r, "page_size", 30),
 		r.URL.Query().Get("university"), strings.TrimSpace(r.URL.Query().Get("q")),
+		strings.TrimSpace(r.URL.Query().Get("status")),
+		strings.TrimSpace(r.URL.Query().Get("order")),
 		r.URL.Query().Get("selector") == "true")
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "Не удалось загрузить группы")
 		return
 	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
+	groupID := strings.TrimSpace(r.PathValue("id"))
+	if groupID == "" {
+		writeAPIError(w, http.StatusBadRequest, "Группа не указана")
+		return
+	}
+	var request struct {
+		IsActive *bool `json:"is_active"`
+	}
+	if err := decodeJSON(w, r, &request); err != nil || request.IsActive == nil {
+		writeAPIError(w, http.StatusBadRequest, "Укажите новое состояние группы")
+		return
+	}
+	group, err := s.store.SetGroupActive(r.Context(), groupID, *request.IsActive)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotFound):
+			writeAPIError(w, http.StatusNotFound, "Группа не найдена")
+		case errors.Is(err, ErrGroupNotPublished):
+			writeAPIError(w, http.StatusConflict, "Группа отсутствует в последнем снимке источника и не может быть включена")
+		default:
+			slog.Error("admin update group lifecycle failed", "group", groupID, "err", err)
+			writeAPIError(w, http.StatusInternalServerError, "Не удалось изменить состояние группы")
+		}
+		return
+	}
+	identity := identityFromContext(r.Context())
+	action := "deactivate_group"
+	if *request.IsActive {
+		action = "activate_group"
+	}
+	s.writeAudit(r.Context(), identity, action, "group", groupID, map[string]any{
+		"name":              group.Name,
+		"university_id":     group.UniversityID,
+		"is_active":         group.IsActive,
+		"source_active":     group.SourceActive,
+		"manually_disabled": group.ManuallyDisabled,
+	}, s.requestIP(r))
+	writeJSON(w, http.StatusOK, group)
+}
+
+func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
+	groupID := strings.TrimSpace(r.PathValue("id"))
+	if groupID == "" {
+		writeAPIError(w, http.StatusBadRequest, "Группа не указана")
+		return
+	}
+	result, err := s.store.DeleteGroup(r.Context(), groupID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotFound):
+			writeAPIError(w, http.StatusNotFound, "Группа не найдена")
+		case errors.Is(err, ErrGroupActive):
+			writeAPIError(w, http.StatusConflict, "Сначала сделайте группу неактивной")
+		case errors.Is(err, ErrGroupStillPublished):
+			writeAPIError(w, http.StatusConflict, "Источник всё ещё публикует эту группу. Её можно отключить, но нельзя удалить")
+		default:
+			slog.Error("admin delete group failed", "group", groupID, "err", err)
+			writeAPIError(w, http.StatusInternalServerError, "Не удалось удалить группу")
+		}
+		return
+	}
+	identity := identityFromContext(r.Context())
+	s.writeAudit(r.Context(), identity, "delete_group", "group", groupID, result, s.requestIP(r))
 	writeJSON(w, http.StatusOK, result)
 }
 

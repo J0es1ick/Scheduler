@@ -204,15 +204,34 @@ func (s *ParserService) runDataSource(ctx context.Context, dataSourceID string, 
 	results := fetchReport.Results
 
 	payload, lessonCount := buildScheduleSnapshot(adapter.UniversityID(), semesterID, ds.ID, results)
-	existingGroups, err := s.groupRepo.GetGroupsByUniversityID(ctx, adapter.UniversityID())
+	existingGroups, err := s.groupRepo.GetAllGroupsByUniversityID(ctx, adapter.UniversityID())
 	if err != nil {
 		return fail(lessonCount, fmt.Errorf("parser: load existing group identities: %w", err))
 	}
-	payload, remappedGroups, err := repository.CanonicalizeSnapshotGroupIDs(payload, existingGroups)
+	mappings, err := s.groupRepo.GroupSourceIdentityMappings(ctx, ds.ID)
 	if err != nil {
+		return fail(lessonCount, fmt.Errorf("parser: load group identity mappings: %w", err))
+	}
+	payload, remappedGroups, err := repository.CanonicalizeSnapshotGroupIDsWithMappings(
+		payload, existingGroups, mappings,
+	)
+	if err != nil {
+		var conflict *repository.GroupIdentityConflictError
+		if errors.As(err, &conflict) {
+			if recordErr := s.groupRepo.RecordIdentityConflict(
+				ctx, ds.ID, adapter.UniversityID(), conflict,
+			); recordErr != nil {
+				return fail(lessonCount, fmt.Errorf(
+					"%w: persist group identity conflict: %w", ErrParserInfrastructure, recordErr,
+				))
+			}
+		}
 		return fail(lessonCount, sourceDegradedError(
 			fmt.Errorf("parser: reconcile group identities: %w", err),
 		))
+	}
+	if err = s.groupRepo.ClearPendingIdentityConflicts(ctx, ds.ID); err != nil {
+		return fail(lessonCount, fmt.Errorf("%w: %w", ErrParserInfrastructure, err))
 	}
 	if remappedGroups > 0 {
 		slog.Info(
@@ -371,13 +390,30 @@ func (s *ParserService) ingestExternalSnapshot(
 		}
 	}
 	recordsFetched = lessonCount
-	existingGroups, err := s.groupRepo.GetGroupsByUniversityID(ctx, payload.UniversityID)
+	existingGroups, err := s.groupRepo.GetAllGroupsByUniversityID(ctx, payload.UniversityID)
 	if err != nil {
 		return fail(fmt.Errorf("parser: load existing group identities: %w", err))
 	}
-	payload, _, err = repository.CanonicalizeSnapshotGroupIDs(payload, existingGroups)
+	mappings, err := s.groupRepo.GroupSourceIdentityMappings(ctx, ds.ID)
 	if err != nil {
+		return fail(fmt.Errorf("parser: load group identity mappings: %w", err))
+	}
+	payload, _, err = repository.CanonicalizeSnapshotGroupIDsWithMappings(payload, existingGroups, mappings)
+	if err != nil {
+		var conflict *repository.GroupIdentityConflictError
+		if errors.As(err, &conflict) {
+			if recordErr := s.groupRepo.RecordIdentityConflict(
+				ctx, ds.ID, payload.UniversityID, conflict,
+			); recordErr != nil {
+				return fail(fmt.Errorf(
+					"%w: persist group identity conflict: %w", ErrParserInfrastructure, recordErr,
+				))
+			}
+		}
 		return fail(fmt.Errorf("parser: reconcile group identities: %w", err))
+	}
+	if err = s.groupRepo.ClearPendingIdentityConflicts(ctx, ds.ID); err != nil {
+		return fail(fmt.Errorf("%w: %w", ErrParserInfrastructure, err))
 	}
 	baseline, err := s.snapshotRepo.Baseline(ctx, payload.UniversityID, ds.ID)
 	if err != nil {

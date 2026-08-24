@@ -394,11 +394,16 @@ func applyPublicationSnapshot(
 	}
 	var existingGroups []domain.Group
 	if err = tx.SelectContext(ctx, &existingGroups, `
-		SELECT id, university_id, name, is_active, created_at, updated_at
+		SELECT id, university_id, name, is_active, source_active,
+			manually_disabled, created_at, updated_at
 		FROM groups WHERE university_id=$1`, universityID); err != nil {
 		return nil, fmt.Errorf("publish snapshot: load group identities: %w", err)
 	}
-	payload, _, err = CanonicalizeSnapshotGroupIDs(payload, existingGroups)
+	mappings, err := loadGroupSourceIdentityMappings(ctx, tx, row.DataSourceID)
+	if err != nil {
+		return nil, fmt.Errorf("publish snapshot: %w", err)
+	}
+	payload, _, err = CanonicalizeSnapshotGroupIDsWithMappings(payload, existingGroups, mappings)
 	if err != nil {
 		return nil, fmt.Errorf("publish snapshot: reconcile group identities: %w", err)
 	}
@@ -415,17 +420,23 @@ func applyPublicationSnapshot(
 		return nil, err
 	}
 	if _, err = tx.ExecContext(ctx, `
-		UPDATE groups SET is_active=FALSE, updated_at=NOW()
-		WHERE university_id=$1 AND is_active`, universityID); err != nil {
+		UPDATE groups
+		SET source_active=FALSE, is_active=FALSE, updated_at=NOW()
+		WHERE university_id=$1 AND (source_active OR is_active)`, universityID); err != nil {
 		return nil, fmt.Errorf("publish snapshot: deactivate groups: %w", err)
 	}
 	for _, group := range payload.Groups {
 		if _, err = tx.ExecContext(ctx, `
-			INSERT INTO groups (id, university_id, name, is_active, created_at, updated_at)
-			VALUES ($1,$2,$3,TRUE,NOW(),NOW())
+			INSERT INTO groups (
+				id, university_id, name, is_active, source_active,
+				manually_disabled, created_at, updated_at
+			)
+			VALUES ($1,$2,$3,TRUE,TRUE,FALSE,NOW(),NOW())
 			ON CONFLICT (id) DO UPDATE SET
 				university_id=EXCLUDED.university_id, name=EXCLUDED.name,
-				is_active=TRUE, updated_at=NOW()`,
+				source_active=TRUE,
+				is_active=NOT groups.manually_disabled,
+				updated_at=NOW()`,
 			group.ID, group.UniversityID, group.Name); err != nil {
 			return nil, fmt.Errorf("publish snapshot: group %s: %w", group.ID, err)
 		}
