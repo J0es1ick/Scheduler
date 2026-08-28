@@ -2,6 +2,8 @@ package scheduleview
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -26,11 +28,12 @@ type Day struct {
 }
 
 type Request struct {
-	University string
-	Group      string
-	From       time.Time
-	Days       int
-	Schedule   []Day
+	University              string
+	Group                   string
+	From                    time.Time
+	Days                    int
+	Schedule                []Day
+	NormalizeResearchBlocks bool
 }
 
 var (
@@ -49,22 +52,47 @@ type faces struct {
 	small  font.Face
 }
 
-const maxConcurrentPNGRenders = 4
+const (
+	maxConcurrentPNGRenders = 4
+	maxRenderDays           = 14
+	maxLessonsPerRenderDay  = 32
+	maxLessonsPerRender     = 224
+	maxRenderPixels         = 25_000_000
+)
+
+var ErrRenderLimit = errors.New("schedule exceeds visual rendering limits")
 
 var pngRenderSlots = make(chan struct{}, maxConcurrentPNGRenders)
 
 func RenderPNG(request Request) ([]byte, error) {
-	pngRenderSlots <- struct{}{}
+	return RenderPNGContext(context.Background(), request)
+}
+
+func RenderPNGContext(ctx context.Context, request Request) ([]byte, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case pngRenderSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	defer func() { <-pngRenderSlots }()
 
 	if request.Days <= 0 {
 		request.Days = 1
 	}
+	if request.Days > maxRenderDays {
+		return nil, fmt.Errorf("%w: %d days", ErrRenderLimit, request.Days)
+	}
+	days := completeDays(request)
+	if err := validateRenderSize(request, days); err != nil {
+		return nil, err
+	}
 	fontFaces, err := loadFaces()
 	if err != nil {
 		return nil, err
 	}
-	days := completeDays(request)
 	var imageValue *image.RGBA
 	if request.Days == 1 {
 		imageValue = renderDay(request, days[0], fontFaces)
@@ -76,6 +104,39 @@ func RenderPNG(request Request) ([]byte, error) {
 		return nil, fmt.Errorf("encode schedule PNG: %w", err)
 	}
 	return output.Bytes(), nil
+}
+
+func validateRenderSize(request Request, days []Day) error {
+	total := 0
+	for _, day := range days {
+		if len(day.Lessons) > maxLessonsPerRenderDay {
+			return fmt.Errorf("%w: %s has %d lessons", ErrRenderLimit, day.Date.Format(time.DateOnly), len(day.Lessons))
+		}
+		total += len(day.Lessons)
+	}
+	if total > maxLessonsPerRender {
+		return fmt.Errorf("%w: %d lessons", ErrRenderLimit, total)
+	}
+	width, height := renderDimensions(request, days)
+	if width <= 0 || height <= 0 || int64(width)*int64(height) > maxRenderPixels {
+		return fmt.Errorf("%w: %dx%d pixels", ErrRenderLimit, width, height)
+	}
+	return nil
+}
+
+func renderDimensions(request Request, days []Day) (int, int) {
+	if request.Days == 1 {
+		return 1100, 220 + max(1, len(days[0].Lessons))*145 + 60
+	}
+	height := 150 + 45
+	weekCount := (len(days) + 6) / 7
+	height += max(0, weekCount-1) * 34
+	for index := 0; index < weekCount; index++ {
+		from := index * 7
+		to := min(from+7, len(days))
+		height += weekHeight(days[from:to], request.NormalizeResearchBlocks)
+	}
+	return 1900, height
 }
 
 func loadFaces() (*faces, error) {
@@ -123,8 +184,12 @@ func completeDays(request Request) []Day {
 }
 
 func renderDay(request Request, day Day, faces *faces) *image.RGBA {
-	const width = 1100
-	lessonHeight := 145
+	const (
+		width        = 1100
+		lessonHeight = 145
+		timeWidth    = 145
+		rowGap       = 12
+	)
 	height := 220 + max(1, len(day.Lessons))*lessonHeight + 60
 	canvas := image.NewRGBA(image.Rect(0, 0, width, height))
 	draw.Draw(canvas, canvas.Bounds(), &image.Uniform{canvasColor}, image.Point{}, draw.Src)
@@ -133,19 +198,27 @@ func renderDay(request Request, day Day, faces *faces) *image.RGBA {
 	fillRect(canvas, panel, panelColor)
 	strokeRect(canvas, panel, lineColor, 2)
 	if len(day.Lessons) == 0 {
-		drawText(canvas, faces.header, textColor, panel.Min.X+35, panel.Min.Y+70, "Занятий нет")
+		metrics := faces.header.Metrics()
+		baseline := panel.Min.Y + (panel.Dy()-(metrics.Ascent+metrics.Descent).Ceil())/2 + metrics.Ascent.Ceil()
+		drawCentered(canvas, faces.header, mutedColor, panel.Min.X, panel.Max.X, baseline, "Занятий нет")
 		return canvas
 	}
 	y := panel.Min.Y + 20
 	for _, lesson := range day.Lessons {
-		lessonRect := image.Rect(panel.Min.X+18, y, panel.Max.X-18, y+lessonHeight-12)
+		row := image.Rect(panel.Min.X+18, y, panel.Max.X-18, y+lessonHeight-rowGap)
+		timeRect := image.Rect(row.Min.X, row.Min.Y, row.Min.X+timeWidth, row.Max.Y)
+		lessonRect := image.Rect(timeRect.Max.X+rowGap, row.Min.Y, row.Max.X, row.Max.Y)
+		fillRect(canvas, timeRect, headerColor)
+		strokeRect(canvas, timeRect, lineColor, 1)
 		fillRect(canvas, lessonRect, lessonTypeColor(lesson.Type))
 		strokeRect(canvas, lessonRect, lineColor, 1)
+		slot := visualTimeSlot(lesson, request.NormalizeResearchBlocks)
+		drawCentered(canvas, faces.header, textColor, timeRect.Min.X, timeRect.Max.X, timeRect.Min.Y+52, slot.start)
+		drawCentered(canvas, faces.body, mutedColor, timeRect.Min.X, timeRect.Max.X, timeRect.Min.Y+82, slot.end)
 		clipped := clippedCanvas(canvas, lessonRect.Inset(2))
-		slot := visualTimeSlot(lesson)
-		drawText(clipped, faces.header, textColor, lessonRect.Min.X+18, lessonRect.Min.Y+29,
-			slot.start+"–"+slot.end+"  ·  "+strings.ToUpper(lessonTypeName(lesson.Type)))
-		lineY := drawWrapped(clipped, faces.header, textColor, lessonRect.Min.X+18, lessonRect.Min.Y+58,
+		drawText(clipped, faces.body, mutedColor, lessonRect.Min.X+18, lessonRect.Min.Y+27,
+			strings.ToUpper(lessonTypeName(lesson.Type)))
+		lineY := drawWrapped(clipped, faces.header, textColor, lessonRect.Min.X+18, lessonRect.Min.Y+57,
 			lessonRect.Dx()-36, 22, visualSubject(lesson.Subject), 2)
 		details := lessonDetails(lesson)
 		if details != "" {
@@ -168,7 +241,7 @@ func renderWeeks(request Request, days []Day, faces *faces) *image.RGBA {
 	for index := 0; index < weekCount; index++ {
 		from := index * 7
 		to := min(from+7, len(days))
-		heights[index] = weekHeight(days[from:to])
+		heights[index] = weekHeight(days[from:to], request.NormalizeResearchBlocks)
 	}
 	height := titleHeight + bottomMargin + (weekCount-1)*weekGap
 	for _, value := range heights {
@@ -181,27 +254,27 @@ func renderWeeks(request Request, days []Day, faces *faces) *image.RGBA {
 	for index := 0; index < weekCount; index++ {
 		from := index * 7
 		to := min(from+7, len(days))
-		renderWeek(canvas, image.Pt(30, y), width-60, days[from:to], faces)
+		renderWeek(canvas, image.Pt(30, y), width-60, days[from:to], faces, request.NormalizeResearchBlocks)
 		y += heights[index] + weekGap
 	}
 	return canvas
 }
 
-func weekHeight(days []Day) int {
-	slots := weekSlots(days)
+func weekHeight(days []Day, normalizeResearch bool) int {
+	slots := weekSlots(days, normalizeResearch)
 	if len(slots) == 0 {
 		return 72 + 140
 	}
 	height := 72
 	for _, slot := range slots {
-		height += slotHeight(days, slot)
+		height += slotHeight(days, slot, normalizeResearch)
 	}
 	return height
 }
 
-func renderWeek(canvas *image.RGBA, origin image.Point, width int, days []Day, faces *faces) {
+func renderWeek(canvas *image.RGBA, origin image.Point, width int, days []Day, faces *faces, normalizeResearch bool) {
 	const timeWidth = 145
-	height := weekHeight(days)
+	height := weekHeight(days, normalizeResearch)
 	panel := image.Rect(origin.X, origin.Y, origin.X+width, origin.Y+height)
 	fillRect(canvas, panel, panelColor)
 	strokeRect(canvas, panel, lineColor, 2)
@@ -214,10 +287,10 @@ func renderWeek(canvas *image.RGBA, origin image.Point, width int, days []Day, f
 		label := weekdayShort(day.Date) + "  " + day.Date.Format("02.01")
 		drawCentered(canvas, faces.header, textColor, x, x+columnWidth, panel.Min.Y+43, label)
 	}
-	slots := weekSlots(days)
+	slots := weekSlots(days, normalizeResearch)
 	y := panel.Min.Y + 72
 	for _, slot := range slots {
-		rowHeight := slotHeight(days, slot)
+		rowHeight := slotHeight(days, slot, normalizeResearch)
 		strokeHorizontal(canvas, panel.Min.X, panel.Max.X, y, lineColor)
 		drawCentered(canvas, faces.header, textColor, panel.Min.X, panel.Min.X+timeWidth, y+46, slot.start)
 		drawCentered(canvas, faces.small, mutedColor, panel.Min.X, panel.Min.X+timeWidth, y+72, slot.end)
@@ -228,7 +301,7 @@ func renderWeek(canvas *image.RGBA, origin image.Point, width int, days []Day, f
 				panel.Min.X+timeWidth+(dayIndex+1)*columnWidth,
 				y+rowHeight,
 			)
-			lessons := lessonsAt(day.Lessons, slot)
+			lessons := lessonsAt(day.Lessons, slot, normalizeResearch)
 			if len(lessons) == 0 {
 				continue
 			}
@@ -261,11 +334,11 @@ func renderWeek(canvas *image.RGBA, origin image.Point, width int, days []Day, f
 
 type timeSlot struct{ start, end string }
 
-func weekSlots(days []Day) []timeSlot {
+func weekSlots(days []Day, normalizeResearch bool) []timeSlot {
 	unique := map[timeSlot]struct{}{}
 	for _, day := range days {
 		for _, lesson := range day.Lessons {
-			unique[visualTimeSlot(lesson)] = struct{}{}
+			unique[visualTimeSlot(lesson, normalizeResearch)] = struct{}{}
 		}
 	}
 	result := make([]timeSlot, 0, len(unique))
@@ -281,18 +354,18 @@ func weekSlots(days []Day) []timeSlot {
 	return result
 }
 
-func lessonsAt(lessons []domain.Lesson, slot timeSlot) []domain.Lesson {
+func lessonsAt(lessons []domain.Lesson, slot timeSlot, normalizeResearch bool) []domain.Lesson {
 	result := make([]domain.Lesson, 0, 2)
 	for _, lesson := range lessons {
-		if visualTimeSlot(lesson) == slot {
+		if visualTimeSlot(lesson, normalizeResearch) == slot {
 			result = append(result, lesson)
 		}
 	}
 	return result
 }
 
-func visualTimeSlot(lesson domain.Lesson) timeSlot {
-	if lesson.TimeStart == "08:00" && isResearchWork(lesson.Subject) {
+func visualTimeSlot(lesson domain.Lesson, normalizeResearch bool) timeSlot {
+	if normalizeResearch && lesson.TimeStart == "08:00" && isResearchWork(lesson.Subject) {
 		return timeSlot{start: "08:00", end: "09:35"}
 	}
 	return timeSlot{start: lesson.TimeStart, end: lesson.TimeEnd}
@@ -308,10 +381,10 @@ func visualSubject(subject string) string {
 	return value
 }
 
-func slotHeight(days []Day, slot timeSlot) int {
+func slotHeight(days []Day, slot timeSlot, normalizeResearch bool) int {
 	maximum := 1
 	for _, day := range days {
-		maximum = max(maximum, len(lessonsAt(day.Lessons, slot)))
+		maximum = max(maximum, len(lessonsAt(day.Lessons, slot, normalizeResearch)))
 	}
 	return maximum * 140
 }

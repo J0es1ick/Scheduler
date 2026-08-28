@@ -2,6 +2,7 @@ package scheduleview
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -81,6 +82,73 @@ func RenderCSV(request Request) ([]byte, error) {
 		return nil, fmt.Errorf("encode schedule CSV: %w", err)
 	}
 	return output.Bytes(), nil
+}
+
+func RenderICS(request Request) ([]byte, error) {
+	lines := []string{
+		"BEGIN:VCALENDAR",
+		"VERSION:2.0",
+		"CALSCALE:GREGORIAN",
+		"METHOD:PUBLISH",
+		"PRODID:-//Scheduler//Schedule//RU",
+		"X-WR-CALNAME:" + escapeICS(request.University+" · "+request.Group),
+	}
+	for _, lesson := range flattenLessons(request) {
+		startsAt, err := parseExportDateTime(lesson.Date, lesson.TimeStart, request.From.Location())
+		if err != nil {
+			return nil, fmt.Errorf("encode schedule ICS start: %w", err)
+		}
+		endsAt, err := parseExportDateTime(lesson.Date, lesson.TimeEnd, request.From.Location())
+		if err != nil {
+			return nil, fmt.Errorf("encode schedule ICS end: %w", err)
+		}
+		digest := sha256.Sum256([]byte(strings.Join([]string{
+			request.University, request.Group, lesson.Date, lesson.TimeStart, lesson.TimeEnd,
+			lesson.Subject, lesson.Teacher, lesson.Room, strconv.Itoa(lesson.Subgroup),
+		}, "|")))
+		description := lesson.Type
+		if lesson.Teacher != "" {
+			description += " · " + lesson.Teacher
+		}
+		if lesson.Subgroup > 0 {
+			description += fmt.Sprintf(" · подгруппа %d", lesson.Subgroup)
+		}
+		lines = append(lines,
+			"BEGIN:VEVENT",
+			fmt.Sprintf("UID:%x@scheduler", digest[:16]),
+			"DTSTAMP:"+time.Now().UTC().Format("20060102T150405Z"),
+			"DTSTART:"+startsAt.UTC().Format("20060102T150405Z"),
+			"DTEND:"+endsAt.UTC().Format("20060102T150405Z"),
+			"SUMMARY:"+escapeICS(lesson.Subject),
+			"DESCRIPTION:"+escapeICS(description),
+			"LOCATION:"+escapeICS(lesson.Room),
+			"END:VEVENT",
+		)
+	}
+	lines = append(lines, "END:VCALENDAR", "")
+	return []byte(strings.Join(lines, "\r\n")), nil
+}
+
+func parseExportDateTime(date string, clock string, location *time.Location) (time.Time, error) {
+	if location == nil {
+		location = time.Local
+	}
+	for _, layout := range []string{"2006-01-02 15:04", "2006-01-02 15:04:05"} {
+		value, err := time.ParseInLocation(layout, date+" "+clock, location)
+		if err == nil {
+			return value, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("invalid date or time %q %q", date, clock)
+}
+
+func escapeICS(value string) string {
+	value = strings.ReplaceAll(value, "\\", "\\\\")
+	value = strings.ReplaceAll(value, "\r\n", "\\n")
+	value = strings.ReplaceAll(value, "\r", "\\n")
+	value = strings.ReplaceAll(value, "\n", "\\n")
+	value = strings.ReplaceAll(value, ";", "\\;")
+	return strings.ReplaceAll(value, ",", "\\,")
 }
 
 func safeCSVCell(value string) string {

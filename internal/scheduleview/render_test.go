@@ -2,7 +2,10 @@ package scheduleview
 
 import (
 	"bytes"
+	"context"
 	"encoding/csv"
+	"errors"
+	"image"
 	"image/png"
 	"strings"
 	"testing"
@@ -32,6 +35,62 @@ func TestRenderPNGProducesReadableImage(t *testing.T) {
 	}
 	if imageValue.Bounds().Dx() < 1000 || imageValue.Bounds().Dy() < 300 {
 		t.Fatalf("unexpected image size: %v", imageValue.Bounds())
+	}
+}
+
+func TestRenderDaySeparatesTimeAndLessonCards(t *testing.T) {
+	fontFaces, err := loadFaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	date := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.Local)
+	canvas := renderDay(Request{University: "ИГХТУ", Group: "4/147", From: date, Days: 1}, Day{
+		Date: date,
+		Lessons: []domain.Lesson{{
+			TimeStart: "09:50", TimeEnd: "11:25", Subject: "Психология и педагогика", Type: domain.LessonTypePractice,
+		}},
+	}, fontFaces)
+
+	if got := canvas.RGBAAt(70, 290); got != headerColor {
+		t.Fatalf("time card color = %#v, want %#v", got, headerColor)
+	}
+	if got := canvas.RGBAAt(1000, 290); got != lessonTypeColor(domain.LessonTypePractice) {
+		t.Fatalf("lesson card color = %#v", got)
+	}
+}
+
+func TestRenderDayCentersEmptyState(t *testing.T) {
+	fontFaces, err := loadFaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	date := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.Local)
+	canvas := renderDay(Request{University: "ИГХТУ", Group: "4/147", From: date, Days: 1}, Day{Date: date}, fontFaces)
+	panel := image.Rect(40, 155, canvas.Bounds().Dx()-40, canvas.Bounds().Dy()-40)
+	textBounds := image.Rectangle{}
+	for y := panel.Min.Y; y < panel.Max.Y; y++ {
+		for x := panel.Min.X; x < panel.Max.X; x++ {
+			if canvas.RGBAAt(x, y) == panelColor {
+				continue
+			}
+			point := image.Pt(x, y)
+			if textBounds.Empty() {
+				textBounds = image.Rect(point.X, point.Y, point.X+1, point.Y+1)
+			} else {
+				textBounds = textBounds.Union(image.Rect(point.X, point.Y, point.X+1, point.Y+1))
+			}
+		}
+	}
+	if textBounds.Empty() {
+		t.Fatal("empty-state text was not rendered")
+	}
+	textCenter := textBounds.Min.Add(textBounds.Size().Div(2))
+	panelCenter := panel.Min.Add(panel.Size().Div(2))
+	if delta := textCenter.X - panelCenter.X; delta < -3 || delta > 3 {
+		t.Fatalf("empty-state horizontal center = %d, want %d", textCenter.X, panelCenter.X)
+	}
+	if delta := textCenter.Y - panelCenter.Y; delta < -8 || delta > 8 {
+		t.Fatalf("empty-state vertical center = %d, want %d", textCenter.Y, panelCenter.Y)
 	}
 }
 
@@ -101,6 +160,22 @@ func TestScheduleExportsIncludeLesson(t *testing.T) {
 			t.Fatalf("CSV does not contain %q:\n%s", expected, csvPayload)
 		}
 	}
+	icsPayload, err := RenderICS(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"BEGIN:VCALENDAR", "BEGIN:VEVENT", "DTSTART:20260907T050000Z", "DTEND:20260907T063500Z", "SUMMARY:Математика\\, часть 1", "LOCATION:А-101", "END:VCALENDAR"} {
+		if !strings.Contains(string(icsPayload), expected) {
+			t.Fatalf("ICS does not contain %q:\n%s", expected, icsPayload)
+		}
+	}
+}
+
+func TestCalendarExportEscapesAllLineBreaks(t *testing.T) {
+	value := escapeICS("Предмет\rBEGIN:VEVENT\nLOCATION:Другая\r\nАудитория")
+	if strings.ContainsAny(value, "\r\n") || value != "Предмет\\nBEGIN:VEVENT\\nLOCATION:Другая\\nАудитория" {
+		t.Fatalf("calendar field can inject properties: %q", value)
+	}
 }
 
 func TestSafeCSVCellPreventsFormulaInjection(t *testing.T) {
@@ -169,7 +244,7 @@ func TestResearchWorkUsesFirstStandardSlotInVisualTable(t *testing.T) {
 		Subject:   "Научно-исследовательская работа - - -",
 		Type:      domain.LessonTypeOther,
 	}
-	if got, want := visualTimeSlot(lesson), (timeSlot{start: "08:00", end: "09:35"}); got != want {
+	if got, want := visualTimeSlot(lesson, true), (timeSlot{start: "08:00", end: "09:35"}); got != want {
 		t.Fatalf("visualTimeSlot() = %#v, want %#v", got, want)
 	}
 	if got, want := visualSubject(lesson.Subject), "Научно-исследовательская работа"; got != want {
@@ -199,8 +274,38 @@ func TestWeekSlotsDoNotCreateAllDayResearchRow(t *testing.T) {
 		{TimeStart: "08:00", TimeEnd: "17:25", Subject: "Научно-исследовательская работа"},
 		{TimeStart: "08:00", TimeEnd: "09:35", Subject: "Математика"},
 	}}}
-	slots := weekSlots(days)
+	slots := weekSlots(days, true)
 	if len(slots) != 1 || slots[0] != (timeSlot{start: "08:00", end: "09:35"}) {
 		t.Fatalf("unexpected visual slots: %#v", slots)
+	}
+}
+
+func TestRenderPNGRejectsPathologicalScheduleBeforeAllocation(t *testing.T) {
+	date := time.Date(2026, time.September, 7, 0, 0, 0, 0, time.UTC)
+	lessons := make([]domain.Lesson, maxLessonsPerRenderDay+1)
+	for index := range lessons {
+		lessons[index] = domain.Lesson{TimeStart: "08:00", TimeEnd: "09:35", Subject: "Занятие"}
+	}
+	_, err := RenderPNG(Request{From: date, Days: 1, Schedule: []Day{{Date: date, Lessons: lessons}}})
+	if !errors.Is(err, ErrRenderLimit) {
+		t.Fatalf("RenderPNG() error = %v, want ErrRenderLimit", err)
+	}
+}
+
+func TestRenderPNGContextStopsWaitingAfterCancellation(t *testing.T) {
+	for range maxConcurrentPNGRenders {
+		pngRenderSlots <- struct{}{}
+	}
+	defer func() {
+		for len(pngRenderSlots) > 0 {
+			<-pngRenderSlots
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := RenderPNGContext(ctx, Request{From: time.Now(), Days: 1})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RenderPNGContext() error = %v, want context.Canceled", err)
 	}
 }
