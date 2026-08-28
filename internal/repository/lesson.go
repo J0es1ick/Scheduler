@@ -151,7 +151,8 @@ func (r *LessonRepository) GetLessonsByTeacher(
 ) ([]domain.Lesson, error) {
 	var lessons []domain.Lesson
 	err := r.db.SelectContext(ctx, &lessons,
-		lessonWithGroupSelect+` WHERE lesson.university_id = $1 AND lesson.teacher = $2
+		lessonWithGroupSelect+` WHERE lesson.university_id = $1
+			AND lesson.teacher ILIKE '%' || BTRIM($2) || '%'
 			ORDER BY lesson.day_of_week, lesson.time_start, study_group.name`,
 		universityID, teacher)
 	if err != nil {
@@ -167,7 +168,8 @@ func (r *LessonRepository) GetLessonsByRoom(
 ) ([]domain.Lesson, error) {
 	var lessons []domain.Lesson
 	err := r.db.SelectContext(ctx, &lessons,
-		lessonWithGroupSelect+` WHERE lesson.university_id = $1 AND lesson.room = $2
+		lessonWithGroupSelect+` WHERE lesson.university_id = $1
+			AND lesson.room ILIKE '%' || BTRIM($2) || '%'
 			ORDER BY lesson.day_of_week, lesson.time_start, study_group.name`,
 		universityID, room)
 	if err != nil {

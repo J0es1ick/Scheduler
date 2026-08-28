@@ -21,37 +21,51 @@ func (h *Handler) HandleHotline(c tele.Context) error {
 		slog.Error("hotline register user failed", "user_id", c.Sender().ID, "err", err)
 		return c.Send("Не удалось открыть форму обращения. Попробуйте позже.")
 	}
-	text := "Сообщить о расписании\n\nЗдесь можно сообщить об изменениях на уже подключённом сайте или предложить новое учебное заведение. Выберите тип обращения:"
-	if c.Callback() != nil {
-		return editOrSend(c, text, keyboards.HotlineTypeSelector())
-	}
-	return c.Send(text, keyboards.HotlineTypeSelector())
-}
-
-func (h *Handler) HandleHotlineType(c tele.Context) error {
-	args := callbackArguments(c)
-	if len(args) == 0 || (args[0] != domain.SupportRequestUpdateExisting && args[0] != domain.SupportRequestNewInstitution) {
-		return respondStaleCallback(c)
-	}
-	_ = c.Respond()
-	ctx, cancel := reqCtx()
-	defer cancel()
 	state, _, err := h.restoreProfile(ctx, c.Sender().ID)
 	if err != nil {
-		return c.Send("Не удалось загрузить профиль. Попробуйте позже.")
+		return c.Send("Не удалось открыть форму обращения. Попробуйте позже.")
 	}
 	if state == nil {
 		state = &dto.UserState{}
 	}
+	state.Step = "choosing_hotline_type"
+	state.FlowNonce = newFlowNonce()
+	h.StateManager.Set(c.Sender().ID, state)
+	text := "Сообщить о расписании\n\nЗдесь можно сообщить об изменениях на уже подключённом сайте или предложить новое учебное заведение. Выберите тип обращения:"
+	if c.Callback() != nil {
+		return editOrSend(c, text, keyboards.HotlineTypeSelector(state.FlowNonce))
+	}
+	return c.Send(text, keyboards.HotlineTypeSelector(state.FlowNonce))
+}
+
+func (h *Handler) HandleHotlineType(c tele.Context) error {
+	args := callbackArguments(c)
+	if len(args) < 2 || (args[0] != domain.SupportRequestUpdateExisting && args[0] != domain.SupportRequestNewInstitution) {
+		return respondStaleCallback(c)
+	}
+	current := h.StateManager.Get(c.Sender().ID)
+	if !validFlow(current, "choosing_hotline_type", args[1]) {
+		return respondStaleCallback(c)
+	}
+	_ = c.Respond()
+	state := current
 	state.Step = "awaiting_hotline_submission"
 	state.HotlineType = args[0]
+	state.FlowNonce = newFlowNonce()
 	h.StateManager.Set(c.Sender().ID, state)
-	_ = c.Edit("Тип обращения выбран.")
-	_ = c.Send("Теперь отправьте заполненный шаблон одним сообщением.", &tele.ReplyMarkup{RemoveKeyboard: true})
-	return c.Send(hotlineTemplate(args[0]), hotlineCancelButton())
+	return editOrSend(
+		c,
+		"Отправьте заполненный шаблон одним сообщением.\n\n"+hotlineTemplate(args[0]),
+		hotlineCancelButton(state.FlowNonce),
+	)
 }
 
 func (h *Handler) HandleCancelHotline(c tele.Context) error {
+	args := callbackArguments(c)
+	current := h.StateManager.Get(c.Sender().ID)
+	if len(args) < 1 || !validFlow(current, "awaiting_hotline_submission", args[0]) {
+		return respondStaleCallback(c)
+	}
 	_ = c.Respond()
 	ctx, cancel := reqCtx()
 	defer cancel()
@@ -60,12 +74,15 @@ func (h *Handler) HandleCancelHotline(c tele.Context) error {
 		return c.Send("Не удалось восстановить профиль.")
 	}
 	if state == nil {
-		h.StateManager.Delete(c.Sender().ID)
+		state = &dto.UserState{}
 	}
+	state.Step = "choosing_hotline_type"
+	state.FlowNonce = newFlowNonce()
+	h.StateManager.Set(c.Sender().ID, state)
 	return editOrSend(
 		c,
 		"Сообщить о расписании\n\nВыберите тип обращения:",
-		keyboards.HotlineTypeSelector(),
+		keyboards.HotlineTypeSelector(state.FlowNonce),
 	)
 }
 
@@ -77,21 +94,21 @@ func (h *Handler) HandleHotlineSubmission(c tele.Context, input string) error {
 	details := strings.TrimSpace(input)
 	length := utf8.RuneCountInString(details)
 	if length < 20 {
-		return c.Send("Добавьте больше информации — минимум 20 символов.", hotlineCancelButton())
+		return c.Send("Добавьте больше информации — минимум 20 символов.", hotlineCancelButton(state.FlowNonce))
 	}
 	if length > 4096 {
-		return c.Send("Сообщение слишком длинное. Максимум — 4096 символов.", hotlineCancelButton())
+		return c.Send("Сообщение слишком длинное. Максимум — 4096 символов.", hotlineCancelButton(state.FlowNonce))
 	}
 
 	ctx, cancel := reqCtx()
 	defer cancel()
 	id, err := h.SupportRequestService.Submit(ctx, fmt.Sprint(c.Sender().ID), state.HotlineType, details)
 	if errors.Is(err, repository.ErrSupportRequestLimit) {
-		return c.Send("У вас уже есть три открытых обращения. Дождитесь решения администратора.", hotlineCancelButton())
+		return c.Send("У вас уже есть три открытых обращения. Дождитесь решения администратора.", hotlineCancelButton(state.FlowNonce))
 	}
 	if err != nil {
 		slog.Error("submit hotline request failed", "user_id", c.Sender().ID, "err", err)
-		return c.Send("Не удалось сохранить обращение. Попробуйте позже.", hotlineCancelButton())
+		return c.Send("Не удалось сохранить обращение. Попробуйте позже.", hotlineCancelButton(state.FlowNonce))
 	}
 	restored, _, restoreErr := h.restoreProfile(ctx, c.Sender().ID)
 	if restoreErr != nil || restored == nil {
@@ -122,8 +139,8 @@ func hotlineTemplate(requestType string) string {
 		"Дополнительный комментарий:"
 }
 
-func hotlineCancelButton() *tele.ReplyMarkup {
+func hotlineCancelButton(flowNonce string) *tele.ReplyMarkup {
 	menu := &tele.ReplyMarkup{}
-	menu.Inline(menu.Row(menu.Data("Назад", "cancel_hotline")))
+	menu.Inline(menu.Row(menu.Data("Назад", "cancel_hotline", flowNonce)))
 	return menu
 }

@@ -42,7 +42,7 @@ func (h *Handler) HandleDate(c tele.Context) error {
 		now := time.Now().In(location)
 		return c.Send(
 			calendarTitle(now),
-			keyboards.ScheduleCalendar(now),
+			keyboards.ScheduleCalendar(now, target.navigationReference()),
 		)
 	}
 	date, err := parseScheduleDate(input, location)
@@ -60,46 +60,72 @@ func (h *Handler) HandleCalendarMonth(c tele.Context) error {
 	if len(args) == 0 {
 		return respondStaleCallback(c)
 	}
-	month, err := time.ParseInLocation("2006-01", args[0], time.Local)
+	location := time.Local
+	if len(args) > 4 && args[4] != "" {
+		ctx, cancel := reqCtx()
+		defer cancel()
+		target := h.scheduleCallbackTarget(ctx, c, args, 4)
+		if target == nil {
+			return nil
+		}
+		location = h.universityLocation(ctx, target.UniversityID)
+	}
+	month, err := time.ParseInLocation("2006-01", args[0], location)
 	if err != nil || month.Year() < 2000 || month.Year() > 2100 {
 		return respondStaleCallback(c)
 	}
 	_ = c.Respond()
 	markup := scheduleCalendarMarkup(month, args)
-	if err = c.Edit(
-		calendarTitle(month),
-		markup,
-	); err != nil && !strings.Contains(err.Error(), "message is not modified") {
-		return c.Send(calendarTitle(month), markup)
-	}
-	return nil
+	return editScheduleOverlay(c, calendarTitle(month), markup)
 }
 
 func (h *Handler) HandleOpenCalendar(c tele.Context) error {
 	month := time.Now()
 	args := callbackArguments(c)
+	if len(args) > 4 && args[4] != "" {
+		ctx, cancel := reqCtx()
+		defer cancel()
+		target := h.scheduleCallbackTarget(ctx, c, args, 4)
+		if target == nil {
+			return nil
+		}
+		month = h.targetNow(ctx, target)
+	}
 	if len(args) > 0 {
-		parsed, err := time.ParseInLocation("2006-01", args[0], time.Local)
+		parsed, err := time.ParseInLocation("2006-01", args[0], month.Location())
 		if err == nil {
 			month = parsed
 		}
 	}
 	_ = c.Respond()
-	return editOrSend(c, calendarTitle(month), scheduleCalendarMarkup(month, args))
+	return editScheduleOverlay(c, calendarTitle(month), scheduleCalendarMarkup(month, args))
 }
 
 func scheduleCalendarMarkup(month time.Time, args []string) *tele.ReplyMarkup {
-	if len(args) < 3 || (args[1] != "schedule_date" && args[1] != "schedule_week") {
-		return keyboards.ScheduleCalendar(month)
+	groupToken := ""
+	if len(args) > 4 {
+		groupToken = args[4]
 	}
-	backDate, err := parseScheduleDate(args[2], time.Local)
+	if len(args) < 3 {
+		return keyboards.ScheduleCalendar(month, groupToken)
+	}
+	action := args[1]
+	if action == "d" {
+		action = "schedule_date"
+	} else if action == "w" {
+		action = "schedule_week"
+	}
+	if action != "schedule_date" && action != "schedule_week" {
+		return keyboards.ScheduleCalendar(month, groupToken)
+	}
+	backDate, err := parseScheduleDate(args[2], month.Location())
 	if err != nil {
-		return keyboards.ScheduleCalendar(month)
+		return keyboards.ScheduleCalendar(month, groupToken)
 	}
 	if len(args) > 3 {
-		return keyboards.ScheduleCalendarWithBack(month, args[1], backDate, args[3])
+		return keyboards.ScheduleCalendarWithBack(month, action, backDate, args[3], groupToken)
 	}
-	return keyboards.ScheduleCalendarWithBack(month, args[1], backDate)
+	return keyboards.ScheduleCalendarWithBack(month, action, backDate)
 }
 
 func (h *Handler) HandleScheduleDateSelect(c tele.Context) error {
@@ -107,10 +133,14 @@ func (h *Handler) HandleScheduleDateSelect(c tele.Context) error {
 	if len(args) == 0 {
 		return respondStaleCallback(c)
 	}
+	if detachedScheduleMenu(c, "Выберите формат файла:") {
+		_ = c.Respond()
+		return c.Delete()
+	}
 	_ = c.Respond()
 	ctx, cancel := reqCtx()
 	defer cancel()
-	target := h.scheduleTarget(ctx, c)
+	target := h.scheduleCallbackTarget(ctx, c, args, 1)
 	if target == nil {
 		return nil
 	}
@@ -136,9 +166,9 @@ func (h *Handler) sendTargetDate(
 		return sendScheduleLoadError(c, err)
 	}
 	if len(days) == 0 || len(days[0].Lessons) == 0 {
-		return h.sendEmptyTargetDate(c, target, date)
+		return h.sendEmptyTargetDate(ctx, c, target, date)
 	}
-	if err := h.sendSingleDayForTarget(c, days[0], target); err != nil {
+	if err := h.sendSingleDayForTarget(ctx, c, days[0], target); err != nil {
 		slog.Error(
 			"send schedule for selected date failed",
 			"group_id", target.GroupID,
@@ -151,12 +181,13 @@ func (h *Handler) sendTargetDate(
 }
 
 func (h *Handler) sendEmptyTargetDate(
+	ctx context.Context,
 	c tele.Context,
 	target *scheduleTarget,
 	date time.Time,
 ) error {
-	markup := keyboards.ScheduleDayNavigation(date, target.GroupName, isGroupChat(c), target.GroupID)
-	return h.sendScheduleView(c, []dto.DaySchedule{{Date: date}}, target, date, 1, markup, "")
+	markup := keyboards.ScheduleDayNavigation(date, target.GroupName, isGroupChat(c), target.GroupID, target.navigationReference())
+	return h.sendScheduleView(ctx, c, []dto.DaySchedule{{Date: date}}, target, date, 1, markup, "")
 }
 
 func parseScheduleDate(value string, location *time.Location) (time.Time, error) {

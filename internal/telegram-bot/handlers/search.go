@@ -23,23 +23,36 @@ func (h *Handler) HandleSearch(c tgbotapi.Context) error {
 	if state == nil || state.Step != "done" {
 		return c.Send("Сначала настройте профиль: /start")
 	}
-	return c.Send("Выберите критерий поиска:", keyboards.SearchTypeSelector())
+	state.Step = "choosing_search_type"
+	state.FlowNonce = newFlowNonce()
+	h.StateManager.Set(c.Sender().ID, state)
+	return c.Send("Выберите критерий поиска:", keyboards.SearchTypeSelector(state.FlowNonce))
 }
 
 func (h *Handler) HandleCancelSearch(c tgbotapi.Context) error {
 	userID := c.Sender().ID
-	state := h.StateManager.Get(userID)
-	if state != nil {
-		state.Step = "done"
-		state.SearchQuery = ""
-		h.StateManager.Set(userID, state)
+	args := callbackArguments(c)
+	current := h.StateManager.Get(userID)
+	if len(args) < 1 || !validFlow(current, "awaiting_search_query", args[0]) {
+		return respondStaleCallback(c)
 	}
+	ctx, cancel := reqCtx()
+	defer cancel()
+	state, _, err := h.restoreProfile(ctx, userID)
+	if err != nil {
+		return c.Send("Не удалось восстановить профиль. Попробуйте позже.")
+	}
+	if state == nil {
+		return c.Send("Сначала настройте профиль: /start")
+	}
+	state.Step = "choosing_search_type"
+	state.SearchQuery = ""
+	state.FlowNonce = newFlowNonce()
+	h.StateManager.Set(userID, state)
 	_ = c.Respond()
-	return editOrSend(c, "Выберите критерий поиска:", keyboards.SearchTypeSelector())
+	return editOrSend(c, "Выберите критерий поиска:", keyboards.SearchTypeSelector(state.FlowNonce))
 }
 
-// HandleSearchResult выполняет поиск расписания по заданному в state.SearchQuery критерию.
-// Создаёт собственный контекст с таймаутом — вызывается напрямую из HandleTextInput.
 func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) error {
 	ctx, cancel := reqCtx()
 	defer cancel()
@@ -52,17 +65,49 @@ func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) e
 
 	switch state.SearchType {
 	case dto.SearchTypeGroup:
-		group, err := h.GroupService.GetGroupByName(ctx, state.UniversityID, state.SearchQuery)
-		if err != nil || group == nil {
-			state.Step = "awaiting_search_query"
-			h.StateManager.Set(c.Sender().ID, state)
-			return c.Send("Группа не найдена.\nПопробуйте ввести снова:", keyboards.CancelButton())
-		}
-		data, err := h.ScheduleService.GetScheduleForGroupRange(ctx, group.ID, now, to)
+		universities, err := h.UniversityService.GetAll(ctx)
 		if err != nil {
-			return c.Send("Ошибка получения расписания.")
+			return c.Send("Не удалось загрузить вузы.", keyboards.CancelButton(state.FlowNonce))
 		}
-		days = mapToDaySchedule(data)
+		university, query, err := resolveGroupInput(state.SearchQuery, state.UniversityID, false, universities)
+		if err != nil {
+			return c.Send(err.Error(), keyboards.CancelButton(state.FlowNonce))
+		}
+		var group *domain.Group
+		variants := groupQueryVariants(query)
+		for _, variant := range variants {
+			group, err = h.GroupService.GetGroupByName(ctx, university.ID, variant)
+			if err != nil {
+				return c.Send("Не удалось выполнить поиск.", keyboards.CancelButton(state.FlowNonce))
+			}
+			if group != nil {
+				break
+			}
+		}
+		if group == nil {
+			groups, searchErr := h.GroupService.FindActiveByName(ctx, university.ID, variants[len(variants)-1])
+			if searchErr != nil {
+				return c.Send("Не удалось выполнить поиск. Попробуйте позже.", keyboards.CancelButton(state.FlowNonce))
+			}
+			return c.Send(qualifiedGroupSuggestionsText(university.Name, groups), keyboards.CancelButton(state.FlowNonce))
+		}
+		target := &scheduleTarget{
+			GroupID: group.ID, GroupName: group.Name, UniversityID: university.ID, University: university.Name,
+			ViewFormat: domain.ScheduleViewVisual, Public: true,
+		}
+		subscriptions, err := h.SubscriptionService.GetGroupSubscriptions(ctx, fmt.Sprint(c.Sender().ID))
+		if err != nil {
+			return c.Send("Не удалось загрузить настройки расписания.", keyboards.CancelButton(state.FlowNonce))
+		}
+		for _, subscription := range subscriptions {
+			if subscription.GroupID == group.ID {
+				target.ViewFormat, target.Subgroup, target.Public = subscription.ScheduleViewFormat, subscription.Subgroup, false
+				break
+			}
+		}
+		state.Step = "done"
+		h.StateManager.Set(c.Sender().ID, state)
+		return h.sendTargetWeek(ctx, c, target, h.targetNow(ctx, target), 7)
 
 	case dto.SearchTypeTeacher:
 		showGroupNames = true
@@ -103,7 +148,7 @@ func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) e
 		h.StateManager.Set(c.Sender().ID, state)
 		return c.Send(
 			"По вашему запросу ничего не найдено.\nПопробуйте ввести снова или вернитесь назад:",
-			keyboards.CancelButton(),
+			keyboards.CancelButton(state.FlowNonce),
 		)
 	}
 

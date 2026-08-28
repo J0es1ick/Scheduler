@@ -14,6 +14,9 @@ type UniversityRepository struct {
 	db *sqlx.DB
 }
 
+const universityColumns = `id, name, full_name, schedule_url, timezone, locale,
+	first_weekday, academic_week_anchor, is_active, created_at, updated_at`
+
 func NewUniversityRepository(db *sqlx.DB) *UniversityRepository {
 	return &UniversityRepository{db: db}
 }
@@ -31,7 +34,7 @@ func (r *UniversityRepository) CreateUniversity(ctx context.Context, id string, 
 
 func (r *UniversityRepository) GetUniversityByID(ctx context.Context, id string) (*domain.University, error) {
 	var university domain.University
-	query := `SELECT id, name, full_name, schedule_url, is_active, created_at, updated_at FROM universities WHERE id = $1`
+	query := `SELECT ` + universityColumns + ` FROM universities WHERE id = $1`
 	err := r.db.GetContext(ctx, &university, query, id)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -44,7 +47,7 @@ func (r *UniversityRepository) GetUniversityByID(ctx context.Context, id string)
 
 func (r *UniversityRepository) GetUniversityByName(ctx context.Context, name string) (*domain.University, error) {
 	var university domain.University
-	query := `SELECT id, name, full_name, schedule_url, is_active, created_at, updated_at FROM universities WHERE name = $1`
+	query := `SELECT ` + universityColumns + ` FROM universities WHERE name = $1`
 	err := r.db.GetContext(ctx, &university, query, name)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -57,7 +60,7 @@ func (r *UniversityRepository) GetUniversityByName(ctx context.Context, name str
 
 func (r *UniversityRepository) GetAllUniversities(ctx context.Context) ([]domain.University, error) {
 	var universities []domain.University
-	query := `SELECT id, name, full_name, schedule_url, is_active, created_at, updated_at FROM universities`
+	query := `SELECT ` + universityColumns + ` FROM universities WHERE is_active=TRUE ORDER BY name`
 	err := r.db.SelectContext(ctx, &universities, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all universities: %w", err)

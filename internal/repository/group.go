@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -73,7 +74,10 @@ func (r *GroupRepository) GetGroupByName(ctx context.Context, universityID strin
 	var group domain.Group
 	query := `SELECT id, university_id, name, is_active, source_active,
 		manually_disabled, created_at, updated_at
-		FROM groups WHERE university_id = $1 AND name = $2 AND is_active = TRUE`
+		FROM groups
+		WHERE university_id = $1
+		  AND LOWER(BTRIM(name)) = LOWER(BTRIM($2))
+		  AND is_active = TRUE`
 	err := r.db.GetContext(ctx, &group, query, universityID, name)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -84,13 +88,37 @@ func (r *GroupRepository) GetGroupByName(ctx context.Context, universityID strin
 	return &group, nil
 }
 
+func (r *GroupRepository) GetActiveGroupByToken(ctx context.Context, token string) (*domain.Group, error) {
+	if decoded, err := hex.DecodeString(token); err != nil || len(decoded) != 8 {
+		return nil, nil
+	}
+	var groups []domain.Group
+	if err := r.db.SelectContext(ctx, &groups, `
+		SELECT g.id, g.university_id, g.name, g.is_active, g.source_active,
+			g.manually_disabled, g.created_at, g.updated_at
+		FROM groups g
+		JOIN universities u ON u.id=g.university_id
+		WHERE LEFT(ENCODE(SHA256(CONVERT_TO(g.id, 'UTF8')), 'hex'), 16)=$1
+		  AND g.is_active=TRUE AND u.is_active=TRUE
+		LIMIT 2`, token); err != nil {
+		return nil, fmt.Errorf("get active group by token: %w", err)
+	}
+	if len(groups) == 0 {
+		return nil, nil
+	}
+	if len(groups) > 1 {
+		return nil, fmt.Errorf("ambiguous group token")
+	}
+	return &groups[0], nil
+}
+
 func (r *GroupRepository) FindActiveByName(
 	ctx context.Context,
 	universityID string,
 	name string,
 ) ([]domain.Group, error) {
 	var groups []domain.Group
-	where := `LOWER(name)=LOWER($1) AND is_active=TRUE`
+	where := `name ILIKE '%' || BTRIM($1) || '%' AND is_active=TRUE`
 	args := []any{name}
 	if universityID != "" {
 		where += ` AND university_id=$2`
@@ -101,7 +129,9 @@ func (r *GroupRepository) FindActiveByName(
 			manually_disabled, created_at, updated_at
 		FROM groups
 		WHERE `+where+`
-		ORDER BY university_id, name`,
+		ORDER BY (LOWER(BTRIM(name))=LOWER(BTRIM($1))) DESC,
+			LENGTH(name), university_id, name
+		LIMIT 10`,
 		args...,
 	); err != nil {
 		return nil, fmt.Errorf("find active group by name %q: %w", name, err)

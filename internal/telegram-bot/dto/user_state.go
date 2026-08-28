@@ -1,16 +1,29 @@
 package dto
 
-// UserState хранит состояние диалога конкретного пользователя в Telegram.
-// Живёт только в памяти бота, в БД не хранится.
+import "time"
+
 type UserState struct {
-	UniversityID string
-	University   string // человекочитаемое имя для отображения
-	SearchType   SearchType
-	Query        string // основной запрос (группа/ФИО) для регулярного расписания
-	GroupID      string // ID группы из актуального справочника парсера
-	SearchQuery  string // временный запрос для команды /search
-	HotlineType  string // тип создаваемого обращения в горячую линию
-	Step         string // "awaiting_role" | "awaiting_query" | "awaiting_search_query" | "done"
+	UniversityID                       string
+	University                         string
+	SearchType                         SearchType
+	Query                              string
+	GroupID                            string
+	SearchQuery                        string
+	HotlineType                        string
+	Step                               string
+	FlowNonce                          string
+	GroupChangeDestination             string
+	GroupChangePage                    int
+	SetSelectedGroupDefault            bool
+	PendingDeleteToken                 string
+	PendingDeleteExpiresAt             time.Time
+	PendingSubscriptionDeleteToken     string
+	PendingSubscriptionDeleteGroupID   string
+	PendingSubscriptionDeleteExpiresAt time.Time
+	PendingChatUnlinkToken             string
+	PendingChatUnlinkChatID            string
+	PendingChatUnlinkExpiresAt         time.Time
+	GroupActive                        bool
 }
 
 type SearchType string

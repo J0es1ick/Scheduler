@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/miniapp"
+	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	tele "gopkg.in/telebot.v3"
 )
@@ -57,13 +59,29 @@ func (h *Handler) HandleDeleteMe(c tele.Context) error {
 	if user.IsAdmin {
 		return c.Send("Сначала снимите с профиля роль администратора. Это защищает сервис от случайной потери последнего доступа.")
 	}
+	state, _, err := h.restoreProfile(ctx, c.Sender().ID)
+	if err != nil {
+		return c.Send("Не удалось подготовить удаление профиля. Попробуйте позже.")
+	}
+	if state == nil {
+		state = &dto.UserState{Step: "done"}
+	}
+	state.PendingDeleteToken = newFlowNonce()
+	state.PendingDeleteExpiresAt = time.Now().Add(10 * time.Minute)
+	h.StateManager.Set(c.Sender().ID, state)
 	return c.Send(
 		"Удалить профиль, подписки, ожидающие уведомления и обращения на горячую линию? Это действие нельзя отменить.",
-		keyboards.DeleteProfileConfirmation(),
+		keyboards.DeleteProfileConfirmation(state.PendingDeleteToken),
 	)
 }
 
 func (h *Handler) HandleConfirmDeleteProfile(c tele.Context) error {
+	token, ok := callbackArgument(c)
+	state := h.StateManager.Get(c.Sender().ID)
+	if !ok || !consumeDeleteIntent(state, token, time.Now()) {
+		return c.Respond(&tele.CallbackResponse{Text: "Подтверждение устарело. Запустите /delete_me снова.", ShowAlert: true})
+	}
+	h.StateManager.Set(c.Sender().ID, state)
 	_ = c.Respond()
 	ctx, cancel := reqCtx()
 	defer cancel()
@@ -80,8 +98,24 @@ func (h *Handler) HandleConfirmDeleteProfile(c tele.Context) error {
 }
 
 func (h *Handler) HandleCancelDeleteProfile(c tele.Context) error {
+	token, ok := callbackArgument(c)
+	state := h.StateManager.Get(c.Sender().ID)
+	if !ok || !consumeDeleteIntent(state, token, time.Now()) {
+		return c.Respond(&tele.CallbackResponse{Text: "Подтверждение уже недействительно"})
+	}
+	h.StateManager.Set(c.Sender().ID, state)
 	_ = c.Respond()
-	return c.Send("Удаление отменено. Главное меню восстановлено.", keyboards.MainMenu())
+	_ = c.Edit("Удаление отменено.")
+	return h.HandleMenu(c)
+}
+
+func consumeDeleteIntent(state *dto.UserState, token string, now time.Time) bool {
+	if state == nil || token == "" || state.PendingDeleteToken != token || !state.PendingDeleteExpiresAt.After(now) {
+		return false
+	}
+	state.PendingDeleteToken = ""
+	state.PendingDeleteExpiresAt = time.Time{}
+	return true
 }
 
 func (h *Handler) HandleSourcesInfo(c tele.Context) error {

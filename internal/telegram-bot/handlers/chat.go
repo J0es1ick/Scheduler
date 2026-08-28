@@ -8,8 +8,10 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
+	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	tele "gopkg.in/telebot.v3"
 )
@@ -20,6 +22,16 @@ type scheduleTarget struct {
 	UniversityID string
 	University   string
 	ViewFormat   domain.ScheduleViewFormat
+	Subgroup     int
+	Public       bool
+}
+
+func (target *scheduleTarget) navigationReference() string {
+	reference := keyboards.GroupToken(target.GroupID)
+	if target.Public {
+		return "p" + reference
+	}
+	return reference
 }
 
 func isGroupChat(c tele.Context) bool {
@@ -41,6 +53,10 @@ func (h *Handler) PrivateOnly(next tele.HandlerFunc) tele.HandlerFunc {
 }
 
 func (h *Handler) HandleChatSettings(c tele.Context) error {
+	return h.showChatSettings(c, c.Callback() != nil)
+}
+
+func (h *Handler) showChatSettings(c tele.Context, edit bool) error {
 	if !isGroupChat(c) {
 		return c.Send("Эта команда предназначена для групповых чатов.")
 	}
@@ -56,25 +72,23 @@ func (h *Handler) HandleChatSettings(c tele.Context) error {
 		slog.Debug("check chat administrator for settings panel failed", "chat_id", c.Chat().ID, "err", adminErr)
 	}
 	if profile == nil {
-		text := "Группа расписания для этого чата ещё не выбрана.\n\n" +
-			"Администратор чата может настроить её командой:\n" +
-			"/set_chat_group isuct 3/147\n" +
-			"или /set_chat_group ispu 1-40"
-		if c.Callback() != nil {
+		text := "Группа расписания для этого чата ещё не выбрана.\n\n" + h.chatGroupSetupHint(ctx)
+		if edit {
 			return editOrSend(c, text, keyboards.EmptyChatSettings(isAdmin))
 		}
 		return c.Send(text, keyboards.EmptyChatSettings(isAdmin))
 	}
 	text := fmt.Sprintf(
-		"Расписание группового чата\n\nВуз: %s\nГруппа: %s\n\n"+
+		"Расписание группового чата\n\nВуз: %s\nГруппа: %s\nФормат: %s\n\n"+
 			"Доступны /today, /tomorrow, /week, /twoweeks и /date.",
 		profile.UniversityName,
 		profile.GroupName,
+		chatViewLabel(profile.ViewFormat),
 	)
-	if c.Callback() != nil {
-		return editOrSend(c, text, keyboards.ChatSettings(profile.GroupName, isAdmin))
+	if edit {
+		return editOrSend(c, text, keyboards.ChatSettings(profile.GroupName, isAdmin, profile.ViewFormat))
 	}
-	return c.Send(text, keyboards.ChatSettings(profile.GroupName, isAdmin))
+	return c.Send(text, keyboards.ChatSettings(profile.GroupName, isAdmin, profile.ViewFormat))
 }
 
 func (h *Handler) HandleChatChangeGroup(c tele.Context) error {
@@ -86,11 +100,9 @@ func (h *Handler) HandleChatChangeGroup(c tele.Context) error {
 		return c.Respond(&tele.CallbackResponse{Text: "Изменять группу может только администратор чата", ShowAlert: true})
 	}
 	_ = c.Respond()
-	return c.Send(
-		"Отправьте команду с вузом и группой:\n" +
-			"/set_chat_group isuct 3/147\n" +
-			"или /set_chat_group ispu 1-40",
-	)
+	ctx, cancel := reqCtx()
+	defer cancel()
+	return editOrSend(c, h.chatGroupSetupHint(ctx), keyboards.BackButton("open_schedule_group"))
 }
 
 func (h *Handler) HandleRequestUnsetChatGroup(c tele.Context) error {
@@ -101,11 +113,19 @@ func (h *Handler) HandleRequestUnsetChatGroup(c tele.Context) error {
 	if err != nil || !isAdmin {
 		return c.Respond(&tele.CallbackResponse{Text: "Удалить привязку может только администратор чата", ShowAlert: true})
 	}
+	state := h.StateManager.Get(c.Sender().ID)
+	if state == nil {
+		state = &dto.UserState{Step: "done"}
+	}
+	state.PendingChatUnlinkToken = newFlowNonce()
+	state.PendingChatUnlinkChatID = strconv.FormatInt(c.Chat().ID, 10)
+	state.PendingChatUnlinkExpiresAt = time.Now().Add(10 * time.Minute)
+	h.StateManager.Set(c.Sender().ID, state)
 	_ = c.Respond()
 	return editOrSend(
 		c,
 		"Удалить привязку расписания к этому чату?",
-		keyboards.UnsetChatConfirmation(),
+		keyboards.UnsetChatConfirmation(state.PendingChatUnlinkToken),
 	)
 }
 
@@ -117,10 +137,17 @@ func (h *Handler) HandleConfirmUnsetChatGroup(c tele.Context) error {
 	if err != nil || !isAdmin {
 		return c.Respond(&tele.CallbackResponse{Text: "Недостаточно прав", ShowAlert: true})
 	}
+	token, ok := callbackArgument(c)
+	state := h.StateManager.Get(c.Sender().ID)
+	chatID := strconv.FormatInt(c.Chat().ID, 10)
+	if !ok || !consumeChatUnlinkIntent(state, token, chatID, time.Now()) {
+		return c.Respond(&tele.CallbackResponse{Text: "Подтверждение устарело", ShowAlert: true})
+	}
+	h.StateManager.Set(c.Sender().ID, state)
 	_ = c.Respond()
 	ctx, cancel := reqCtx()
 	defer cancel()
-	err = h.ChatProfileService.Delete(ctx, strconv.FormatInt(c.Chat().ID, 10))
+	err = h.ChatProfileService.Delete(ctx, chatID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return editOrSend(c, "Привязка уже удалена.", keyboards.EmptyChatSettings(true))
 	}
@@ -129,6 +156,36 @@ func (h *Handler) HandleConfirmUnsetChatGroup(c tele.Context) error {
 		return c.Send("Не удалось удалить настройку чата.")
 	}
 	return editOrSend(c, "Привязка расписания удалена.", keyboards.EmptyChatSettings(true))
+}
+
+func (h *Handler) HandleCancelUnsetChatGroup(c tele.Context) error {
+	if !isGroupChat(c) {
+		return respondStaleCallback(c)
+	}
+	token, ok := callbackArgument(c)
+	state := h.StateManager.Get(c.Sender().ID)
+	if !ok || !consumeChatUnlinkIntent(
+		state,
+		token,
+		strconv.FormatInt(c.Chat().ID, 10),
+		time.Now(),
+	) {
+		return c.Respond(&tele.CallbackResponse{Text: "Подтверждение уже недействительно"})
+	}
+	h.StateManager.Set(c.Sender().ID, state)
+	_ = c.Respond()
+	return h.HandleChatSettings(c)
+}
+
+func consumeChatUnlinkIntent(state *dto.UserState, token, chatID string, now time.Time) bool {
+	if state == nil || token == "" || state.PendingChatUnlinkToken != token ||
+		state.PendingChatUnlinkChatID != chatID || !state.PendingChatUnlinkExpiresAt.After(now) {
+		return false
+	}
+	state.PendingChatUnlinkToken = ""
+	state.PendingChatUnlinkChatID = ""
+	state.PendingChatUnlinkExpiresAt = time.Time{}
+	return true
 }
 
 func (h *Handler) HandleSetChatGroup(c tele.Context) error {
@@ -146,11 +203,9 @@ func (h *Handler) HandleSetChatGroup(c tele.Context) error {
 
 	universityID, groupName, ok := chatGroupArguments(c.Args())
 	if !ok {
-		return c.Send(
-			"Укажите вуз и группу:\n" +
-				"/set_chat_group isuct 3/147\n" +
-				"/set_chat_group ispu 1-40",
-		)
+		ctx, cancel := reqCtx()
+		defer cancel()
+		return c.Send(h.chatGroupSetupHint(ctx))
 	}
 	ctx, cancel := reqCtx()
 	defer cancel()
@@ -160,7 +215,7 @@ func (h *Handler) HandleSetChatGroup(c tele.Context) error {
 			return c.Send("Не удалось проверить вуз. Попробуйте позже.")
 		}
 		if university == nil || !university.IsActive {
-			return c.Send("Такого подключённого вуза нет. Доступные идентификаторы: isuct, ispu.")
+			return c.Send("Такого активного вуза нет.\n\n" + h.chatGroupSetupHint(ctx))
 		}
 	}
 	groups, err := h.GroupService.FindActiveByName(ctx, universityID, groupName)
@@ -178,14 +233,16 @@ func (h *Handler) HandleSetChatGroup(c tele.Context) error {
 	}
 	if len(groups) > 1 {
 		return c.Send(
-			"Группа с таким названием есть в нескольких вузах. " +
-				"Укажите вуз: /set_chat_group isuct " + groupName,
+			"Найдено несколько похожих групп. Укажите полное название и ID вуза.\n\n" + h.chatGroupSetupHint(ctx),
 		)
 	}
 	group := groups[0]
 	university, err := h.UniversityService.GetByID(ctx, group.UniversityID)
 	if err != nil || university == nil {
 		return c.Send("Не удалось загрузить сведения о вузе.")
+	}
+	if !university.IsActive {
+		return c.Send("Вуз этой группы временно недоступен. Выберите другой источник расписания.")
 	}
 	if err = h.ChatProfileService.Set(
 		ctx,
@@ -202,7 +259,40 @@ func (h *Handler) HandleSetChatGroup(c tele.Context) error {
 			"Теперь участники могут использовать /today, /tomorrow, /week и /date.",
 		university.Name,
 		group.Name,
-	), keyboards.ChatSettings(group.Name, true))
+	), keyboards.ChatSettings(group.Name, true, domain.ScheduleViewCompact))
+}
+
+func (h *Handler) HandleSetChatScheduleView(c tele.Context) error {
+	if !isGroupChat(c) {
+		return respondStaleCallback(c)
+	}
+	isAdmin, err := chatAdministrator(c)
+	if err != nil || !isAdmin {
+		return c.Respond(&tele.CallbackResponse{Text: "Изменять формат может только администратор чата", ShowAlert: true})
+	}
+	value, ok := callbackArgument(c)
+	if !ok {
+		return respondStaleCallback(c)
+	}
+	format := domain.ScheduleViewFormat(value)
+	if format != domain.ScheduleViewCompact && format != domain.ScheduleViewVisual {
+		return respondStaleCallback(c)
+	}
+	ctx, cancel := reqCtx()
+	defer cancel()
+	if err = h.ChatProfileService.SetScheduleView(ctx, strconv.FormatInt(c.Chat().ID, 10), format); err != nil {
+		slog.Error("set chat schedule view failed", "chat_id", c.Chat().ID, "err", err)
+		return c.Respond(&tele.CallbackResponse{Text: "Не удалось сохранить формат", ShowAlert: true})
+	}
+	_ = c.Respond(&tele.CallbackResponse{Text: "Формат сохранён"})
+	return h.HandleChatSettings(c)
+}
+
+func chatViewLabel(format domain.ScheduleViewFormat) string {
+	if format == domain.ScheduleViewVisual {
+		return "визуальная таблица"
+	}
+	return "компактный текст"
 }
 
 func (h *Handler) HandleUnsetChatGroup(c tele.Context) error {
@@ -259,7 +349,7 @@ func (h *Handler) scheduleTarget(
 			GroupName:    profile.GroupName,
 			UniversityID: profile.UniversityID,
 			University:   profile.UniversityName,
-			ViewFormat:   domain.ScheduleViewVisual,
+			ViewFormat:   profile.ViewFormat,
 		}
 	}
 
@@ -277,7 +367,12 @@ func (h *Handler) scheduleTarget(
 		_ = telegramContext.Send("Для начала работы используйте /start")
 		return nil
 	}
+	if !state.GroupActive {
+		_ = telegramContext.Send("Основная группа временно неактивна. Выбор сохранён; назначьте другую группу в «Мои группы» или дождитесь нового расписания.")
+		return nil
+	}
 	viewFormat := domain.ScheduleViewVisual
+	subgroup := 0
 	if subscriptions, loadErr := h.SubscriptionService.GetGroupSubscriptions(
 		requestContext,
 		fmt.Sprint(telegramContext.Sender().ID),
@@ -287,6 +382,7 @@ func (h *Handler) scheduleTarget(
 		for _, subscription := range subscriptions {
 			if subscription.GroupID == state.GroupID {
 				viewFormat = subscription.ScheduleViewFormat
+				subgroup = subscription.Subgroup
 				break
 			}
 		}
@@ -297,6 +393,7 @@ func (h *Handler) scheduleTarget(
 		UniversityID: state.UniversityID,
 		University:   state.University,
 		ViewFormat:   viewFormat,
+		Subgroup:     subgroup,
 	}
 }
 
@@ -324,4 +421,22 @@ func chatGroupArguments(args []string) (string, string, bool) {
 	universityID := strings.ToLower(strings.TrimSpace(args[0]))
 	groupName := strings.TrimSpace(strings.Join(args[1:], " "))
 	return universityID, groupName, universityID != "" && groupName != ""
+}
+
+func (h *Handler) chatGroupSetupHint(ctx context.Context) string {
+	text := "Администратор чата может выбрать расписание командой:\n/set_chat_group <ID вуза> <название группы>"
+	universities, err := h.UniversityService.GetAll(ctx)
+	if err != nil || len(universities) == 0 {
+		return text
+	}
+	ids := make([]string, 0, len(universities))
+	for _, university := range universities {
+		if university.IsActive {
+			ids = append(ids, university.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return text
+	}
+	return text + "\n\nДоступные ID вузов: " + strings.Join(ids, ", ")
 }

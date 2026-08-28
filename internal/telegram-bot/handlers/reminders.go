@@ -114,11 +114,51 @@ func (h *Handler) editReminderSettings(c tele.Context, page int) error {
 }
 
 func editOrSend(c tele.Context, text string, markup *tele.ReplyMarkup) error {
-	if err := c.Edit(text, markup); err == nil ||
-		strings.Contains(err.Error(), "message is not modified") {
+	return editOrReplace(c, text, markup)
+}
+
+func editOrReplace(c tele.Context, text string, markup *tele.ReplyMarkup, options ...interface{}) error {
+	if c.Callback() == nil {
+		return c.Send(text, append([]interface{}{markup}, options...)...)
+	}
+	if messageSupportsCaption(c.Message()) {
+		if err := c.Delete(); err != nil {
+			return err
+		}
+		return c.Send(text, append([]interface{}{markup}, options...)...)
+	}
+	err := c.Edit(text, append([]interface{}{markup}, options...)...)
+	if err == nil || strings.Contains(err.Error(), "message is not modified") {
 		return nil
 	}
+	if deleteErr := c.Delete(); deleteErr != nil {
+		return err
+	}
+	return c.Send(text, append([]interface{}{markup}, options...)...)
+}
+
+func editScheduleOverlay(c tele.Context, text string, markup *tele.ReplyMarkup) error {
+	if c.Callback() == nil {
+		return c.Send(text, markup)
+	}
+	var err error
+	if messageSupportsCaption(c.Message()) {
+		err = c.EditCaption(text, markup)
+	} else {
+		err = c.Edit(text, markup)
+	}
+	if err == nil || strings.Contains(err.Error(), "message is not modified") {
+		return nil
+	}
+	if deleteErr := c.Delete(); deleteErr != nil {
+		return err
+	}
 	return c.Send(text, markup)
+}
+
+func messageSupportsCaption(message *tele.Message) bool {
+	return message != nil && (message.Audio != nil || message.Document != nil ||
+		message.Photo != nil || message.Video != nil || message.Animation != nil)
 }
 
 func parseReminderSetting(

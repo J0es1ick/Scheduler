@@ -16,6 +16,13 @@ func TestFormatSchedulePeriodShowsSelectedWeekDates(t *testing.T) {
 	}
 }
 
+func TestFormatSchedulePeriodShowsSingleDate(t *testing.T) {
+	from := time.Date(2026, time.August, 10, 15, 30, 0, 0, time.UTC)
+	if got, want := formatSchedulePeriod(from, 1), "Дата: 10.08.2026"; got != want {
+		t.Fatalf("formatSchedulePeriod() = %q, want %q", got, want)
+	}
+}
+
 func TestFormatDayScheduleShowsGroupOnlyWhenRequested(t *testing.T) {
 	day := dto.DaySchedule{
 		Date: time.Date(2026, time.August, 10, 0, 0, 0, 0, time.UTC),
@@ -61,7 +68,7 @@ func TestFormatDayScheduleUsesSafeHTMLWithoutDecorativeMarkers(t *testing.T) {
 
 func TestFormatSchedulePeriodLabelsTwoWeekRange(t *testing.T) {
 	from := time.Date(2026, time.August, 10, 0, 0, 0, 0, time.UTC)
-	if got, want := formatSchedulePeriod(from, 14), "Период: 10.08.2026–23.08.2026"; got != want {
+	if got, want := formatSchedulePeriod(from, 14), "Две недели: 10.08.2026–23.08.2026"; got != want {
 		t.Fatalf("formatSchedulePeriod() = %q, want %q", got, want)
 	}
 }

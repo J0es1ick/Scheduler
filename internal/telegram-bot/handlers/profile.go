@@ -8,8 +8,6 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 )
 
-// restoreProfile recreates only the durable, completed part of a Telegram
-// session. In-progress dialogs remain intentionally ephemeral.
 func (h *Handler) restoreProfile(
 	ctx context.Context,
 	telegramID int64,
@@ -27,12 +25,8 @@ func (h *Handler) restoreProfile(
 	if err != nil {
 		return nil, user, err
 	}
-	if group == nil || !group.IsActive {
-		if err = h.UserService.SetDefaultGroup(ctx, userID, ""); err != nil {
-			return nil, user, err
-		}
+	if group == nil {
 		h.StateManager.Delete(telegramID)
-		user.DefaultGroupID = ""
 		return nil, user, nil
 	}
 
@@ -40,7 +34,7 @@ func (h *Handler) restoreProfile(
 	if err != nil {
 		return nil, user, err
 	}
-	if university == nil || !university.IsActive {
+	if university == nil {
 		return nil, user, nil
 	}
 
@@ -50,6 +44,7 @@ func (h *Handler) restoreProfile(
 		SearchType:   dto.SearchTypeGroup,
 		Query:        group.Name,
 		GroupID:      group.ID,
+		GroupActive:  group.IsActive && university.IsActive,
 		Step:         "done",
 	}
 	h.StateManager.Set(telegramID, state)
@@ -57,9 +52,6 @@ func (h *Handler) restoreProfile(
 }
 
 func (h *Handler) readyState(ctx context.Context, telegramID int64) (*dto.UserState, error) {
-	if current := h.StateManager.Get(telegramID); current != nil && current.Step == "done" {
-		return current, nil
-	}
 	restored, _, err := h.restoreProfile(ctx, telegramID)
 	return restored, err
 }

@@ -15,19 +15,20 @@ func NewGroupService(groupRepo *repository.GroupRepository) *GroupService {
 	return &GroupService{groupRepo: groupRepo}
 }
 
-// GetGroupsByUniversity возвращает все группы университета.
 func (s *GroupService) GetGroupsByUniversity(ctx context.Context, universityID string) ([]domain.Group, error) {
 	return s.groupRepo.GetGroupsByUniversityID(ctx, universityID)
 }
 
-// GetGroupByID возвращает группу по ID.
 func (s *GroupService) GetGroupByID(ctx context.Context, groupID string) (*domain.Group, error) {
 	return s.groupRepo.GetGroupByID(ctx, groupID)
 }
 
-// GetGroupByName ищет группу по имени, не создаёт если не найдена.
 func (s *GroupService) GetGroupByName(ctx context.Context, universityID, groupName string) (*domain.Group, error) {
 	return s.groupRepo.GetGroupByName(ctx, universityID, groupName)
+}
+
+func (s *GroupService) GetActiveGroupByToken(ctx context.Context, token string) (*domain.Group, error) {
+	return s.groupRepo.GetActiveGroupByToken(ctx, token)
 }
 
 func (s *GroupService) FindActiveByName(

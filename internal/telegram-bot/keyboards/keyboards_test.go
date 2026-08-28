@@ -109,9 +109,37 @@ func TestScheduleDownloadCallbackUsesBoundedGroupToken(t *testing.T) {
 	}
 }
 
+func TestScheduleWeekNavigationUsesSelectedPeriodStep(t *testing.T) {
+	from := time.Date(2026, time.September, 7, 0, 0, 0, 0, time.Local)
+	tests := []struct {
+		name          string
+		days          int
+		previousDate  string
+		nextDate      string
+		previousLabel string
+		nextLabel     string
+	}{
+		{name: "week", days: 7, previousDate: "2026-08-31", nextDate: "2026-09-14", previousLabel: "← Неделя", nextLabel: "Неделя →"},
+		{name: "two weeks", days: 14, previousDate: "2026-08-24", nextDate: "2026-09-21", previousLabel: "← 2 недели", nextLabel: "2 недели →"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			menu := ScheduleWeekNavigation(from, "3/147", false, "group-id", test.days)
+			row := menu.InlineKeyboard[0]
+			suffix := "|" + fmt.Sprint(test.days) + "|" + GroupToken("group-id")
+			if row[0].Data != test.previousDate+suffix || row[2].Data != test.nextDate+suffix {
+				t.Fatalf("period callbacks = %q and %q", row[0].Data, row[2].Data)
+			}
+			if row[0].Text != test.previousLabel || row[2].Text != test.nextLabel {
+				t.Fatalf("period labels = %q and %q", row[0].Text, row[2].Text)
+			}
+		})
+	}
+}
+
 func TestScheduleExportMenuListsFilesAndReturnsToSchedule(t *testing.T) {
 	menu := ScheduleExportFormats("group-token", "2026-09-07", 7)
-	want := []string{"download_schedule", "download_schedule", "download_schedule", "schedule_week"}
+	want := []string{"download_schedule", "download_schedule", "download_schedule", "download_schedule", "back_to_schedule"}
 	if len(menu.InlineKeyboard) != len(want) {
 		t.Fatalf("export rows = %d, want %d", len(menu.InlineKeyboard), len(want))
 	}
@@ -120,8 +148,11 @@ func TestScheduleExportMenuListsFilesAndReturnsToSchedule(t *testing.T) {
 			t.Fatalf("export row %d = %#v, want %s", index, menu.InlineKeyboard[index], unique)
 		}
 	}
-	if strings.Contains(fmt.Sprint(menu.InlineKeyboard), "ics") {
-		t.Fatal("calendar export must not be exposed")
+	if menu.InlineKeyboard[3][0].Data != "ics|group-token|2026-09-07|7" {
+		t.Fatalf("calendar export callback = %q", menu.InlineKeyboard[3][0].Data)
+	}
+	if menu.InlineKeyboard[4][0].Data != "group-token|2026-09-07|7" {
+		t.Fatalf("back callback data = %q", menu.InlineKeyboard[4][0].Data)
 	}
 }
 
@@ -131,8 +162,8 @@ func TestNestedMenusExposeBackNavigation(t *testing.T) {
 		menu   *tele.ReplyMarkup
 		unique string
 	}{
-		{name: "search type", menu: SearchTypeSelector(), unique: "close_inline"},
-		{name: "hotline type", menu: HotlineTypeSelector(), unique: "back_more"},
+		{name: "search type", menu: SearchTypeSelector("search-flow"), unique: "cancel_search_type"},
+		{name: "hotline type", menu: HotlineTypeSelector("hotline-flow"), unique: "cancel_hotline_type"},
 		{name: "group input", menu: BackButton("cancel_group_change", "main"), unique: "cancel_group_change"},
 	}
 	for _, test := range tests {
@@ -147,40 +178,59 @@ func TestNestedMenusExposeBackNavigation(t *testing.T) {
 
 func TestWeekDaySelectorReturnsToDisplayedWeek(t *testing.T) {
 	from := time.Date(2026, time.September, 9, 0, 0, 0, 0, time.Local)
-	menu := WeekDaySelector(from)
+	menu := WeekDaySelector(from, 14, "group-token")
 	lastRow := menu.InlineKeyboard[len(menu.InlineKeyboard)-1]
 	if len(lastRow) != 1 || lastRow[0].Text != "Назад" {
 		t.Fatalf("last weekday row must contain the back button: %#v", lastRow)
 	}
-	if lastRow[0].Unique != "schedule_week" || lastRow[0].Data != "2026-09-09" {
+	if lastRow[0].Unique != "schedule_week" || lastRow[0].Data != "2026-09-09|14|group-token" {
 		t.Fatalf("back callback = %q %q", lastRow[0].Unique, lastRow[0].Data)
 	}
+	buttons := 0
 	for _, row := range menu.InlineKeyboard[:len(menu.InlineKeyboard)-1] {
 		for _, button := range row {
-			if !strings.HasSuffix(button.Data, "|2026-09-09") {
-				t.Fatalf("weekday callback %q does not preserve displayed week", button.Data)
+			buttons++
+			if button.Unique != "schedule_period_date" {
+				t.Fatalf("weekday callback %q does not select an exact date", button.Unique)
 			}
 		}
+	}
+	if buttons != 14 {
+		t.Fatalf("two-week selector has %d dates, want 14", buttons)
 	}
 }
 
 func TestNestedCalendarReturnsToItsScheduleContext(t *testing.T) {
 	month := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.Local)
 	backDate := time.Date(2026, time.September, 9, 0, 0, 0, 0, time.Local)
-	menu := ScheduleCalendarWithBack(month, "schedule_week", backDate)
+	menu := ScheduleCalendarWithBack(month, "schedule_week", backDate, "14", "group-token")
 
 	lastRow := menu.InlineKeyboard[len(menu.InlineKeyboard)-1]
 	if len(lastRow) != 1 || lastRow[0].Text != "Назад" {
 		t.Fatalf("nested calendar must end with back: %#v", lastRow)
 	}
-	if lastRow[0].Unique != "schedule_week" || lastRow[0].Data != "2026-09-09" {
+	if lastRow[0].Unique != "schedule_week" || lastRow[0].Data != "2026-09-09|14|group-token" {
 		t.Fatalf("calendar back callback = %q %q", lastRow[0].Unique, lastRow[0].Data)
 	}
 
 	monthNavigation := menu.InlineKeyboard[len(menu.InlineKeyboard)-2]
-	if monthNavigation[0].Data != "2026-08|schedule_week|2026-09-09" ||
-		monthNavigation[2].Data != "2026-10|schedule_week|2026-09-09" {
+	if monthNavigation[0].Data != "2026-08|w|2026-09-09|14|group-token" ||
+		monthNavigation[2].Data != "2026-10|w|2026-09-09|14|group-token" {
 		t.Fatalf("month navigation lost return context: %#v", monthNavigation)
+	}
+	for _, row := range menu.InlineKeyboard[1 : len(menu.InlineKeyboard)-2] {
+		for _, button := range row {
+			if button.Text == "·" {
+				continue
+			}
+			if button.Unique != "schedule_period_date" || !strings.HasSuffix(button.Data, "|2026-09-09|14|group-token") {
+				t.Fatalf("calendar day lost two-week context: %#v", button)
+			}
+		}
+	}
+	if monthNavigation[1].Unique != "schedule_period_date" ||
+		!strings.HasSuffix(monthNavigation[1].Data, "|2026-09-09|14|group-token") {
+		t.Fatalf("today button lost two-week context: %#v", monthNavigation[1])
 	}
 }
 
@@ -189,5 +239,60 @@ func TestStandaloneCalendarCanBeClosed(t *testing.T) {
 	lastRow := menu.InlineKeyboard[len(menu.InlineKeyboard)-1]
 	if len(lastRow) != 1 || lastRow[0].Text != "Закрыть" || lastRow[0].Unique != "close_inline" {
 		t.Fatalf("standalone calendar must keep close action: %#v", lastRow)
+	}
+}
+
+func TestAllSubscriptionCallbacksFitTelegramLimit(t *testing.T) {
+	item := domain.GroupSubscription{
+		GroupID:            strings.Repeat("connector-group-identifier-", 6),
+		GroupName:          strings.Repeat("Очень длинная группа ", 4),
+		UniversityName:     "Университет",
+		IsActive:           true,
+		ScheduleViewFormat: domain.ScheduleViewVisual,
+	}
+	menus := []*tele.ReplyMarkup{
+		SubscriptionSettings([]domain.GroupSubscription{item}, true, true, 15, 0),
+		SubscriptionActions(item, 0),
+		ScheduleViewSettings(item, 0),
+		SubgroupSettings(item, 0),
+		DeleteSubscriptionConfirmation(GroupToken(item.GroupID), 0, "intent-token"),
+		ScheduleExportFormats(GroupToken(item.GroupID), "2026-09-07", 14),
+		ScheduleExportResultNavigation(GroupToken(item.GroupID), "2026-09-07", 14),
+		ScheduleDayNavigation(time.Now(), item.GroupName, false, item.GroupID),
+		ScheduleWeekNavigation(time.Now(), item.GroupName, false, item.GroupID, 14),
+		ScheduleCalendarWithBack(time.Now(), "schedule_week", time.Now(), "14", GroupToken(item.GroupID)),
+		ScheduleCalendarWithBack(time.Now(), "schedule_date", time.Now(), "1", GroupToken(item.GroupID)),
+		WeekDaySelector(time.Now(), 14, GroupToken(item.GroupID)),
+		SchedulePeriodDateBack(time.Now(), 14, GroupToken(item.GroupID)),
+		ScheduleWeekNavigation(time.Now(), item.GroupName, false, item.GroupID, 14, "p"+GroupToken(item.GroupID)),
+		ScheduleCalendarWithBack(time.Now(), "schedule_week", time.Now(), "14", "p"+GroupToken(item.GroupID)),
+		WeekDaySelector(time.Now(), 14, "p"+GroupToken(item.GroupID)),
+		ScheduleExportFormats("p"+GroupToken(item.GroupID), "2026-09-07", 14),
+	}
+	for _, menu := range menus {
+		for _, row := range menu.InlineKeyboard {
+			for _, button := range row {
+				payload := "\f" + button.Unique
+				if button.Data != "" {
+					payload += "|" + button.Data
+				}
+				if len([]byte(payload)) > 64 {
+					t.Fatalf("callback %q is %d bytes", payload, len([]byte(payload)))
+				}
+			}
+		}
+	}
+}
+
+func TestUniversitySelectorCallbackFitsTelegramLimit(t *testing.T) {
+	universityID := strings.Repeat("u", 63)
+	menu := UniversitySelector([]domain.University{{ID: universityID, Name: "Университет"}}, strings.Repeat("n", 16))
+	button := menu.InlineKeyboard[0][0]
+	payload := "\f" + button.Unique + "|" + button.Data
+	if len([]byte(payload)) > 64 {
+		t.Fatalf("university callback is %d bytes: %q", len([]byte(payload)), payload)
+	}
+	if strings.Contains(button.Data, universityID) || !strings.HasPrefix(button.Data, UniversityToken(universityID)+"|") {
+		t.Fatalf("university callback does not use a stable token: %q", button.Data)
 	}
 }

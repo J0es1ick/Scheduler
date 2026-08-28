@@ -3,20 +3,22 @@ package handlers
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/miniapp"
+	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	tele "gopkg.in/telebot.v3"
 )
 
 func (h *Handler) HandleStart(c tele.Context) error {
 	if isGroupChat(c) {
+		ctx, cancel := reqCtx()
+		defer cancel()
 		return c.Send(
 			"Я могу показывать расписание прямо в этом чате.\n\n" +
-				"Администратору нужно один раз выбрать учебную группу:\n" +
-				"/set_chat_group isuct 3/147\n" +
-				"или /set_chat_group ispu 1-40\n\n" +
+				h.chatGroupSetupHint(ctx) + "\n\n" +
 				"После настройки участникам будут доступны /today, /tomorrow, " +
 				"/week, /twoweeks и /date.",
 		)
@@ -51,11 +53,29 @@ func (h *Handler) HandleStart(c tele.Context) error {
 		return c.Send("Не удалось загрузить сохранённую группу. Попробуйте ещё раз позже.")
 	}
 	if state != nil {
+		payload := ""
+		if len(c.Args()) > 0 {
+			payload = strings.ToLower(strings.TrimSpace(c.Args()[0]))
+		}
+		switch payload {
+		case "date":
+			now := time.Now().In(h.universityLocation(ctx, state.UniversityID))
+			return c.Send(calendarTitle(now), keyboards.ScheduleCalendar(now))
+		case "menu":
+			return h.HandleMenu(c)
+		case "setup":
+			return h.HandleChangeUniversity(c)
+		}
+		availability := ""
+		if !state.GroupActive {
+			availability = "\nСтатус: группа временно не публикуется. Выбор сохранён; можно переключиться в «Мои группы»."
+		}
 		return c.Send(fmt.Sprintf(
-			"%s\n\nОсновная группа: %s · %s\nУправление подписками: кнопка «Мои группы»",
+			"%s\n\nОсновная группа: %s · %s%s\nУправление подписками: кнопка «Мои группы»",
 			greeting,
 			state.University,
 			state.Query,
+			availability,
 		), keyboards.MainMenu())
 	}
 
@@ -67,10 +87,12 @@ func (h *Handler) HandleStart(c tele.Context) error {
 	if len(universities) == 0 {
 		return c.Send("В системе пока нет вузов с актуальным расписанием.")
 	}
+	setupState := &dto.UserState{Step: "choosing_university", FlowNonce: newFlowNonce()}
+	h.StateManager.Set(c.Sender().ID, setupState)
 	if err = c.Send(greeting + "\n\nВыберите вуз, чтобы настроить основную группу:"); err != nil {
 		return err
 	}
-	return c.Send("Доступные вузы:", keyboards.UniversitySelector(universities))
+	return c.Send("Доступные вузы:", keyboards.UniversitySelector(universities, setupState.FlowNonce))
 }
 
 func timeGreeting() string {

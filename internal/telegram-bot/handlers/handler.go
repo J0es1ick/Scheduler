@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
@@ -9,34 +10,31 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/state"
 )
 
-// handlerTimeout — таймаут на обработку одного апдейта (включая все DB-запросы).
-// telebot.v3.Context не оборачивает context.Context (в отличие от net/http.Request),
-// поэтому контекст с таймаутом создаётся вручную на входе в каждый хэндлер через reqCtx.
 const handlerTimeout = 15 * time.Second
 
-// reqCtx возвращает context.Context с таймаутом для использования в DB/HTTP-вызовах
-// внутри хэндлера. Заменяет context.Background() без таймаута — если апдейт завис
-// (например, БД недоступна), обработка прервётся через handlerTimeout вместо
-// блокировки навсегда.
-//
-// Важно: возвращаемый cancel должен быть вызван через defer в каждом хэндлере,
-// который его получает, иначе будет утечка таймеров.
 func reqCtx() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), handlerTimeout)
 }
 
 type Handler struct {
-	ScheduleService       *service.ScheduleService
+	ScheduleService       scheduleService
 	StateManager          *state.Manager
 	UniversityService     universityService
 	UserService           userService
 	GroupService          groupService
-	SubscriptionService   *service.SubscriptionService
+	SubscriptionService   subscriptionService
 	SupportRequestService *service.SupportRequestService
 	MetricsService        *service.MetricsService
 	ChatProfileService    *service.ChatProfileService
 	AdminPublicURL        string
 	ProjectURL            string
+	scheduleMessagesMu    sync.Mutex
+	scheduleMessages      map[string]trackedScheduleMessages
+}
+
+type trackedScheduleMessages struct {
+	IDs       []int
+	CreatedAt time.Time
 }
 
 type universityService interface {
@@ -62,6 +60,23 @@ type groupService interface {
 	GetGroupByID(context.Context, string) (*domain.Group, error)
 	GetGroupByName(context.Context, string, string) (*domain.Group, error)
 	FindActiveByName(context.Context, string, string) ([]domain.Group, error)
+	GetActiveGroupByToken(context.Context, string) (*domain.Group, error)
+}
+
+type scheduleService interface {
+	GetScheduleForGroupRange(context.Context, string, time.Time, time.Time) (map[time.Time][]domain.Lesson, error)
+	GetScheduleForTeacherRange(context.Context, string, string, time.Time, time.Time) (map[time.Time][]domain.Lesson, error)
+	GetScheduleForRoomRange(context.Context, string, string, time.Time, time.Time) (map[time.Time][]domain.Lesson, error)
+}
+
+type subscriptionService interface {
+	GetGroupSubscriptions(context.Context, string) ([]domain.GroupSubscription, error)
+	Subscribe(context.Context, string, string, string) error
+	SubscribeAndSetDefault(context.Context, string, string) error
+	SetDefaultGroup(context.Context, string, string) error
+	UnsubscribeAndSelectDefault(context.Context, string, string) (string, error)
+	SetGroupScheduleView(context.Context, string, string, domain.ScheduleViewFormat) error
+	SetGroupSubgroup(context.Context, string, string, int) error
 }
 
 func NewHandler(
