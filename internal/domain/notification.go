@@ -12,6 +12,8 @@ type NotificationDelivery struct {
 	Source         string     `db:"source"`
 	Summary        string     `db:"summary"`
 	Attempts       int        `db:"attempts"`
+	ClaimToken     string     `db:"claim_token"`
+	LeaseExpiresAt *time.Time `db:"lease_expires_at"`
 	NextAttemptAt  time.Time  `db:"next_attempt_at"`
 	CreatedAt      time.Time  `db:"created_at"`
 	DeliveredAt    *time.Time `db:"delivered_at"`

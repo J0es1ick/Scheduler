@@ -2,14 +2,20 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )
 
 const maxNotificationAttempts = 5
+const notificationClaimLease = 2 * time.Minute
+
+var ErrNotificationClaimLost = errors.New("notification delivery claim was lost")
 
 type NotificationRepository struct {
 	db *sqlx.DB
@@ -53,6 +59,7 @@ func (r *NotificationRepository) ClaimPending(ctx context.Context, limit int) ([
 	if limit <= 0 {
 		return []domain.NotificationDelivery{}, nil
 	}
+	claimToken := uuid.NewString()
 	var items []domain.NotificationDelivery
 	err := r.db.SelectContext(ctx, &items, `
 		WITH candidates AS (
@@ -63,6 +70,8 @@ func (r *NotificationRepository) ClaimPending(ctx context.Context, limit int) ([
 			JOIN universities un ON un.id=g.university_id
 			JOIN users usr ON usr.id=d.user_id
 			WHERE d.status = 'pending' AND d.next_attempt_at <= NOW()
+			  AND (d.claim_token='' OR d.lease_expires_at IS NULL
+				OR d.lease_expires_at<=clock_timestamp())
 			  AND NOT (usr.quiet_hours_enabled AND CASE
 				WHEN usr.quiet_hours_start < usr.quiet_hours_end THEN
 					(NOW() AT TIME ZONE un.timezone)::time >= usr.quiet_hours_start
@@ -76,22 +85,25 @@ func (r *NotificationRepository) ClaimPending(ctx context.Context, limit int) ([
 		), claimed AS (
 			UPDATE notification_deliveries d
 			SET attempts = d.attempts + 1,
-				next_attempt_at = NOW() + INTERVAL '2 minutes',
+				claim_token=$2,
+				lease_expires_at=clock_timestamp()+($3 * INTERVAL '1 second'),
 				updated_at = NOW()
 			FROM candidates c
 			WHERE d.id = c.id
 			RETURNING d.id, d.event_id, d.user_id, d.attempts,
-				d.next_attempt_at, d.created_at, d.delivered_at
+				d.claim_token, d.lease_expires_at, d.next_attempt_at,
+				d.created_at, d.delivered_at
 		)
 		SELECT c.id, c.event_id, c.user_id, e.group_id,
 			g.name AS group_name, u.name AS university_name,
-			e.source, e.summary, c.attempts, c.next_attempt_at,
+			e.source, e.summary, c.attempts, c.claim_token,
+			c.lease_expires_at, c.next_attempt_at,
 			c.created_at, c.delivered_at
 		FROM claimed c
 		JOIN schedule_change_events e ON e.id = c.event_id
 		JOIN groups g ON g.id = e.group_id
 		JOIN universities u ON u.id = g.university_id
-		ORDER BY c.created_at, c.id`, limit)
+		ORDER BY c.created_at, c.id`, limit, claimToken, int(notificationClaimLease/time.Second))
 	if err != nil {
 		return nil, fmt.Errorf("claim pending notifications: %w", err)
 	}
@@ -107,7 +119,7 @@ func (r *NotificationRepository) ClaimBotOutbox(ctx context.Context, limit int) 
 	}
 	if _, err := r.db.ExecContext(ctx, `
 		UPDATE bot_outbox o
-		SET status='cancelled', updated_at=NOW()
+		SET status='cancelled', updated_at=NOW(), claim_token='', lease_expires_at=NULL
 		FROM users u
 		WHERE o.user_id=u.id AND o.kind IN ('support_request', 'admin_alert')
 			AND o.status='pending' AND NOT u.is_admin`); err != nil {
@@ -115,7 +127,7 @@ func (r *NotificationRepository) ClaimBotOutbox(ctx context.Context, limit int) 
 	}
 	if _, err := r.db.ExecContext(ctx, `
 		UPDATE bot_outbox o
-		SET status='cancelled', updated_at=NOW()
+		SET status='cancelled', updated_at=NOW(), claim_token='', lease_expires_at=NULL
 		FROM users usr, groups g, universities un
 		WHERE o.user_id=usr.id AND o.kind='lesson_reminder' AND o.status='pending'
 		  AND g.id=o.group_id AND un.id=g.university_id
@@ -128,6 +140,7 @@ func (r *NotificationRepository) ClaimBotOutbox(ctx context.Context, limit int) 
 		  END`); err != nil {
 		return nil, fmt.Errorf("cancel reminders during quiet hours: %w", err)
 	}
+	claimToken := uuid.NewString()
 	var items []domain.BotOutboxDelivery
 	err := r.db.SelectContext(ctx, &items, `
 		WITH candidates AS (
@@ -137,6 +150,8 @@ func (r *NotificationRepository) ClaimBotOutbox(ctx context.Context, limit int) 
 			LEFT JOIN groups g ON g.id=o.group_id
 			LEFT JOIN universities un ON un.id=g.university_id
 			WHERE o.status='pending' AND o.next_attempt_at <= NOW()
+			  AND (o.claim_token='' OR o.lease_expires_at IS NULL
+				OR o.lease_expires_at<=clock_timestamp())
 			  AND (o.kind<>'lesson_reminder' OR NOT (usr.quiet_hours_enabled AND CASE
 				WHEN usr.quiet_hours_start < usr.quiet_hours_end THEN
 					(NOW() AT TIME ZONE COALESCE(un.timezone, 'Europe/Moscow'))::time >= usr.quiet_hours_start
@@ -150,15 +165,18 @@ func (r *NotificationRepository) ClaimBotOutbox(ctx context.Context, limit int) 
 		), claimed AS (
 			UPDATE bot_outbox o
 			SET attempts=o.attempts+1,
-				next_attempt_at=NOW()+INTERVAL '2 minutes',
+				claim_token=$2,
+				lease_expires_at=clock_timestamp()+($3 * INTERVAL '1 second'),
 				updated_at=NOW()
 			FROM candidates c
 			WHERE o.id=c.id
-			RETURNING o.id, o.user_id, o.request_id, o.kind, o.body, o.attempts
+			RETURNING o.id, o.user_id, o.request_id, o.kind, o.body, o.attempts,
+				o.claim_token, o.lease_expires_at
 		)
-		SELECT id, user_id, COALESCE(request_id, '') AS request_id, kind, body, attempts
+		SELECT id, user_id, COALESCE(request_id, '') AS request_id, kind, body, attempts,
+			claim_token, lease_expires_at
 		FROM claimed
-		ORDER BY id`, limit)
+		ORDER BY id`, limit, claimToken, int(notificationClaimLease/time.Second))
 	if err != nil {
 		return nil, fmt.Errorf("claim bot outbox: %w", err)
 	}
@@ -168,24 +186,69 @@ func (r *NotificationRepository) ClaimBotOutbox(ctx context.Context, limit int) 
 	return items, nil
 }
 
-func (r *NotificationRepository) MarkBotOutboxDelivered(ctx context.Context, id string) error {
-	if _, err := r.db.ExecContext(ctx, `
-		UPDATE bot_outbox
-		SET status='delivered', delivered_at=NOW(), last_error='', updated_at=NOW()
-		WHERE id=$1`, id); err != nil {
-		return fmt.Errorf("mark bot outbox %s delivered: %w", id, err)
-	}
-	return nil
+func (r *NotificationRepository) RenewDeliveryClaims(
+	ctx context.Context,
+	claimToken string,
+	ids []string,
+) error {
+	return r.renewClaims(ctx, "notification_deliveries", claimToken, ids)
 }
 
-func (r *NotificationRepository) IsBotOutboxActive(ctx context.Context, id string) (bool, error) {
+func (r *NotificationRepository) RenewBotOutboxClaims(
+	ctx context.Context,
+	claimToken string,
+	ids []string,
+) error {
+	return r.renewClaims(ctx, "bot_outbox", claimToken, ids)
+}
+
+func (r *NotificationRepository) renewClaims(
+	ctx context.Context,
+	table string,
+	claimToken string,
+	ids []string,
+) error {
+	if claimToken == "" || len(ids) == 0 {
+		return fmt.Errorf("%w: empty claim", ErrNotificationClaimLost)
+	}
+	query, args, err := sqlx.In(`UPDATE `+table+`
+		SET lease_expires_at=clock_timestamp()+(? * INTERVAL '1 second'),
+			updated_at=NOW()
+		WHERE status='pending' AND claim_token=?
+		  AND lease_expires_at>clock_timestamp() AND id IN (?)`,
+		int(notificationClaimLease/time.Second), claimToken, ids)
+	if err != nil {
+		return fmt.Errorf("renew %s claim: %w", table, err)
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return fmt.Errorf("renew %s claim: %w", table, err)
+	}
+	return requireNotificationClaim(result, int64(len(ids)), table)
+}
+
+func (r *NotificationRepository) MarkBotOutboxDelivered(ctx context.Context, id, claimToken string) error {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE bot_outbox
+		SET status='delivered', delivered_at=NOW(), last_error='', updated_at=NOW(),
+			claim_token='', lease_expires_at=NULL
+		WHERE id=$1 AND claim_token=$2 AND status='pending'
+		  AND lease_expires_at>clock_timestamp()`, id, claimToken)
+	if err != nil {
+		return fmt.Errorf("mark bot outbox %s delivered: %w", id, err)
+	}
+	return requireNotificationClaim(result, 1, id)
+}
+
+func (r *NotificationRepository) IsBotOutboxActive(ctx context.Context, id, claimToken string) (bool, error) {
 	var active bool
 	err := r.db.GetContext(ctx, &active, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM bot_outbox o
 			JOIN users u ON u.id=o.user_id
-			WHERE o.id=$1 AND o.status='pending'
+			WHERE o.id=$1 AND o.claim_token=$2 AND o.status='pending'
+				AND o.lease_expires_at>clock_timestamp()
 				AND CASE
 					WHEN o.kind IN ('support_request', 'admin_alert') THEN u.is_admin
 					WHEN o.kind='lesson_reminder' THEN
@@ -193,25 +256,28 @@ func (r *NotificationRepository) IsBotOutboxActive(ctx context.Context, id strin
 						AND u.default_group_id=o.group_id
 					ELSE TRUE
 				END
-		)`, id)
+		)`, id, claimToken)
 	if err != nil {
 		return false, fmt.Errorf("check bot outbox %s eligibility: %w", id, err)
 	}
 	return active, nil
 }
 
-func (r *NotificationRepository) MarkBotOutboxCancelled(ctx context.Context, id string) error {
-	if _, err := r.db.ExecContext(ctx, `
-		UPDATE bot_outbox SET status='cancelled', updated_at=NOW()
-		WHERE id=$1 AND status='pending'`, id); err != nil {
+func (r *NotificationRepository) MarkBotOutboxCancelled(ctx context.Context, id, claimToken string) error {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE bot_outbox SET status='cancelled', updated_at=NOW(),
+			claim_token='', lease_expires_at=NULL
+		WHERE id=$1 AND claim_token=$2 AND status='pending'
+		  AND lease_expires_at>clock_timestamp()`, id, claimToken)
+	if err != nil {
 		return fmt.Errorf("cancel bot outbox %s: %w", id, err)
 	}
-	return nil
+	return requireNotificationClaim(result, 1, id)
 }
 
 func (r *NotificationRepository) MarkBotOutboxFailed(
 	ctx context.Context,
-	id string,
+	id, claimToken string,
 	attempts int,
 	retryAfter time.Duration,
 	deliveryErr error,
@@ -227,45 +293,53 @@ func (r *NotificationRepository) MarkBotOutboxFailed(
 			errorText = errorText[:1000]
 		}
 	}
-	if _, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, `
 		UPDATE bot_outbox
 		SET status=$2, next_attempt_at=NOW()+($3 * INTERVAL '1 second'),
-			last_error=$4, updated_at=NOW()
-		WHERE id=$1`, id, status, retryAfter.Seconds(), errorText); err != nil {
+			last_error=$4, updated_at=NOW(), claim_token='', lease_expires_at=NULL
+		WHERE id=$1 AND claim_token=$5 AND status='pending'
+		  AND lease_expires_at>clock_timestamp()`,
+		id, status, retryAfter.Seconds(), errorText, claimToken)
+	if err != nil {
 		return fmt.Errorf("mark bot outbox %s failed: %w", id, err)
 	}
-	return nil
+	return requireNotificationClaim(result, 1, id)
 }
 
 func (r *NotificationRepository) MarkBotOutboxPermanentFailure(
 	ctx context.Context,
-	id string,
+	id, claimToken string,
 	deliveryErr error,
 ) error {
-	return r.markPermanentFailure(ctx, "bot_outbox", id, deliveryErr)
+	return r.markPermanentFailure(ctx, "bot_outbox", id, claimToken, deliveryErr)
 }
 
-func (r *NotificationRepository) MarkDelivered(ctx context.Context, id string) error {
-	if _, err := r.db.ExecContext(ctx, `
+func (r *NotificationRepository) MarkDelivered(ctx context.Context, id, claimToken string) error {
+	result, err := r.db.ExecContext(ctx, `
 		UPDATE notification_deliveries
-		SET status='delivered', delivered_at=NOW(), last_error='', updated_at=NOW()
-		WHERE id=$1`, id); err != nil {
+		SET status='delivered', delivered_at=NOW(), last_error='', updated_at=NOW(),
+			claim_token='', lease_expires_at=NULL
+		WHERE id=$1 AND claim_token=$2 AND status='pending'
+		  AND lease_expires_at>clock_timestamp()`, id, claimToken)
+	if err != nil {
 		return fmt.Errorf("mark notification %s delivered: %w", id, err)
 	}
-	return nil
+	return requireNotificationClaim(result, 1, id)
 }
 
-func (r *NotificationRepository) MarkCancelled(ctx context.Context, id string) error {
-	if _, err := r.db.ExecContext(ctx, `
+func (r *NotificationRepository) MarkCancelled(ctx context.Context, id, claimToken string) error {
+	result, err := r.db.ExecContext(ctx, `
 		UPDATE notification_deliveries
-		SET status='cancelled', updated_at=NOW()
-		WHERE id=$1 AND status='pending'`, id); err != nil {
+		SET status='cancelled', updated_at=NOW(), claim_token='', lease_expires_at=NULL
+		WHERE id=$1 AND claim_token=$2 AND status='pending'
+		  AND lease_expires_at>clock_timestamp()`, id, claimToken)
+	if err != nil {
 		return fmt.Errorf("mark notification %s cancelled: %w", id, err)
 	}
-	return nil
+	return requireNotificationClaim(result, 1, id)
 }
 
-func (r *NotificationRepository) IsDeliveryActive(ctx context.Context, id string) (bool, error) {
+func (r *NotificationRepository) IsDeliveryActive(ctx context.Context, id, claimToken string) (bool, error) {
 	var active bool
 	err := r.db.GetContext(ctx, &active, `
 		SELECT EXISTS (
@@ -277,8 +351,9 @@ func (r *NotificationRepository) IsDeliveryActive(ctx context.Context, id string
 				ON s.user_id=d.user_id
 				AND s.object_type='group'
 				AND s.object_id=e.group_id
-			WHERE d.id=$1 AND d.status='pending'
-		)`, id)
+			WHERE d.id=$1 AND d.claim_token=$2 AND d.status='pending'
+			  AND d.lease_expires_at>clock_timestamp()
+		)`, id, claimToken)
 	if err != nil {
 		return false, fmt.Errorf("check notification %s eligibility: %w", id, err)
 	}
@@ -287,7 +362,7 @@ func (r *NotificationRepository) IsDeliveryActive(ctx context.Context, id string
 
 func (r *NotificationRepository) MarkFailed(
 	ctx context.Context,
-	id string,
+	id, claimToken string,
 	attempts int,
 	retryAfter time.Duration,
 	deliveryErr error,
@@ -303,28 +378,31 @@ func (r *NotificationRepository) MarkFailed(
 			errorText = errorText[:1000]
 		}
 	}
-	if _, err := r.db.ExecContext(ctx, `
+	result, err := r.db.ExecContext(ctx, `
 		UPDATE notification_deliveries
 		SET status=$2, next_attempt_at=NOW() + ($3 * INTERVAL '1 second'),
-			last_error=$4, updated_at=NOW()
-		WHERE id=$1`, id, status, retryAfter.Seconds(), errorText); err != nil {
+			last_error=$4, updated_at=NOW(), claim_token='', lease_expires_at=NULL
+		WHERE id=$1 AND claim_token=$5 AND status='pending'
+		  AND lease_expires_at>clock_timestamp()`,
+		id, status, retryAfter.Seconds(), errorText, claimToken)
+	if err != nil {
 		return fmt.Errorf("mark notification %s failed: %w", id, err)
 	}
-	return nil
+	return requireNotificationClaim(result, 1, id)
 }
 
 func (r *NotificationRepository) MarkPermanentFailure(
 	ctx context.Context,
-	id string,
+	id, claimToken string,
 	deliveryErr error,
 ) error {
-	return r.markPermanentFailure(ctx, "notification_deliveries", id, deliveryErr)
+	return r.markPermanentFailure(ctx, "notification_deliveries", id, claimToken, deliveryErr)
 }
 
 func (r *NotificationRepository) markPermanentFailure(
 	ctx context.Context,
 	table string,
-	id string,
+	id, claimToken string,
 	deliveryErr error,
 ) error {
 	errorText := ""
@@ -335,12 +413,15 @@ func (r *NotificationRepository) markPermanentFailure(
 		}
 	}
 	query := `UPDATE ` + table + `
-		SET status='failed', last_error=$2, updated_at=NOW()
-		WHERE id=$1`
-	if _, err := r.db.ExecContext(ctx, query, id, errorText); err != nil {
+		SET status='failed', last_error=$2, updated_at=NOW(),
+			claim_token='', lease_expires_at=NULL
+		WHERE id=$1 AND claim_token=$3 AND status='pending'
+		  AND lease_expires_at>clock_timestamp()`
+	result, err := r.db.ExecContext(ctx, query, id, errorText, claimToken)
+	if err != nil {
 		return fmt.Errorf("mark %s %s permanently failed: %w", table, id, err)
 	}
-	return nil
+	return requireNotificationClaim(result, 1, id)
 }
 
 func (r *NotificationRepository) PruneCompleted(ctx context.Context, retention time.Duration) (int64, error) {
@@ -370,4 +451,15 @@ func (r *NotificationRepository) PruneCompleted(ctx context.Context, retention t
 		return 0, fmt.Errorf("count pruned bot outbox: %w", err)
 	}
 	return eventCount + outboxCount, nil
+}
+
+func requireNotificationClaim(result sql.Result, expected int64, id string) error {
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count notification claim updates for %s: %w", id, err)
+	}
+	if updated != expected {
+		return fmt.Errorf("%w: %s", ErrNotificationClaimLost, id)
+	}
+	return nil
 }

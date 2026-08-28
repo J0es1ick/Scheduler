@@ -14,8 +14,8 @@ func TestMonitorDetectsStoppedAndStaleWorkers(t *testing.T) {
 		t.Fatal("registered but unstarted worker reported ready")
 	}
 	monitor.Started(ParserWorkerName)
-	if monitor.Checks()[ParserWorkerName] {
-		t.Fatal("worker without a successful pass reported ready")
+	if !monitor.Checks()[ParserWorkerName] {
+		t.Fatal("running worker with a fresh heartbeat reported unready during its first pass")
 	}
 	monitor.Succeeded(ParserWorkerName)
 	if !monitor.Checks()[ParserWorkerName] {

@@ -150,7 +150,7 @@ func (m *Monitor) Checks() map[string]bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for name, probe := range m.workers {
-		result[name] = probe.running && probe.hasResult && probe.lastResultOK &&
+		result[name] = probe.running && (!probe.hasResult || probe.lastResultOK) &&
 			!probe.lastHeartbeat.IsZero() && now.Sub(probe.lastHeartbeat) <= probe.maxSilence
 	}
 	return result
