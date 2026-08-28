@@ -120,15 +120,30 @@ func TestLiveISPUAdapter(t *testing.T) {
 			break
 		}
 	}
-	lessons, err := adapter.FetchSchedule(ctx, sample.ID)
-	if err != nil {
-		t.Fatal(err)
+	samples := []domain.Group{sample}
+	if os.Getenv("ISPU_INTEGRATION_ALL_GROUPS") == "1" {
+		samples = groups
 	}
-	subgroups := make(map[int]int)
-	for _, lesson := range lessons {
-		subgroups[lesson.Subgroup]++
+	total, populated := 0, 0
+	for _, group := range samples {
+		lessons, err := adapter.FetchSchedule(ctx, group.ID)
+		if err != nil {
+			t.Fatalf("group %s: %v", group.Name, err)
+		}
+		subgroups := make(map[int]int)
+		for _, lesson := range lessons {
+			subgroups[lesson.Subgroup]++
+			if lesson.ValidFrom == nil || lesson.ValidTo == nil || lesson.ValidTo.Before(*lesson.ValidFrom) {
+				t.Fatalf("group %s: invalid lesson period: %#v", group.Name, lesson)
+			}
+		}
+		total += len(lessons)
+		if len(lessons) > 0 {
+			populated++
+		}
+		t.Logf("group=%s lessons=%d subgroups=%v", group.Name, len(lessons), subgroups)
 	}
-	t.Logf("groups=%d sample=%s lessons=%d subgroups=%v", len(groups), sample.Name, len(lessons), subgroups)
+	t.Logf("discovered=%d checked=%d populated=%d total_lessons=%d", len(groups), len(samples), populated, total)
 }
 
 func mustDocument(t *testing.T, html string) *goquery.Document {

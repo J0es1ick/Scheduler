@@ -41,12 +41,13 @@ const (
 
 var (
 	reDate          = regexp.MustCompile(`\b(\d{2}\.\d{2}\.\d{4})\b`)
-	reScheduleRange = regexp.MustCompile(`(?i)начало\s*:\s*(\d{2}\.\d{2}\.\d{4})\s*[-–—]\s*окончание\s*:\s*(\d{2}\.\d{2}\.\d{4})`)
+	reScheduleRange = regexp.MustCompile(`(?i)начало\s*:\s*(\d{2}\.\d{2}\.\d{4})([^()]*)\s*[-–—]\s*окончание\s*:\s*(\d{2}\.\d{2}\.\d{4})`)
+	reStartWeek     = regexp.MustCompile(`(?:^|\s)([12])\s+недел[ияи](?:\s|$)`)
 	reTime          = regexp.MustCompile(`^\s*(\d{1,2})[\.:](\d{2})\s*[-–—]\s*(\d{1,2})[\.:](\d{2})\s*$`)
 	reSpaces        = regexp.MustCompile(`\s+`)
 	reLessonMarker  = regexp.MustCompile(`(?i)(?:^|\s)(пр\.\s*з\.|пр\.з\.|пр\.|пз\.|лаб\.|лек\.|лк\.|сем\.|конс\.|экз\.|зач\.)(?:\s|$)`)
-	reTeacherPrefix = regexp.MustCompile(`^(([А-ЯЁ][А-Яа-яЁё-]+\s+[А-ЯЁ]\.[А-ЯЁ]\.)(?:\s*,\s*[А-ЯЁ][А-Яа-яЁё-]+\s+[А-ЯЁ]\.[А-ЯЁ]\.)*)(?:\s+(.+))?$`)
-	reTeacherTail   = regexp.MustCompile(`\s+(([А-ЯЁ][А-Яа-яЁё-]+\s+[А-ЯЁ]\.[А-ЯЁ]\.)(?:\s*,\s*[А-ЯЁ][А-Яа-яЁё-]+\s+[А-ЯЁ]\.[А-ЯЁ]\.)*)(?:\s+(.+))?$`)
+	reTeacherPrefix = regexp.MustCompile(`^(([А-ЯЁ][А-Яа-яЁё-]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.)(?:\s*,\s*[А-ЯЁ][А-Яа-яЁё-]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.)*)(?:\s+(.+))?$`)
+	reTeacherTail   = regexp.MustCompile(`\s+(([А-ЯЁ][А-Яа-яЁё-]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.)(?:\s*,\s*[А-ЯЁ][А-Яа-яЁё-]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.)*)(?:\s+(.+))?$`)
 )
 
 type Adapter struct {
@@ -152,10 +153,11 @@ func (a *Adapter) FetchGroups(ctx context.Context) ([]domain.Group, error) {
 				}
 				groupOptions := selectOptions(coursePage.doc, groupControl)
 				for _, groupOption := range groupOptions {
-					extID := strings.TrimSpace(groupOption.value)
-					if extID == "" || strings.TrimSpace(groupOption.label) == "" {
+					groupValue := strings.TrimSpace(groupOption.value)
+					if groupValue == "" || strings.TrimSpace(groupOption.label) == "" {
 						continue
 					}
+					extID := groupSourceKey(facultyOption.value, courseOption.value, groupValue)
 					descriptor := discovered[extID]
 					if descriptor.name == "" {
 						descriptor.name = displayGroupName(courseOption.label, groupOption.label)
@@ -176,7 +178,7 @@ func (a *Adapter) FetchGroups(ctx context.Context) ([]domain.Group, error) {
 							scheduleLabel: scheduleOption.label,
 							facultyLabel:  facultyOption.label,
 							courseLabel:   courseOption.label,
-							groupValue:    extID,
+							groupValue:    groupValue,
 						})
 					}
 					discovered[extID] = descriptor
@@ -433,126 +435,33 @@ func parseScheduleTable(doc *goquery.Document, gid, semesterID, scheduleLabel st
 		)
 	}
 
-	rangeStart, rangeEnd := parseScheduleRange(doc.Text())
-	oneOff := isOneOffSchedule(scheduleLabel)
-	var currentDates [7]time.Time
-	currentWeek := 1
-	now := time.Now()
+	period, err := parseSchedulePeriod(doc.Text())
 	var lessons []domain.Lesson
-
-	table.ChildrenFiltered("tbody").ChildrenFiltered("tr").Each(func(_ int, row *goquery.Selection) {
-		parseScheduleRow(row, gid, semesterID, oneOff, rangeStart, rangeEnd, &currentDates, &currentWeek, now, &lessons)
-	})
-	if table.ChildrenFiltered("tbody").Length() == 0 {
-		table.ChildrenFiltered("tr").Each(func(_ int, row *goquery.Selection) {
-			parseScheduleRow(row, gid, semesterID, oneOff, rangeStart, rangeEnd, &currentDates, &currentWeek, now, &lessons)
-		})
+	if err == nil {
+		lessons, err = parseScheduleGrid(table, period, gid, semesterID, isOneOffSchedule(scheduleLabel))
+	}
+	if err != nil {
+		pageText := normalizeText(doc.Text())
+		digest := sha256.Sum256([]byte(pageText))
+		preview := []rune(pageText)
+		if len(preview) > 500 {
+			preview = preview[:500]
+		}
+		return nil, scraper.NewDiagnosticError(
+			fmt.Errorf("ispu schedule table for group %s: %w", gid, err),
+			scraper.ResponseDiagnostic{
+				Category: "markup_changed", Summary: "Не удалось распознать таблицу или даты расписания ИГЭУ",
+				ResponseSize: len(pageText), ResponseSHA256: fmt.Sprintf("%x", digest[:]),
+				ResponsePreview: string(preview), Retryable: false, StopBatch: true,
+			},
+		)
 	}
 	return lessons, nil
 }
 
-func parseScheduleRow(
-	row *goquery.Selection,
-	gid, semesterID string,
-	oneOff bool,
-	rangeStart, rangeEnd time.Time,
-	currentDates *[7]time.Time,
-	currentWeek *int,
-	now time.Time,
-	lessons *[]domain.Lesson,
-) {
-	cells := row.ChildrenFiltered("td")
-	if cells.Length() == 0 {
-		return
-	}
-
-	var dates []time.Time
-	cells.Each(func(_ int, cell *goquery.Selection) {
-		if match := reDate.FindStringSubmatch(cell.Text()); match != nil {
-			if parsed, err := time.Parse("02.01.2006", match[1]); err == nil {
-				dates = append(dates, parsed)
-			}
-		}
-	})
-	if len(dates) == 7 {
-		copy(currentDates[:], dates)
-		return
-	}
-
-	offset := 0
-	firstText := normalizeText(cells.Eq(0).Text())
-	if _, hasRowspan := cells.Eq(0).Attr("rowspan"); hasRowspan && (firstText == "1" || firstText == "2") {
-		*currentWeek, _ = strconv.Atoi(firstText)
-		offset = 1
-	}
-	if cells.Length() <= offset {
-		return
-	}
-	timeStart, timeEnd, ok := parseTimeRange(cells.Eq(offset).Text())
-	if !ok {
-		return
-	}
-
-	for dayIndex := 0; dayIndex < 7; dayIndex++ {
-		cellIndex := offset + 1 + dayIndex
-		if cellIndex >= cells.Length() || currentDates[dayIndex].IsZero() {
-			continue
-		}
-		subject, lessonType, teacher, room, ok := parseLessonCell(cells.Eq(cellIndex))
-		if !ok || subject == "" {
-			continue
-		}
-
-		lesson := domain.Lesson{
-			UniversityID: UniversityID,
-			SemesterID:   semesterID,
-			TimeStart:    timeStart,
-			TimeEnd:      timeEnd,
-			Subject:      subject,
-			Type:         lessonType,
-			Teacher:      teacher,
-			Room:         room,
-			GroupID:      gid,
-			UpdatedAt:    now,
-		}
-		cellDate := currentDates[dayIndex]
-		if oneOff {
-			specialDate := cellDate
-			lesson.WeekType = domain.WeekTypeDate
-			lesson.SpecialDate = &specialDate
-			lesson.ValidFrom = &specialDate
-			lesson.ValidTo = &specialDate
-		} else {
-			lesson.DayOfWeek = weekdayNumber(cellDate)
-			lesson.WeekType = domain.WeekTypeOdd
-			if *currentWeek == 2 {
-				lesson.WeekType = domain.WeekTypeEven
-			}
-			validFrom := cellDate
-			for !rangeStart.IsZero() && validFrom.Before(rangeStart) {
-				validFrom = validFrom.AddDate(0, 0, 14)
-			}
-			validTo := rangeEnd
-			if validTo.IsZero() {
-				validTo = cellDate.AddDate(0, 0, 13)
-			}
-			if validFrom.After(validTo) {
-				continue
-			}
-			lesson.ValidFrom = &validFrom
-			lesson.ValidTo = &validTo
-		}
-		*lessons = append(*lessons, lesson)
-	}
-}
-
-func parseLessonCell(cell *goquery.Selection) (string, domain.LessonType, string, string, bool) {
-	text := normalizeText(cell.Text())
+func parseLessonText(text string) (string, domain.LessonType, string, string, bool) {
+	text = normalizeText(text)
 	if text == "" {
-		return "", "", "", "", false
-	}
-	style := strings.ToUpper(strings.ReplaceAll(attrOr(cell, "style", ""), " ", ""))
-	if strings.Contains(style, "BACKGROUND:#FFFFFF") {
 		return "", "", "", "", false
 	}
 
@@ -690,20 +599,6 @@ func lessonStableID(lesson domain.Lesson) string {
 	return fmt.Sprintf("%x", hash[:12])
 }
 
-func parseScheduleRange(text string) (time.Time, time.Time) {
-	text = normalizeText(text)
-	match := reScheduleRange.FindStringSubmatch(text)
-	if match == nil {
-		return time.Time{}, time.Time{}
-	}
-	start, startErr := time.Parse("02.01.2006", match[1])
-	end, endErr := time.Parse("02.01.2006", match[2])
-	if startErr != nil || endErr != nil || end.Before(start) {
-		return time.Time{}, time.Time{}
-	}
-	return start, end
-}
-
 func isOneOffSchedule(label string) bool {
 	label = strings.ToLower(normalizeText(label))
 	for _, keyword := range []string{"экзам", "зач", "фзво", "сесси", "аттест"} {
@@ -721,6 +616,11 @@ func parseTimeRange(text string) (string, string, bool) {
 	}
 	startHour, _ := strconv.Atoi(match[1])
 	endHour, _ := strconv.Atoi(match[3])
+	startMinute, _ := strconv.Atoi(match[2])
+	endMinute, _ := strconv.Atoi(match[4])
+	if startHour > 23 || endHour > 23 || startMinute > 59 || endMinute > 59 || startHour*60+startMinute >= endHour*60+endMinute {
+		return "", "", false
+	}
 	return fmt.Sprintf("%02d:%s", startHour, match[2]), fmt.Sprintf("%02d:%s", endHour, match[4]), true
 }
 
@@ -792,6 +692,10 @@ func weekdayNumber(date time.Time) int {
 }
 
 func groupID(extID string) string { return fmt.Sprintf("%s:group:%s", UniversityID, extID) }
+
+func groupSourceKey(faculty, course, group string) string {
+	return strings.Join([]string{url.QueryEscape(faculty), url.QueryEscape(course), url.QueryEscape(group)}, ":")
+}
 
 func extractExtID(gid string) string {
 	parts := strings.SplitN(gid, ":", 3)
