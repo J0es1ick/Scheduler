@@ -1,6 +1,6 @@
 FROM postgres:16-alpine
 
-RUN apk add --no-cache openssl
+RUN apk add --no-cache age openssl
 
 COPY backup-loop.sh /usr/local/bin/scheduler-backup-loop
 COPY backup-lib.sh /usr/local/lib/scheduler-backup-lib.sh

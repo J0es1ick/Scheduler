@@ -2,7 +2,10 @@
 set -eu
 
 : "${POSTGRES_SUPERUSER:=postgres}"
+: "${DATABASE_HOST:=postgres}"
+: "${DATABASE_PORT:=5432}"
 : "${DATABASE_NAME:=scheduler}"
+: "${DATABASE_SSLMODE:=prefer}"
 : "${DATABASE_MIGRATOR_USER:=scheduler_migrator}"
 : "${DATABASE_BOT_USER:=scheduler_bot}"
 : "${DATABASE_ADMIN_USER:=scheduler_admin}"
@@ -10,15 +13,15 @@ set -eu
 : "${DATABASE_BACKUP_USER:=scheduler_backup}"
 : "${DATABASE_RESTORE_USER:=scheduler_restore}"
 
-# Это роль, которая будет использоваться для предоставления прав на чтение данных пользователю сайта. Она не имеет права входа в систему (NOLOGIN).
 DATABASE_SITE_READER_ROLE="scheduler_public_reader"
 
 export PGPASSWORD="${POSTGRES_SUPERUSER_PASSWORD:?POSTGRES_SUPERUSER_PASSWORD is required}"
+export PGSSLMODE="$DATABASE_SSLMODE"
 
 psql_super() {
   database="$1"
   shift
-  psql --host postgres --port 5432 --username "$POSTGRES_SUPERUSER" \
+  psql --host "$DATABASE_HOST" --port "$DATABASE_PORT" --username "$POSTGRES_SUPERUSER" \
     --dbname "$database" --set ON_ERROR_STOP=1 "$@"
 }
 

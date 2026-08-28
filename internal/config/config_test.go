@@ -2,10 +2,30 @@ package config
 
 import "testing"
 
+func TestProductionConfigRejectsInsecureTransport(t *testing.T) {
+	cfg := Config{
+		DeploymentEnvironment:  "production",
+		BotToken:               "production-bot-token",
+		BotTelegramAPIURL:      "http://telegram.internal",
+		BotTelegramAPIInsecure: true,
+		BotHealthPort:          "8082",
+		Database: DatabaseConfig{
+			Host: "postgres", Port: "5432", User: "scheduler",
+			Password: "production-database-password", Name: "scheduler", SSLMode: "verify-full",
+		},
+		Admin: AdminConfig{Port: "8080", CookieSecure: true},
+		Site:  SiteConfig{Port: "8081"},
+	}
+	if err := cfg.validate(true); err == nil {
+		t.Fatal("production config accepted an insecure Telegram API URL")
+	}
+}
+
 func TestInitConfigReadsEnvironmentWithoutDotEnv(t *testing.T) {
 	t.Setenv("BOT_TOKEN", "test-token")
 	t.Setenv("BOT_USERNAME", "schedule_free_bot")
 	t.Setenv("BOT_TELEGRAM_API_URL", "http://telegram-mock:8080/")
+	t.Setenv("BOT_TELEGRAM_API_ALLOW_INSECURE", "true")
 	t.Setenv("DATABASE_HOST", "postgres")
 	t.Setenv("DATABASE_PORT", "5432")
 	t.Setenv("DATABASE_USER", "scheduler")
@@ -62,6 +82,20 @@ func TestInitConfigRejectsInvalidTelegramAPIURL(t *testing.T) {
 
 	if _, err := InitConfig(); err == nil {
 		t.Fatal("relative Telegram API URL must be rejected")
+	}
+}
+
+func TestInitConfigRejectsInsecureTelegramAPIURLWithoutOptIn(t *testing.T) {
+	t.Setenv("BOT_TOKEN", "test-token")
+	t.Setenv("BOT_TELEGRAM_API_URL", "http://telegram-mock:8080")
+	t.Setenv("BOT_TELEGRAM_API_ALLOW_INSECURE", "false")
+	t.Setenv("DATABASE_HOST", "postgres")
+	t.Setenv("DATABASE_PORT", "5432")
+	t.Setenv("DATABASE_USER", "scheduler")
+	t.Setenv("DATABASE_PASSWORD", "test-database-password")
+	t.Setenv("DATABASE_NAME", "scheduler")
+	if _, err := InitConfig(); err == nil {
+		t.Fatal("insecure Telegram API URL was accepted without explicit opt-in")
 	}
 }
 

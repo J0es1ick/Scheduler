@@ -4,9 +4,12 @@
 : "${DATABASE_PORT:=5432}"
 : "${DATABASE_USER:=postgres}"
 : "${DATABASE_NAME:=scheduler}"
+: "${DATABASE_SSLMODE:=prefer}"
+: "${DEPLOYMENT_ENV:=development}"
 : "${BACKUP_RETENTION_DAYS:=14}"
 : "${BACKUP_OFFSITE_DIRECTORY:=}"
-: "${BACKUP_ENCRYPTION_PASSPHRASE_FILE:=}"
+: "${BACKUP_AGE_RECIPIENT:=}"
+: "${BACKUP_REQUIRE_OFFSITE:=false}"
 : "${BACKUP_DIRECTORY:=/backups}"
 : "${BACKUP_STATE_DIRECTORY:=/tmp}"
 
@@ -15,21 +18,42 @@ offsite_success_marker="${BACKUP_STATE_DIRECTORY}/last-offsite-backup-success"
 last_local_backup=""
 
 offsite_requested() {
-  [ -n "$BACKUP_OFFSITE_DIRECTORY" ] || [ -n "$BACKUP_ENCRYPTION_PASSPHRASE_FILE" ]
+  [ "$BACKUP_REQUIRE_OFFSITE" = "true" ] ||
+    [ -n "$BACKUP_OFFSITE_DIRECTORY" ] ||
+    [ -n "$BACKUP_AGE_RECIPIENT" ]
 }
 
 validate_offsite() {
+  case "$BACKUP_REQUIRE_OFFSITE" in
+    true|false) ;;
+    *)
+      echo "BACKUP_REQUIRE_OFFSITE must be true or false" >&2
+      return 1
+      ;;
+  esac
+  if [ "$DEPLOYMENT_ENV" = "production" ] && [ "$BACKUP_REQUIRE_OFFSITE" != "true" ]; then
+    echo "BACKUP_REQUIRE_OFFSITE must be true in production" >&2
+    return 1
+  fi
   if ! offsite_requested; then
     return 0
   fi
-  if [ -z "$BACKUP_OFFSITE_DIRECTORY" ] || [ -z "$BACKUP_ENCRYPTION_PASSPHRASE_FILE" ]; then
-    echo "both BACKUP_OFFSITE_DIRECTORY and BACKUP_ENCRYPTION_PASSPHRASE_FILE are required" >&2
+  if [ -z "$BACKUP_OFFSITE_DIRECTORY" ] || [ -z "$BACKUP_AGE_RECIPIENT" ]; then
+    echo "both BACKUP_OFFSITE_DIRECTORY and BACKUP_AGE_RECIPIENT are required" >&2
     return 1
   fi
-  if [ ! -r "$BACKUP_ENCRYPTION_PASSPHRASE_FILE" ] || [ ! -d "$BACKUP_OFFSITE_DIRECTORY" ]; then
-    echo "off-host backup destination or encryption secret is unavailable" >&2
+  if [ ! -d "$BACKUP_OFFSITE_DIRECTORY" ]; then
+    echo "off-host backup destination is unavailable" >&2
     return 1
   fi
+  if ! age --recipient "$BACKUP_AGE_RECIPIENT" </dev/null >/dev/null 2>&1; then
+    echo "age recipient is invalid" >&2
+    return 1
+  fi
+}
+
+run_age() {
+  age --recipient "$BACKUP_AGE_RECIPIENT" "$@"
 }
 
 write_success_marker() {
@@ -92,6 +116,7 @@ create_local_backup() {
 run_local_retention() {
   find "$BACKUP_DIRECTORY" -maxdepth 1 -type f \
     \( -name 'scheduler-*.dump' -o -name 'scheduler-*.dump.sha256' \
+       -o -name 'scheduler-*.dump.age' -o -name 'scheduler-*.dump.age.sha256' \
        -o -name 'scheduler-*.dump.enc' -o -name 'scheduler-*.dump.enc.sha256' \
        -o -name 'scheduler-*.partial' \) \
     -mtime "+${BACKUP_RETENTION_DAYS}" -delete || {
@@ -103,7 +128,7 @@ run_local_retention() {
 upload_offsite_backup() {
   target="$1"
   validate_offsite || return 1
-  encrypted="${target}.enc"
+  encrypted="${target}.age"
   encrypted_checksum="${encrypted}.sha256"
   encrypted_tmp="${encrypted}.partial"
   checksum_tmp="${encrypted_checksum}.partial"
@@ -114,9 +139,7 @@ upload_offsite_backup() {
 
   if [ ! -s "$encrypted" ]; then
     rm -f "$encrypted_tmp" "$checksum_tmp"
-    if ! openssl enc -aes-256-cbc -salt -pbkdf2 \
-      -pass "file:${BACKUP_ENCRYPTION_PASSPHRASE_FILE}" \
-      -in "$target" -out "$encrypted_tmp"; then
+    if ! run_age --output "$encrypted_tmp" "$target"; then
       rm -f "$encrypted_tmp" "$checksum_tmp"
       echo "off-host backup encryption failed" >&2
       return 1

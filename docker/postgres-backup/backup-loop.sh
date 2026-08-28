@@ -5,13 +5,17 @@ set -eu
 : "${DATABASE_PORT:=5432}"
 : "${DATABASE_USER:=postgres}"
 : "${DATABASE_NAME:=scheduler}"
+: "${DATABASE_SSLMODE:=prefer}"
 : "${BACKUP_INTERVAL_SECONDS:=86400}"
 : "${BACKUP_RETENTION_DAYS:=14}"
 : "${BACKUP_RETRY_SECONDS:=300}"
 
 export PGPASSWORD="${DATABASE_PASSWORD:?DATABASE_PASSWORD is required}"
+export PGSSLMODE="$DATABASE_SSLMODE"
 
 . /usr/local/lib/scheduler-backup-lib.sh
+
+validate_offsite || exit 1
 
 until pg_isready -h "$DATABASE_HOST" -p "$DATABASE_PORT" -U "$DATABASE_USER" -d "$DATABASE_NAME" >/dev/null 2>&1; do
   sleep 2

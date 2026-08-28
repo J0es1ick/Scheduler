@@ -5,28 +5,69 @@ set -eu
 : "${DATABASE_PORT:=5432}"
 : "${DATABASE_USER:=postgres}"
 : "${DATABASE_NAME:=scheduler}"
+: "${DATABASE_SSLMODE:=prefer}"
 : "${MIGRATIONS_PATH:=/app/migrations}"
 : "${BACKUP_VERIFY_OFFSITE:=false}"
 : "${BACKUP_OFFSITE_DIRECTORY:=}"
+: "${BACKUP_AGE_IDENTITY_FILE:=}"
 : "${BACKUP_ENCRYPTION_PASSPHRASE_FILE:=}"
+: "${BACKUP_ALLOW_LEGACY_AES_CBC:=false}"
 export PGPASSWORD="${DATABASE_PASSWORD:?DATABASE_PASSWORD is required}"
+export PGSSLMODE="$DATABASE_SSLMODE"
 
 decrypted_backup=""
+cleanup() {
+  if [ -n "${verify_db:-}" ]; then
+    dropdb --if-exists --force -h "$DATABASE_HOST" -p "$DATABASE_PORT" -U "$DATABASE_USER" "$verify_db" >/dev/null 2>&1 || true
+  fi
+  if [ -n "$decrypted_backup" ]; then
+    rm -f "$decrypted_backup"
+  fi
+}
+trap cleanup EXIT INT TERM
+
 if [ "$BACKUP_VERIFY_OFFSITE" = "true" ]; then
-  if [ ! -d "$BACKUP_OFFSITE_DIRECTORY" ] || [ ! -r "$BACKUP_ENCRYPTION_PASSPHRASE_FILE" ]; then
-    echo "off-host backup destination or encryption secret is unavailable" >&2
+  if [ ! -d "$BACKUP_OFFSITE_DIRECTORY" ]; then
+    echo "off-host backup destination is unavailable" >&2
     exit 1
   fi
-  encrypted="$(find "$BACKUP_OFFSITE_DIRECTORY" -maxdepth 1 -type f -name 'scheduler-*.dump.enc' -print | sort | tail -n 1)"
+  encrypted="$(find "$BACKUP_OFFSITE_DIRECTORY" -maxdepth 1 -type f -name 'scheduler-*.dump.age' -print | sort | tail -n 1)"
+  legacy=false
+  if [ -z "$encrypted" ]; then
+    case "$BACKUP_ALLOW_LEGACY_AES_CBC" in
+      true)
+        encrypted="$(find "$BACKUP_OFFSITE_DIRECTORY" -maxdepth 1 -type f -name 'scheduler-*.dump.enc' -print | sort | tail -n 1)"
+        legacy=true
+        ;;
+      false) ;;
+      *)
+        echo "BACKUP_ALLOW_LEGACY_AES_CBC must be true or false" >&2
+        exit 1
+        ;;
+    esac
+  fi
   if [ -z "$encrypted" ] || [ ! -f "${encrypted}.sha256" ]; then
     echo "no complete encrypted off-host backup found" >&2
     exit 1
   fi
   (cd "$BACKUP_OFFSITE_DIRECTORY" && sha256sum -c "$(basename "${encrypted}.sha256")") || exit 1
   decrypted_backup="/tmp/offsite-restore-verify-$$.dump"
-  openssl enc -d -aes-256-cbc -pbkdf2 \
-    -pass "file:${BACKUP_ENCRYPTION_PASSPHRASE_FILE}" \
-    -in "$encrypted" -out "$decrypted_backup" || exit 1
+  if [ "$legacy" = "true" ]; then
+    if [ ! -s "$BACKUP_ENCRYPTION_PASSPHRASE_FILE" ]; then
+      echo "legacy backup passphrase is unavailable" >&2
+      exit 1
+    fi
+    echo "warning: decrypting a legacy unauthenticated AES-CBC backup" >&2
+    openssl enc -d -aes-256-cbc -pbkdf2 \
+      -pass "file:${BACKUP_ENCRYPTION_PASSPHRASE_FILE}" \
+      -in "$encrypted" -out "$decrypted_backup" || exit 1
+  else
+    if [ ! -s "$BACKUP_AGE_IDENTITY_FILE" ]; then
+      echo "age identity is unavailable" >&2
+      exit 1
+    fi
+    age --decrypt --identity "$BACKUP_AGE_IDENTITY_FILE" --output "$decrypted_backup" "$encrypted" || exit 1
+  fi
   backup="$decrypted_backup"
 else
   backup="$(find /backups -maxdepth 1 -type f -name 'scheduler-*.dump' -print | sort | tail -n 1)"
@@ -43,13 +84,6 @@ else
 fi
 
 verify_db="${DATABASE_NAME}_restore_verify_$(date -u +%s)"
-cleanup() {
-  dropdb --if-exists --force -h "$DATABASE_HOST" -p "$DATABASE_PORT" -U "$DATABASE_USER" "$verify_db" >/dev/null 2>&1 || true
-  if [ -n "$decrypted_backup" ]; then
-    rm -f "$decrypted_backup"
-  fi
-}
-trap cleanup EXIT INT TERM
 
 createdb -h "$DATABASE_HOST" -p "$DATABASE_PORT" -U "$DATABASE_USER" "$verify_db"
 pg_restore \

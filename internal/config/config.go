@@ -12,9 +12,11 @@ import (
 )
 
 type Config struct {
+	DeploymentEnvironment    string         `mapstructure:"DEPLOYMENT_ENV"`
 	BotToken                 string         `mapstructure:"BOT_TOKEN"`
 	BotUsername              string         `mapstructure:"BOT_USERNAME"`
 	BotTelegramAPIURL        string         `mapstructure:"BOT_TELEGRAM_API_URL"`
+	BotTelegramAPIInsecure   bool           `mapstructure:"BOT_TELEGRAM_API_ALLOW_INSECURE"`
 	BotHealthPort            string         `mapstructure:"BOT_HEALTH_PORT"`
 	BotMaxConcurrentHandlers int            `mapstructure:"BOT_MAX_CONCURRENT_HANDLERS"`
 	BotMaxPendingPerSender   int            `mapstructure:"BOT_MAX_PENDING_PER_SENDER"`
@@ -87,6 +89,7 @@ func initConfig(requireBotToken bool) (*Config, error) {
 	reader.SetConfigFile(".env")
 	reader.SetConfigType("env")
 	reader.AutomaticEnv()
+	reader.SetDefault("DEPLOYMENT_ENV", "development")
 	reader.SetDefault("ADMIN_PORT", "18080")
 	reader.SetDefault("DATABASE_SSLMODE", "disable")
 	reader.SetDefault("DATABASE_MAX_OPEN_CONNECTIONS", 15)
@@ -97,6 +100,7 @@ func initConfig(requireBotToken bool) (*Config, error) {
 	reader.SetDefault("BOT_MAX_CONCURRENT_HANDLERS", 32)
 	reader.SetDefault("BOT_MAX_PENDING_PER_SENDER", 8)
 	reader.SetDefault("BOT_STATE_TTL_MINUTES", 30)
+	reader.SetDefault("BOT_TELEGRAM_API_ALLOW_INSECURE", false)
 	reader.SetDefault("ADMIN_ACCESS_LOGIN_ENABLED", false)
 	reader.SetDefault("ADMIN_COOKIE_SECURE", true)
 	reader.SetDefault("ADMIN_TRUSTED_PROXY_CIDRS", "127.0.0.1/32,::1/128")
@@ -104,9 +108,11 @@ func initConfig(requireBotToken bool) (*Config, error) {
 	reader.SetDefault("PROJECT_URL", "https://github.com/J0es1ick/Scheduler")
 	reader.SetDefault("BOT_PUBLIC_URL", "https://t.me/schedule_free_bot")
 	for _, key := range []string{
+		"DEPLOYMENT_ENV",
 		"BOT_TOKEN",
 		"BOT_USERNAME",
 		"BOT_TELEGRAM_API_URL",
+		"BOT_TELEGRAM_API_ALLOW_INSECURE",
 		"BOT_HEALTH_PORT",
 		"BOT_MAX_CONCURRENT_HANDLERS",
 		"BOT_MAX_PENDING_PER_SENDER",
@@ -156,6 +162,10 @@ func initConfig(requireBotToken bool) (*Config, error) {
 }
 
 func (c *Config) validate(requireBotToken bool) error {
+	c.DeploymentEnvironment = strings.ToLower(strings.TrimSpace(c.DeploymentEnvironment))
+	if c.DeploymentEnvironment != "development" && c.DeploymentEnvironment != "test" && c.DeploymentEnvironment != "production" {
+		return errors.New("DEPLOYMENT_ENV must be one of development, test, production")
+	}
 	var missing []string
 	if requireBotToken && c.BotToken == "" {
 		missing = append(missing, "BOT_TOKEN")
@@ -192,6 +202,12 @@ func (c *Config) validate(requireBotToken bool) error {
 		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 			return errors.New("BOT_TELEGRAM_API_URL must be an absolute HTTP(S) URL")
 		}
+		if parsed.Scheme == "http" && !c.BotTelegramAPIInsecure {
+			return errors.New("BOT_TELEGRAM_API_URL may use HTTP only when BOT_TELEGRAM_API_ALLOW_INSECURE=true")
+		}
+		if c.DeploymentEnvironment == "production" && parsed.Scheme != "https" {
+			return errors.New("BOT_TELEGRAM_API_URL must use HTTPS in production")
+		}
 		c.BotTelegramAPIURL = strings.TrimRight(c.BotTelegramAPIURL, "/")
 	}
 	if isPlaceholderSecret(c.Database.Password) {
@@ -213,6 +229,20 @@ func (c *Config) validate(requireBotToken bool) error {
 		return fmt.Errorf("DATABASE_SSLMODE must be one of disable, allow, prefer, require, verify-ca, verify-full")
 	}
 	c.Database.SSLMode = sslMode
+	if c.DeploymentEnvironment == "production" {
+		if sslMode == "disable" || sslMode == "allow" || sslMode == "prefer" {
+			return errors.New("DATABASE_SSLMODE must be require, verify-ca, or verify-full in production")
+		}
+		if !c.Admin.CookieSecure {
+			return errors.New("ADMIN_COOKIE_SECURE must be true in production")
+		}
+		if strings.TrimSpace(c.Admin.PublicURL) != "" {
+			publicURL, err := url.Parse(c.Admin.PublicURL)
+			if err != nil || publicURL.Scheme != "https" || publicURL.Host == "" {
+				return errors.New("ADMIN_PUBLIC_URL must be an absolute HTTPS URL in production")
+			}
+		}
+	}
 	if err := validatePort("DATABASE_PORT", c.Database.Port); err != nil {
 		return err
 	}
