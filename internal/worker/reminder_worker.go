@@ -254,6 +254,16 @@ func (w *ReminderWorker) enqueueRecipientReminders(
 			groupSchedules[dateKey] = lessons
 		}
 
+		if recipient.Subgroup > 0 {
+			filtered := lessons[:0]
+			for _, lesson := range lessons {
+				if lesson.Subgroup == 0 || lesson.Subgroup == recipient.Subgroup {
+					filtered = append(filtered, lesson)
+				}
+			}
+			lessons = filtered
+		}
+
 		for _, slot := range reminderSlots(lessons) {
 			if err := w.enqueueReminderSlot(ctx, recipient, date, now, slot); err != nil && firstErr == nil {
 				firstErr = err

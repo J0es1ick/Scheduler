@@ -48,7 +48,7 @@ func (r *ChatProfileRepository) Get(
 	err := r.db.GetContext(ctx, &profile, `
 		SELECT p.chat_id, p.title, p.default_group_id,
 			g.name AS group_name, g.university_id,
-			u.name AS university_name, p.configured_by,
+			u.name AS university_name, p.schedule_view_format, p.configured_by,
 			p.created_at, p.updated_at
 		FROM chat_schedule_profiles p
 		JOIN groups g ON g.id=p.default_group_id AND g.is_active
@@ -61,6 +61,24 @@ func (r *ChatProfileRepository) Get(
 		return nil, fmt.Errorf("get chat schedule profile %s: %w", chatID, err)
 	}
 	return &profile, nil
+}
+
+func (r *ChatProfileRepository) SetScheduleView(
+	ctx context.Context,
+	chatID string,
+	format domain.ScheduleViewFormat,
+) error {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE chat_schedule_profiles
+		SET schedule_view_format=$2, updated_at=NOW()
+		WHERE chat_id=$1`, chatID, format)
+	if err != nil {
+		return fmt.Errorf("set chat schedule view %s: %w", chatID, err)
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (r *ChatProfileRepository) Delete(ctx context.Context, chatID string) error {

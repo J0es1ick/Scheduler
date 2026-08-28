@@ -788,6 +788,10 @@ func (s *Server) handleUpdateSource(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusNotFound, "Источник не найден")
 			return
 		}
+		if errors.Is(err, ErrSourceLifecycle) {
+			writeAPIError(w, http.StatusConflict, "Сначала переведите источник в активное состояние")
+			return
+		}
 		writeAPIError(w, http.StatusInternalServerError, "Не удалось изменить интервал")
 		return
 	}
@@ -1384,6 +1388,10 @@ func parseTrustedProxies(raw string) ([]*net.IPNet, error) {
 		_, network, err := net.ParseCIDR(value)
 		if err != nil {
 			return nil, fmt.Errorf("admin trusted proxy %q: %w", value, err)
+		}
+		ones, bits := network.Mask.Size()
+		if ones == 0 && (bits == net.IPv4len*8 || bits == net.IPv6len*8) {
+			return nil, fmt.Errorf("admin trusted proxy %q: unrestricted networks are not allowed", value)
 		}
 		result = append(result, network)
 	}

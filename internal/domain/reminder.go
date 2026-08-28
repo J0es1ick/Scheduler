@@ -7,4 +7,5 @@ type ReminderRecipient struct {
 	UniversityName  string `db:"university_name"`
 	Timezone        string `db:"timezone"`
 	ReminderMinutes int    `db:"reminder_minutes"`
+	Subgroup        int    `db:"subgroup"`
 }

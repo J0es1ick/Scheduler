@@ -29,7 +29,11 @@ func TestConnectorLeaseRejectsLateWorkerCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	})
 	if err = database.ApplyMigrations(ctx, db); err != nil {
 		t.Fatal(err)
 	}
@@ -41,10 +45,7 @@ func TestConnectorLeaseRejectsLateWorkerCompletion(t *testing.T) {
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cleanupCancel()
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM connector_ingestion_runs WHERE connector_id=$1`, connectorID)
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM connector_clients WHERE id=$1`, connectorID)
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM data_sources WHERE id=$1`, sourceID)
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM universities WHERE id=$1`, universityID)
+		cleanupConnectorLeaseFixture(t, cleanupCtx, db, connectorID, sourceID, universityID)
 	})
 	if _, err = repo.Create(ctx, repository.CreateConnectorParams{
 		ConnectorID: connectorID, SourceID: sourceID, UniversityID: universityID,
@@ -66,7 +67,7 @@ func TestConnectorLeaseRejectsLateWorkerCompletion(t *testing.T) {
 		t.Fatalf("first claim: run=%+v err=%v", first, err)
 	}
 	if _, err = db.ExecContext(ctx, `
-		UPDATE connector_ingestion_runs SET lease_expires_at=NOW()-INTERVAL '1 second'
+		UPDATE connector_ingestion_runs SET lease_expires_at=TIMESTAMPTZ '-infinity'
 		WHERE id=$1`, first.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +100,11 @@ func TestExpiredConnectorLeaseCannotPublishSchedule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	})
 	if err = database.ApplyMigrations(ctx, db); err != nil {
 		t.Fatal(err)
 	}
@@ -120,9 +125,7 @@ func TestExpiredConnectorLeaseCannotPublishSchedule(t *testing.T) {
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cleanupCancel()
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM connector_ingestion_runs WHERE connector_id=$1`, connectorID)
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM connector_clients WHERE id=$1`, connectorID)
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM universities WHERE id=$1`, universityID)
+		cleanupConnectorLeaseFixture(t, cleanupCtx, db, connectorID, sourceID, universityID)
 	})
 	if err = runRepo.UpdateStatus(ctx, connectorID, domain.ConnectorStatusActive); err != nil {
 		t.Fatal(err)
@@ -137,8 +140,11 @@ func TestExpiredConnectorLeaseCannotPublishSchedule(t *testing.T) {
 	if err != nil || run == nil {
 		t.Fatalf("claim connector run: run=%+v err=%v", run, err)
 	}
+	if run.ConnectorID != connectorID {
+		t.Fatalf("claimed a run for another connector: got %s, want %s", run.ConnectorID, connectorID)
+	}
 	if _, err = db.ExecContext(ctx, `
-		UPDATE connector_ingestion_runs SET lease_expires_at=NOW()-INTERVAL '1 second'
+		UPDATE connector_ingestion_runs SET lease_expires_at=TIMESTAMPTZ '-infinity'
 		WHERE id=$1`, run.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +160,7 @@ func TestExpiredConnectorLeaseCannotPublishSchedule(t *testing.T) {
 	)
 	start := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, time.December, 31, 0, 0, 0, 0, time.UTC)
-	_, err = parser.IngestClaimedExternalSnapshot(ctx, sourceID, domain.ScheduleSnapshot{
+	candidate, err := parser.IngestClaimedExternalSnapshot(ctx, sourceID, domain.ScheduleSnapshot{
 		UniversityID: universityID,
 		SemesterID:   "fence-semester-" + suffix,
 		StartDate:    start,
@@ -171,7 +177,7 @@ func TestExpiredConnectorLeaseCannotPublishSchedule(t *testing.T) {
 		}},
 	}, run.ID, run.ClaimToken)
 	if !errors.Is(err, repository.ErrConnectorClaimLost) {
-		t.Fatalf("expired lease publication error=%v, want ErrConnectorClaimLost", err)
+		t.Fatalf("expired lease publication error=%v, candidate=%+v, want ErrConnectorClaimLost", err, candidate)
 	}
 	var liveLessons int
 	if err = db.GetContext(ctx, &liveLessons,
@@ -180,5 +186,31 @@ func TestExpiredConnectorLeaseCannotPublishSchedule(t *testing.T) {
 	}
 	if liveLessons != 0 {
 		t.Fatalf("expired connector lease published %d lessons", liveLessons)
+	}
+}
+
+func cleanupConnectorLeaseFixture(
+	t *testing.T,
+	ctx context.Context,
+	db *sqlx.DB,
+	connectorID string,
+	sourceID string,
+	universityID string,
+) {
+	t.Helper()
+	statements := []struct {
+		name  string
+		query string
+		arg   string
+	}{
+		{name: "connector ingestion runs", query: `DELETE FROM connector_ingestion_runs WHERE connector_id=$1`, arg: connectorID},
+		{name: "connector client", query: `DELETE FROM connector_clients WHERE id=$1`, arg: connectorID},
+		{name: "data source", query: `DELETE FROM data_sources WHERE id=$1`, arg: sourceID},
+		{name: "university", query: `DELETE FROM universities WHERE id=$1`, arg: universityID},
+	}
+	for _, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement.query, statement.arg); err != nil {
+			t.Errorf("clean up %s: %v", statement.name, err)
+		}
 	}
 }

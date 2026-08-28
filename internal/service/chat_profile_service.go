@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
@@ -34,4 +35,15 @@ func (s *ChatProfileService) Get(
 
 func (s *ChatProfileService) Delete(ctx context.Context, chatID string) error {
 	return s.repo.Delete(ctx, chatID)
+}
+
+func (s *ChatProfileService) SetScheduleView(
+	ctx context.Context,
+	chatID string,
+	format domain.ScheduleViewFormat,
+) error {
+	if format != domain.ScheduleViewCompact && format != domain.ScheduleViewVisual {
+		return fmt.Errorf("unsupported schedule view format %q", format)
+	}
+	return s.repo.SetScheduleView(ctx, chatID, format)
 }

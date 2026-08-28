@@ -27,7 +27,11 @@ func TestLessonIdentityKeepsOverrideAcrossSourceEditsAndTemporaryAbsence(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	t.Cleanup(func() {
+		if closeErr := db.Close(); closeErr != nil {
+			t.Errorf("close integration database: %v", closeErr)
+		}
+	})
 	if err = database.ApplyMigrations(ctx, db); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +44,9 @@ func TestLessonIdentityKeepsOverrideAcrossSourceEditsAndTemporaryAbsence(t *test
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cleanupCancel()
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM universities WHERE id=$1`, universityID)
+		if _, cleanupErr := db.ExecContext(cleanupCtx, `DELETE FROM universities WHERE id=$1`, universityID); cleanupErr != nil {
+			t.Errorf("cleanup identity university: %v", cleanupErr)
+		}
 	})
 	if _, err = repository.NewUniversityRepository(db).CreateUniversity(
 		ctx, universityID, "Identity test", "Identity test", "https://example.test", true,
@@ -124,9 +130,6 @@ func TestLessonIdentityKeepsOverrideAcrossSourceEditsAndTemporaryAbsence(t *test
 		"Returned subject", "Returned teacher", "303", true)
 	assertEffectiveOverride(t, ctx, db, groupID, stableLessonID, "returned-id-"+suffix)
 
-	// Models migration 026 selecting A followed by an old application
-	// publishing B before startup reconciliation. A is now obsolete and must
-	// not overwrite B or block every subsequent process start.
 	if _, err = db.ExecContext(ctx, `
 		INSERT INTO publication_reconciliation_queue (university_id, snapshot_id, reason)
 		VALUES ($1,$2,'rolling migration integration test')`, universityID, firstSnapshotID); err != nil {

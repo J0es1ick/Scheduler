@@ -19,7 +19,10 @@ type Store struct {
 	db *sqlx.DB
 }
 
-var ErrSourceBusy = errors.New("data source is currently running")
+var (
+	ErrSourceBusy      = errors.New("data source is currently running")
+	ErrSourceLifecycle = errors.New("data source lifecycle does not allow enabling")
+)
 
 func NewStore(db *sqlx.DB) *Store { return &Store{db: db} }
 
@@ -370,8 +373,6 @@ func (s *Store) Groups(
 		CASE WHEN g.name ~ '^[0-9]+' THEN substring(g.name from '^[0-9]+')::int ELSE 2147483647 END,
 		g.name`
 	if selector {
-		// Interleave the first matches from each course. Otherwise a short selector is
-		// filled by first-year groups before the user has typed a course number.
 		orderBy = `g.is_active DESC,
 			CASE WHEN g.name ~ '^[0-9]+' THEN 0 ELSE 1 END,
 			ROW_NUMBER() OVER (
@@ -488,7 +489,23 @@ func (s *Store) UpdateSourceSettings(
 	interval *int,
 	isEnabled *bool,
 ) error {
-	result, err := s.db.ExecContext(ctx,
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("admin update source settings: begin: %w", err)
+	}
+	defer tx.Rollback()
+	var lifecycle string
+	if err = tx.GetContext(ctx, &lifecycle,
+		`SELECT lifecycle_status FROM data_sources WHERE id=$1 FOR UPDATE`, sourceID,
+	); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return fmt.Errorf("admin update source settings: load source: %w", err)
+	}
+	if isEnabled != nil && *isEnabled && lifecycle != domain.ConnectorStatusActive {
+		return ErrSourceLifecycle
+	}
+	result, err := tx.ExecContext(ctx,
 		`UPDATE data_sources
 		 SET update_interval=COALESCE($1::int, update_interval),
 		     last_run_at=CASE
@@ -508,6 +525,9 @@ func (s *Store) UpdateSourceSettings(
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return ErrNotFound
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("admin update source settings: commit: %w", err)
 	}
 	return nil
 }
@@ -633,6 +653,9 @@ func (s *Store) UpdateUserAdminRole(ctx context.Context, userID, role string) er
 		return fmt.Errorf("admin update user role: begin: %w", err)
 	}
 	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('scheduler-admin-roles'))`); err != nil {
+		return fmt.Errorf("admin update user role: acquire role lock: %w", err)
+	}
 	var previous string
 	if err = tx.GetContext(ctx, &previous, `SELECT admin_role FROM users WHERE id=$1 FOR UPDATE`, userID); errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound

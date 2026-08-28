@@ -19,7 +19,25 @@ func NewSubscriptionService(subRepo *repository.SubscriptionRepository) *Subscri
 
 func (s *SubscriptionService) Subscribe(ctx context.Context, userID, objectID, objectType string) error {
 	id := uuid.New().String()
+	if objectType == "group" {
+		return s.subRepo.UpsertActiveGroupSubscription(ctx, id, userID, objectID)
+	}
 	return s.subRepo.UpsertSubscription(ctx, id, userID, objectID, objectType)
+}
+
+func (s *SubscriptionService) SubscribeAndSetDefault(ctx context.Context, userID, groupID string) error {
+	return s.subRepo.SubscribeAndSetDefault(ctx, uuid.NewString(), userID, groupID)
+}
+
+func (s *SubscriptionService) SetDefaultGroup(ctx context.Context, userID, groupID string) error {
+	return s.subRepo.SetDefaultSubscribedGroup(ctx, userID, groupID)
+}
+
+func (s *SubscriptionService) UnsubscribeAndSelectDefault(
+	ctx context.Context,
+	userID, groupID string,
+) (string, error) {
+	return s.subRepo.UnsubscribeAndSelectDefault(ctx, userID, groupID)
 }
 
 func (s *SubscriptionService) Unsubscribe(ctx context.Context, userID, objectID, objectType string) error {
@@ -52,4 +70,16 @@ func (s *SubscriptionService) SetGroupScheduleView(
 		return fmt.Errorf("unsupported schedule view format %q", format)
 	}
 	return s.subRepo.SetGroupScheduleView(ctx, userID, groupID, format)
+}
+
+func (s *SubscriptionService) SetGroupSubgroup(
+	ctx context.Context,
+	userID string,
+	groupID string,
+	subgroup int,
+) error {
+	if subgroup < 0 || subgroup > 100 {
+		return fmt.Errorf("unsupported subgroup %d", subgroup)
+	}
+	return s.subRepo.SetGroupSubgroup(ctx, userID, groupID, subgroup)
 }

@@ -40,6 +40,14 @@ func TestRequestIPTrustsForwardedHeaderOnlyFromConfiguredProxy(t *testing.T) {
 	}
 }
 
+func TestParseTrustedProxiesRejectsUnrestrictedNetworks(t *testing.T) {
+	for _, value := range []string{"0.0.0.0/0", "::/0"} {
+		if _, err := parseTrustedProxies(value); err == nil {
+			t.Fatalf("unrestricted proxy network %q was accepted", value)
+		}
+	}
+}
+
 func TestRequestIPIgnoresSpoofedLeftmostForwardedAddress(t *testing.T) {
 	proxies, err := parseTrustedProxies("127.0.0.1/32")
 	if err != nil {

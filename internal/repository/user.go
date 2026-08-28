@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -22,10 +23,14 @@ func NewUserRepository(db *sqlx.DB) *UserRepository {
 
 func (r *UserRepository) CreateUser(ctx context.Context, id, username string, isAdmin bool) (string, error) {
 	now := time.Now()
+	role := "none"
+	if isAdmin {
+		role = "owner"
+	}
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO users (id, username, is_admin, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5)`,
-		id, username, isAdmin, now, now)
+		`INSERT INTO users (id, username, is_admin, admin_role, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		id, username, isAdmin, role, now, now)
 	if err != nil {
 		return "", fmt.Errorf("create user: %w", err)
 	}
@@ -121,12 +126,12 @@ func (r *UserRepository) MarkMenuConfigured(ctx context.Context, userID, fingerp
 	return nil
 }
 
-func (r *UserRepository) UpdateUser(ctx context.Context, id, username string, isAdmin bool) error {
+func (r *UserRepository) UpdateUsername(ctx context.Context, id, username string) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE users SET username = $1, is_admin = $2, updated_at = $3 WHERE id = $4`,
-		username, isAdmin, time.Now(), id)
+		`UPDATE users SET username=$1, updated_at=$2 WHERE id=$3`,
+		username, time.Now(), id)
 	if err != nil {
-		return fmt.Errorf("update user %s: %w", id, err)
+		return fmt.Errorf("update username for user %s: %w", id, err)
 	}
 	return nil
 }
@@ -250,6 +255,19 @@ func (r *UserRepository) DeleteUser(ctx context.Context, id string) error {
 		return fmt.Errorf("delete user %s: begin: %w", id, err)
 	}
 	defer tx.Rollback()
+	var role struct {
+		IsAdmin   bool   `db:"is_admin"`
+		AdminRole string `db:"admin_role"`
+	}
+	if err = tx.GetContext(ctx, &role, `
+		SELECT is_admin, admin_role FROM users WHERE id=$1 FOR UPDATE`, id); errors.Is(err, sql.ErrNoRows) {
+		return sql.ErrNoRows
+	} else if err != nil {
+		return fmt.Errorf("delete user %s: lock profile: %w", id, err)
+	}
+	if role.IsAdmin || role.AdminRole != "none" {
+		return fmt.Errorf("remove administrator role before deleting the profile")
+	}
 	if _, err = tx.ExecContext(ctx, `DELETE FROM admin_sessions WHERE admin_id=$1`, id); err != nil {
 		return fmt.Errorf("delete user %s: revoke admin sessions: %w", id, err)
 	}
@@ -294,7 +312,8 @@ func (r *UserRepository) ExportUserData(ctx context.Context, id string) (*domain
 		References:      []domain.PersonalDataReference{},
 	}
 	if err = r.db.SelectContext(ctx, &result.Subscriptions, `
-		SELECT id, user_id, object_id, object_type, created_at, updated_at
+		SELECT id, user_id, object_id, object_type, schedule_view_format, subgroup,
+			created_at, updated_at
 		FROM subscriptions
 		WHERE user_id=$1
 		ORDER BY created_at`, id); err != nil {

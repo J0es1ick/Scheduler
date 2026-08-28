@@ -27,7 +27,11 @@ func TestTeacherAndRoomQueriesAreScopedByUniversity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect integration database: %v", err)
 	}
-	defer db.Close()
+	t.Cleanup(func() {
+		if closeErr := db.Close(); closeErr != nil {
+			t.Errorf("close integration database: %v", closeErr)
+		}
+	})
 	if err = database.ApplyMigrations(ctx, db); err != nil {
 		t.Fatalf("apply migrations: %v", err)
 	}
@@ -43,7 +47,9 @@ func TestTeacherAndRoomQueriesAreScopedByUniversity(t *testing.T) {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cleanupCancel()
 		for _, universityID := range []string{firstUniversity, secondUniversity} {
-			_, _ = db.ExecContext(cleanupCtx, `DELETE FROM universities WHERE id=$1`, universityID)
+			if _, cleanupErr := db.ExecContext(cleanupCtx, `DELETE FROM universities WHERE id=$1`, universityID); cleanupErr != nil {
+				t.Errorf("cleanup lesson scope university %s: %v", universityID, cleanupErr)
+			}
 		}
 	})
 	for _, universityID := range []string{firstUniversity, secondUniversity} {

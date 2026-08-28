@@ -38,7 +38,9 @@ func openOperationalIntegrationDB(t *testing.T) (*sqlx.DB, context.Context) {
 		t.Fatalf("apply migrations: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = db.Close()
+		if err := db.Close(); err != nil {
+			t.Errorf("close integration database: %v", err)
+		}
 		cancel()
 	})
 	return db, ctx
@@ -66,8 +68,7 @@ func TestConnectorRateLimitIsAtomic(t *testing.T) {
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM connector_clients WHERE id=$1`, connectorID)
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM universities WHERE id=$1`, universityID)
+		cleanupConnectorLeaseFixture(t, cleanupCtx, db, connectorID, "rate-source-"+suffix, universityID)
 	})
 
 	const limit = 5
@@ -255,6 +256,14 @@ func TestOperationalRetentionBoundsPayloadsAndHistory(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		cleanupConnectorLeaseFixture(t, cleanupCtx, db, connectorID, sourceID, universityID)
+		if _, err := db.ExecContext(cleanupCtx, `DELETE FROM admin_audit_logs WHERE id=$1`, auditID); err != nil {
+			t.Errorf("clean up retention audit fixture: %v", err)
+		}
+	})
 	parseLogs := repository.NewParseLogRepository(db)
 	if _, err := parseLogs.CreateParseLog(ctx, logID, sourceID, "failed", 0, "old failure"); err != nil {
 		t.Fatal(err)
@@ -297,14 +306,6 @@ func TestOperationalRetentionBoundsPayloadsAndHistory(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	t.Cleanup(func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM connector_clients WHERE id=$1`, connectorID)
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM admin_audit_logs WHERE id=$1`, auditID)
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM universities WHERE id=$1`, universityID)
-	})
-
 	ran, err := parseLogs.RunOperationalRetention(ctx)
 	if err != nil {
 		t.Fatalf("run retention: %v", err)
@@ -360,9 +361,31 @@ func TestDeleteUserRevokesSessionsAndAnonymizesOperationalReferences(t *testing.
 	auditID := "privacy-audit-" + suffix
 	overrideID := "privacy-override-" + suffix
 	requestID := "privacy-request-" + suffix
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		for _, statement := range []struct {
+			query string
+			id    string
+		}{
+			{`DELETE FROM connector_ingestion_runs WHERE connector_id=$1`, connectorID},
+			{`DELETE FROM connector_clients WHERE id=$1`, connectorID},
+			{`DELETE FROM support_requests WHERE id=$1`, requestID},
+			{`DELETE FROM admin_audit_logs WHERE id=$1`, auditID},
+			{`DELETE FROM admin_sessions WHERE admin_id=$1`, userID},
+			{`DELETE FROM chat_schedule_profiles WHERE chat_id=$1`, "privacy-chat-" + suffix},
+			{`DELETE FROM users WHERE id=$1`, userID},
+			{`DELETE FROM users WHERE id=$1`, otherUserID},
+			{`DELETE FROM universities WHERE id=$1`, universityID},
+		} {
+			if _, err := db.ExecContext(cleanupCtx, statement.query, statement.id); err != nil {
+				t.Errorf("clean up privacy fixture %s: %v", statement.id, err)
+			}
+		}
+	})
 
 	users := repository.NewUserRepository(db)
-	if _, err := users.CreateUser(ctx, userID, "privacy_target", true); err != nil {
+	if _, err := users.CreateUser(ctx, userID, "privacy_target", false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := users.CreateUser(ctx, otherUserID, "privacy_owner", false); err != nil {
@@ -431,16 +454,6 @@ func TestDeleteUserRevokesSessionsAndAnonymizesOperationalReferences(t *testing.
 			t.Fatalf("create privacy reference: %v", err)
 		}
 	}
-	t.Cleanup(func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM connector_clients WHERE id=$1`, connectorID)
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM support_requests WHERE id=$1`, requestID)
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM admin_audit_logs WHERE id=$1`, auditID)
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM users WHERE id=$1`, otherUserID)
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM universities WHERE id=$1`, universityID)
-	})
-
 	exported, err := users.ExportUserData(ctx, userID)
 	if err != nil {
 		t.Fatalf("export user data: %v", err)

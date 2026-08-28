@@ -26,7 +26,11 @@ func TestPostgresAdminSessionLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect integration database: %v", err)
 	}
-	defer db.Close()
+	t.Cleanup(func() {
+		if closeErr := db.Close(); closeErr != nil {
+			t.Errorf("close integration database: %v", closeErr)
+		}
+	})
 	if err = database.ApplyMigrations(ctx, db); err != nil {
 		t.Fatalf("apply migrations: %v", err)
 	}
@@ -37,7 +41,11 @@ func TestPostgresAdminSessionLifecycle(t *testing.T) {
 		ID: "integration-admin", Name: "Integration Admin", AuthMethod: "telegram",
 		Role: "owner", CSRFToken: "csrf-" + uuid.NewString(),
 	}
-	t.Cleanup(func() { _ = store.DeleteAdminSession(context.Background(), tokenHash) })
+	t.Cleanup(func() {
+		if cleanupErr := store.DeleteAdminSession(context.Background(), tokenHash); cleanupErr != nil {
+			t.Errorf("cleanup admin session: %v", cleanupErr)
+		}
+	})
 
 	expires := time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond)
 	if err = store.SaveAdminSession(ctx, tokenHash, identity, expires, 100); err != nil {

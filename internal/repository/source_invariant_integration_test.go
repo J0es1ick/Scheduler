@@ -28,7 +28,11 @@ func TestOnlyOneSourceCanBeActiveForUniversity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	t.Cleanup(func() {
+		if closeErr := db.Close(); closeErr != nil {
+			t.Errorf("close integration database: %v", closeErr)
+		}
+	})
 	if err = database.ApplyMigrations(ctx, db); err != nil {
 		t.Fatal(err)
 	}
@@ -44,8 +48,12 @@ func TestOnlyOneSourceCanBeActiveForUniversity(t *testing.T) {
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cleanupCancel()
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM connector_clients WHERE id=$1`, connectorID)
-		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM universities WHERE id=$1`, universityID)
+		if _, cleanupErr := db.ExecContext(cleanupCtx, `DELETE FROM connector_clients WHERE id=$1`, connectorID); cleanupErr != nil {
+			t.Errorf("cleanup connector client: %v", cleanupErr)
+		}
+		if _, cleanupErr := db.ExecContext(cleanupCtx, `DELETE FROM universities WHERE id=$1`, universityID); cleanupErr != nil {
+			t.Errorf("cleanup source invariant university: %v", cleanupErr)
+		}
 	})
 
 	if _, err = universityRepo.CreateUniversity(
