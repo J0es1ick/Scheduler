@@ -73,6 +73,18 @@ func TestScheduleSnapshotsEquivalentIgnoresTechnicalIdentityAndOrder(t *testing.
 	}
 }
 
+func TestBuildScheduleSnapshotKeepsAdapterGroupExternalIdentity(t *testing.T) {
+	payload, _ := buildScheduleSnapshot("university", "semester", "source", []groupScheduleResult{{
+		group: domain.Group{
+			ID: "group:canonical", ExternalID: "source-group-101",
+			UniversityID: "university", Name: "1-ЭЭ-В",
+		},
+	}})
+	if len(payload.Groups) != 1 || payload.Groups[0].ExternalID != "source-group-101" {
+		t.Fatalf("snapshot group external identity = %+v", payload.Groups)
+	}
+}
+
 func TestEvaluateSnapshotTrustsRepeatedApprovedEmptySchedule(t *testing.T) {
 	approved := domain.ScheduleSnapshot{
 		UniversityID: "isuct",

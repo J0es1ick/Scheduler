@@ -25,6 +25,9 @@ func TestConvertCycleSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	lesson := result.Groups[0].Lessons[0]
+	if result.Groups[0].ExternalID != "g1" {
+		t.Fatalf("external group id = %q", result.Groups[0].ExternalID)
+	}
 	if lesson.WeekType != domain.WeekTypeEvery || lesson.Recurrence.CycleLength != 4 {
 		t.Fatalf("unexpected recurrence: %#v", lesson)
 	}

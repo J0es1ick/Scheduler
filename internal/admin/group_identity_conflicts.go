@@ -31,6 +31,20 @@ func (s *Store) ResolveGroupIdentityConflict(
 		return nil, fmt.Errorf("begin group identity resolution: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	var universityID string
+	if err = tx.GetContext(ctx, &universityID,
+		`SELECT university_id FROM data_sources WHERE id=$1`, sourceID,
+	); errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	} else if err != nil {
+		return nil, fmt.Errorf("load identity conflict source: %w", err)
+	}
+	if _, err = tx.ExecContext(ctx, `
+		SELECT pg_advisory_xact_lock(
+			hashtext('scheduler-snapshot-publication'), hashtext($1)
+		)`, universityID); err != nil {
+		return nil, fmt.Errorf("lock identity conflict university: %w", err)
+	}
 
 	var conflict domain.GroupIdentityConflict
 	if err = tx.GetContext(ctx, &conflict, `

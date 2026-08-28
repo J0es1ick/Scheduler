@@ -591,33 +591,27 @@ func combinePublicationHooks(hooks ...repository.SnapshotPublicationHook) reposi
 }
 
 func (s *ParserService) snapshotPublicationHook(
-	ctx context.Context,
+	_ context.Context,
 	candidate *domain.ParserSnapshot,
 ) (repository.SnapshotPublicationHook, error) {
-	groupIDs := make(map[string]struct{}, len(candidate.Payload.Groups))
-	for _, group := range candidate.Payload.Groups {
-		groupIDs[group.ID] = struct{}{}
-	}
-	currentGroups, err := s.groupRepo.GetGroupsByUniversityID(ctx, candidate.Payload.UniversityID)
-	if err != nil {
-		return nil, err
-	}
-	for _, group := range currentGroups {
-		groupIDs[group.ID] = struct{}{}
-	}
-	before, err := s.captureEffectiveSchedules(ctx, candidate.Payload.UniversityID, groupIDs)
-	if err != nil {
-		return nil, err
-	}
 	var hook repository.SnapshotPublicationHook
 	if s.notificationRepo != nil {
 		hook = func(ctx context.Context, publication *repository.SnapshotPublication) error {
+			beforeLessons := publication.PreviousEffectiveLessons()
 			afterLessons, err := publication.EffectiveLessonsByUniversity(
 				ctx, candidate.Payload.UniversityID,
 			)
 			if err != nil {
 				return err
 			}
+			groupIDs := make(map[string]struct{})
+			for _, lesson := range beforeLessons {
+				groupIDs[lesson.GroupID] = struct{}{}
+			}
+			for _, lesson := range afterLessons {
+				groupIDs[lesson.GroupID] = struct{}{}
+			}
+			before := schedulesByGroup(groupIDs, beforeLessons)
 			after := schedulesByGroup(groupIDs, afterLessons)
 			for groupID := range groupIDs {
 				diff := CompareLessonSnapshots(before[groupID], after[groupID])
@@ -634,18 +628,6 @@ func (s *ParserService) snapshotPublicationHook(
 		}
 	}
 	return hook, nil
-}
-
-func (s *ParserService) captureEffectiveSchedules(
-	ctx context.Context,
-	universityID string,
-	groupIDs map[string]struct{},
-) (map[string][]domain.Lesson, error) {
-	lessons, err := s.scheduleSvc.GetAllLessonsForUniversity(ctx, universityID)
-	if err != nil {
-		return nil, fmt.Errorf("read effective schedule for university %s: %w", universityID, err)
-	}
-	return schedulesByGroup(groupIDs, lessons), nil
 }
 
 func schedulesByGroup(
@@ -682,8 +664,13 @@ func buildScheduleSnapshot(
 	}
 	total := 0
 	for _, result := range results {
+		externalID := strings.TrimSpace(result.group.ExternalID)
+		if externalID == "" {
+			externalID = result.group.ID
+		}
 		group := domain.SnapshotGroup{
 			ID:           result.group.ID,
+			ExternalID:   externalID,
 			UniversityID: universityID,
 			Name:         strings.TrimSpace(result.group.Name),
 			Lessons:      result.lessons,

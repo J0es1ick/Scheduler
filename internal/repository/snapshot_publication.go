@@ -93,12 +93,15 @@ func (r *ParserSnapshotRepository) PublishWithHook(
 	}
 	var source publicationSource
 	if err = tx.GetContext(ctx, &source, `
-		SELECT adapter_type, lifecycle_status, university_id
+		SELECT adapter_type, lifecycle_status, university_id, is_enabled
 		FROM data_sources WHERE id=$1 FOR UPDATE`, row.DataSourceID); err != nil {
 		return nil, fmt.Errorf("publish snapshot: lock source: %w", err)
 	}
 	if source.Lifecycle != domain.ConnectorStatusActive {
 		return nil, fmt.Errorf("publish snapshot: source %s is not active", row.DataSourceID)
+	}
+	if !source.IsEnabled {
+		return nil, fmt.Errorf("publish snapshot: source %s is disabled", row.DataSourceID)
 	}
 	snapshot, err := applyPublicationSnapshot(
 		ctx, tx, row, source.AdapterType, source.UniversityID, actorID, reviewNote, hook, true,
@@ -145,6 +148,7 @@ func (r *ParserSnapshotRepository) RestorePublishedSnapshot(
 	type restorationSource struct {
 		AdapterType        string         `db:"adapter_type"`
 		Lifecycle          string         `db:"lifecycle_status"`
+		IsEnabled          bool           `db:"is_enabled"`
 		UniversityID       string         `db:"university_id"`
 		CurrentSnapshotID  string         `db:"current_snapshot_id"`
 		LastSuccessAt      *time.Time     `db:"last_success_at"`
@@ -156,14 +160,14 @@ func (r *ParserSnapshotRepository) RestorePublishedSnapshot(
 	}
 	var source restorationSource
 	if err = tx.GetContext(ctx, &source, `
-		SELECT adapter_type, lifecycle_status, university_id,
+		SELECT adapter_type, lifecycle_status, is_enabled, university_id,
 		       COALESCE(current_snapshot_id, '') AS current_snapshot_id,
 		       last_success_at, last_run_at, last_error,
 		       consecutive_failures, next_retry_at, updated_at
 		FROM data_sources WHERE id=$1 FOR UPDATE`, row.DataSourceID); err != nil {
 		return nil, fmt.Errorf("restore published snapshot: lock source: %w", err)
 	}
-	if source.Lifecycle != domain.ConnectorStatusActive || source.CurrentSnapshotID != snapshotID {
+	if source.Lifecycle != domain.ConnectorStatusActive || !source.IsEnabled || source.CurrentSnapshotID != snapshotID {
 		var newerPublicationExists bool
 		if err = tx.GetContext(ctx, &newerPublicationExists, `
 			SELECT EXISTS (
@@ -327,6 +331,7 @@ type publicationSource struct {
 	AdapterType  string `db:"adapter_type"`
 	Lifecycle    string `db:"lifecycle_status"`
 	UniversityID string `db:"university_id"`
+	IsEnabled    bool   `db:"is_enabled"`
 }
 
 type connectorPublicationTarget struct {
@@ -368,7 +373,7 @@ func applyPublicationSnapshot(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	row *parserSnapshotRow,
-	adapterType, universityID, actorID, reviewNote string,
+	_ string, universityID, actorID, reviewNote string,
 	hook SnapshotPublicationHook,
 	finalizeParseLog bool,
 ) (*domain.ParserSnapshot, error) {
@@ -389,9 +394,7 @@ func applyPublicationSnapshot(
 			row.ID, payload.UniversityID, universityID,
 		)
 	}
-	if adapterType == domain.IntegrationModeExternalPush {
-		payload = normalizeExternalParityRecurrence(payload)
-	}
+	payload = normalizeParityRecurrence(payload)
 	var existingGroups []domain.Group
 	if err = tx.SelectContext(ctx, &existingGroups, `
 		SELECT id, university_id, name, is_active, source_active,
@@ -403,7 +406,7 @@ func applyPublicationSnapshot(
 	if err != nil {
 		return nil, fmt.Errorf("publish snapshot: %w", err)
 	}
-	payload, _, err = CanonicalizeSnapshotGroupIDsWithMappings(payload, existingGroups, mappings)
+	payload, _, discoveredMappings, err := canonicalizeSnapshotGroupIDs(payload, existingGroups, mappings)
 	if err != nil {
 		return nil, fmt.Errorf("publish snapshot: reconcile group identities: %w", err)
 	}
@@ -412,6 +415,13 @@ func applyPublicationSnapshot(
 		return nil, err
 	}
 	snapshot.Payload = payload
+	var beforeLessons []domain.Lesson
+	if err = tx.SelectContext(ctx, &beforeLessons,
+		lessonSelect+` WHERE university_id=$1 ORDER BY group_id, day_of_week, time_start`,
+		universityID,
+	); err != nil {
+		return nil, fmt.Errorf("publish snapshot: capture notification baseline: %w", err)
+	}
 	canonicalPayload, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("publish snapshot: encode canonical payload: %w", err)
@@ -439,6 +449,19 @@ func applyPublicationSnapshot(
 				updated_at=NOW()`,
 			group.ID, group.UniversityID, group.Name); err != nil {
 			return nil, fmt.Errorf("publish snapshot: group %s: %w", group.ID, err)
+		}
+	}
+	for externalID, mapping := range discoveredMappings {
+		if _, err = tx.ExecContext(ctx, `
+			INSERT INTO group_source_identity_mappings (
+				data_source_id, external_group_id, group_id, expected_name
+			) VALUES ($1,$2,$3,$4)
+			ON CONFLICT (data_source_id, external_group_id) DO UPDATE SET
+				group_id=EXCLUDED.group_id,
+				expected_name=EXCLUDED.expected_name,
+				updated_at=NOW()`,
+			row.DataSourceID, externalID, mapping.GroupID, mapping.ExpectedName); err != nil {
+			return nil, fmt.Errorf("publish snapshot: save group identity mapping %s: %w", externalID, err)
 		}
 	}
 	if err = storeLessonIdentities(ctx, tx, payload); err != nil {
@@ -493,7 +516,7 @@ func applyPublicationSnapshot(
 		}
 	}
 	if hook != nil {
-		if err = hook(ctx, &SnapshotPublication{tx: tx}); err != nil {
+		if err = hook(ctx, &SnapshotPublication{tx: tx, beforeLessons: beforeLessons}); err != nil {
 			return nil, fmt.Errorf("publish snapshot: transactional hook: %w", err)
 		}
 	}

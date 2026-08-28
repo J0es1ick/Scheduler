@@ -49,7 +49,8 @@ func convertSnapshot(sourceID, universityID string, input connector.Snapshot) (d
 	for _, inputGroup := range input.Groups {
 		groupID := stableID("group", universityID, inputGroup.ExternalID)
 		group := domain.SnapshotGroup{
-			ID: groupID, UniversityID: universityID, Name: strings.TrimSpace(inputGroup.Name),
+			ID: groupID, ExternalID: inputGroup.ExternalID,
+			UniversityID: universityID, Name: strings.TrimSpace(inputGroup.Name),
 			Lessons: make([]domain.Lesson, 0, len(inputGroup.Lessons)),
 		}
 		for _, inputLesson := range inputGroup.Lessons {

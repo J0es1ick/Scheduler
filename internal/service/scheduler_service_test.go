@@ -36,8 +36,30 @@ func TestLessonMatchesDateUsesSourceValidityAsParityAnchor(t *testing.T) {
 	}
 }
 
+func TestLessonMatchesDateKeepsISUCTFirstPublishedWeek(t *testing.T) {
+	evenFrom := mustDate(t, "2026-09-01")
+	oddFrom := mustDate(t, "2026-09-08")
+	validTo := mustDate(t, "2026-12-30")
+	even := domain.Lesson{
+		DayOfWeek: 2,
+		WeekType:  domain.WeekTypeEven,
+		ValidFrom: &evenFrom,
+		ValidTo:   &validTo,
+	}
+	odd := even
+	odd.WeekType = domain.WeekTypeOdd
+	odd.ValidFrom = &oddFrom
+
+	if !lessonMatchesDate(even, mustDate(t, "2026-09-01"), nil) {
+		t.Fatal("the first source occurrence must be visible regardless of its parity label")
+	}
+	if lessonMatchesDate(odd, mustDate(t, "2026-09-01"), nil) {
+		t.Fatal("a lesson whose first occurrence is next week must remain hidden")
+	}
+}
+
 func TestLessonMatchesDateDistinguishesOddAndEvenByExplicitTermRecurrence(t *testing.T) {
-	semesterStart := mustDate(t, "2026-08-31") // понедельник первой, нечётной недели
+	semesterStart := mustDate(t, "2026-08-31")
 	validTo := mustDate(t, "2027-01-31")
 	odd := domain.Lesson{
 		DayOfWeek: 2,

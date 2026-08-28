@@ -20,6 +20,7 @@ type SnapshotAnomaly struct {
 
 type SnapshotGroup struct {
 	ID           string   `json:"id"`
+	ExternalID   string   `json:"external_id,omitempty"`
 	UniversityID string   `json:"university_id"`
 	Name         string   `json:"name"`
 	Lessons      []Lesson `json:"lessons"`

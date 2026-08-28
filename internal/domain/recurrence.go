@@ -29,8 +29,8 @@ func (r RecurrenceRule) Matches(date time.Time, fallbackAnchor *time.Time) bool 
 	if anchor == nil {
 		return false
 	}
-	start := time.Date(anchor.Year(), anchor.Month(), anchor.Day(), 0, 0, 0, 0, anchor.Location())
-	current := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+	start := time.Date(anchor.Year(), anchor.Month(), anchor.Day(), 0, 0, 0, 0, time.UTC)
+	current := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
 	days := int(current.Sub(start).Hours() / 24)
 	if days < 0 {
 		return false

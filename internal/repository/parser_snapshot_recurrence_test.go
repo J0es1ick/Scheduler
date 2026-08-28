@@ -18,7 +18,7 @@ func TestNormalizeExternalParityRecurrence(t *testing.T) {
 		}}},
 	}
 
-	result := normalizeExternalParityRecurrence(payload)
+	result := normalizeParityRecurrence(payload)
 	odd := result.Groups[0].Lessons[0].Recurrence
 	even := result.Groups[0].Lessons[1].Recurrence
 	every := result.Groups[0].Lessons[2].Recurrence
@@ -32,5 +32,25 @@ func TestNormalizeExternalParityRecurrence(t *testing.T) {
 	}
 	if !every.IsZero() {
 		t.Fatalf("weekly lesson recurrence was changed: %#v", every)
+	}
+}
+
+func TestNormalizeParityRecurrencePreservesSourceOccurrenceDates(t *testing.T) {
+	start := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)
+	oddFrom := time.Date(2026, time.September, 8, 0, 0, 0, 0, time.UTC)
+	evenFrom := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)
+	payload := domain.ScheduleSnapshot{
+		StartDate: start,
+		Groups: []domain.SnapshotGroup{{Lessons: []domain.Lesson{
+			{WeekType: domain.WeekTypeOdd, ValidFrom: &oddFrom},
+			{WeekType: domain.WeekTypeEven, ValidFrom: &evenFrom},
+		}}},
+	}
+
+	result := normalizeParityRecurrence(payload)
+	for index, lesson := range result.Groups[0].Lessons {
+		if !lesson.Recurrence.IsZero() {
+			t.Fatalf("lesson %d received an artificial recurrence: %#v", index, lesson.Recurrence)
+		}
 	}
 }

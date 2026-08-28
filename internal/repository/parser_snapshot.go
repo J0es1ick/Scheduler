@@ -17,7 +17,14 @@ type ParserSnapshotRepository struct {
 }
 
 type SnapshotPublication struct {
-	tx *sqlx.Tx
+	tx            *sqlx.Tx
+	beforeLessons []domain.Lesson
+}
+
+func (p *SnapshotPublication) PreviousEffectiveLessons() []domain.Lesson {
+	result := make([]domain.Lesson, len(p.beforeLessons))
+	copy(result, p.beforeLessons)
+	return result
 }
 
 func (p *SnapshotPublication) CompleteConnectorIngestion(
@@ -220,11 +227,12 @@ func (r *ParserSnapshotRepository) Publish(
 	return r.PublishWithHook(ctx, snapshotID, actorID, reviewNote, nil)
 }
 
-func normalizeExternalParityRecurrence(payload domain.ScheduleSnapshot) domain.ScheduleSnapshot {
+func normalizeParityRecurrence(payload domain.ScheduleSnapshot) domain.ScheduleSnapshot {
 	for groupIndex := range payload.Groups {
 		for lessonIndex := range payload.Groups[groupIndex].Lessons {
 			lesson := &payload.Groups[groupIndex].Lessons[lessonIndex]
 			if !lesson.Recurrence.IsZero() ||
+				lesson.ValidFrom != nil ||
 				(lesson.WeekType != domain.WeekTypeOdd && lesson.WeekType != domain.WeekTypeEven) {
 				continue
 			}

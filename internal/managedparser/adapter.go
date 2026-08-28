@@ -77,7 +77,8 @@ func (a *adapter) FetchGroups(ctx context.Context) ([]domain.Group, error) {
 		internalID := stableID("group", a.UniversityID(), item.ExternalID)
 		lookup[internalID] = item
 		result = append(result, domain.Group{
-			ID: internalID, UniversityID: a.UniversityID(), Name: item.Name, IsActive: true,
+			ID: internalID, ExternalID: item.ExternalID,
+			UniversityID: a.UniversityID(), Name: item.Name, IsActive: true,
 		})
 	}
 	a.mu.Lock()
@@ -177,6 +178,16 @@ func convertLesson(a *adapter, groupID string, input managed.Lesson, fetchedAt t
 				return domain.Lesson{}, err
 			}
 			lesson.ValidFrom, lesson.ValidTo = &from, &to
+		}
+		if recurrence.Kind == connector.RecurrenceOdd || recurrence.Kind == connector.RecurrenceEven {
+			cycleWeek := 1
+			if recurrence.Kind == connector.RecurrenceEven {
+				cycleWeek = 2
+			}
+			lesson.Recurrence = domain.RecurrenceRule{
+				CycleLength: 2,
+				CycleWeeks:  []int{cycleWeek},
+			}
 		}
 	default:
 		return domain.Lesson{}, fmt.Errorf("unsupported recurrence %q", recurrence.Kind)

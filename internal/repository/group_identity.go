@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -38,6 +40,15 @@ func CanonicalizeSnapshotGroupIDsWithMappings(
 	existing []domain.Group,
 	mappings map[string]domain.GroupSourceIdentityMapping,
 ) (domain.ScheduleSnapshot, int, error) {
+	payload, remapped, _, err := canonicalizeSnapshotGroupIDs(payload, existing, mappings)
+	return payload, remapped, err
+}
+
+func canonicalizeSnapshotGroupIDs(
+	payload domain.ScheduleSnapshot,
+	existing []domain.Group,
+	mappings map[string]domain.GroupSourceIdentityMapping,
+) (domain.ScheduleSnapshot, int, map[string]domain.GroupSourceIdentityMapping, error) {
 	byName := make(map[string]domain.Group, len(existing))
 	byID := make(map[string]domain.Group, len(existing))
 	for _, group := range existing {
@@ -46,19 +57,26 @@ func CanonicalizeSnapshotGroupIDsWithMappings(
 	}
 
 	remapped := 0
+	discovered := make(map[string]domain.GroupSourceIdentityMapping, len(payload.Groups))
 	for index := range payload.Groups {
 		group := &payload.Groups[index]
 		group.Name = strings.TrimSpace(group.Name)
-		canonicalID := group.ID
-		if mapping, ok := mappings[group.ID]; ok {
+		originalID := strings.TrimSpace(group.ID)
+		externalID := strings.TrimSpace(group.ExternalID)
+		if externalID == "" {
+			externalID = originalID
+		}
+		group.ExternalID = externalID
+		canonicalID := originalID
+		if mapping, ok := mappings[externalID]; ok {
 			current, exists := byID[mapping.GroupID]
 			if !exists || current.Name != group.Name || mapping.ExpectedName != group.Name {
 				existingName := mapping.ExpectedName
 				if exists {
 					existingName = current.Name
 				}
-				return payload, remapped, &GroupIdentityConflictError{
-					ExternalGroupID: group.ID,
+				return payload, remapped, discovered, &GroupIdentityConflictError{
+					ExternalGroupID: externalID,
 					ExistingGroupID: mapping.GroupID,
 					ExistingName:    existingName,
 					IncomingName:    group.Name,
@@ -67,23 +85,38 @@ func CanonicalizeSnapshotGroupIDsWithMappings(
 			canonicalID = mapping.GroupID
 		} else if current, ok := byName[group.Name]; ok {
 			canonicalID = current.ID
-		} else if current, ok := byID[group.ID]; ok && current.Name != group.Name {
-			return payload, remapped, &GroupIdentityConflictError{
-				ExternalGroupID: group.ID,
+		} else if current, ok := byID[externalID]; ok {
+			if current.Name != group.Name {
+				return payload, remapped, discovered, &GroupIdentityConflictError{
+					ExternalGroupID: externalID,
+					ExistingGroupID: current.ID,
+					ExistingName:    current.Name,
+					IncomingName:    group.Name,
+				}
+			}
+			canonicalID = current.ID
+		} else if current, ok := byID[originalID]; ok && current.Name != group.Name {
+			return payload, remapped, discovered, &GroupIdentityConflictError{
+				ExternalGroupID: externalID,
 				ExistingGroupID: current.ID,
 				ExistingName:    current.Name,
 				IncomingName:    group.Name,
 			}
 		}
-		if canonicalID != group.ID {
+		if canonicalID != originalID {
 			remapped++
 			group.ID = canonicalID
+		}
+		discovered[externalID] = domain.GroupSourceIdentityMapping{
+			ExternalGroupID: externalID,
+			GroupID:         canonicalID,
+			ExpectedName:    group.Name,
 		}
 		for lessonIndex := range group.Lessons {
 			group.Lessons[lessonIndex].GroupID = canonicalID
 		}
 	}
-	return payload, remapped, nil
+	return payload, remapped, discovered, nil
 }
 
 func loadGroupSourceIdentityMappings(
@@ -121,7 +154,51 @@ func (r *GroupRepository) RecordIdentityConflict(
 	if conflict == nil {
 		return nil
 	}
-	_, err := r.db.ExecContext(ctx, `
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("record group identity conflict: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var sourceUniversityID string
+	if err = tx.GetContext(ctx, &sourceUniversityID,
+		`SELECT university_id FROM data_sources WHERE id=$1`, dataSourceID,
+	); err != nil {
+		return fmt.Errorf("record group identity conflict: load source: %w", err)
+	}
+	if sourceUniversityID != universityID {
+		return fmt.Errorf(
+			"record group identity conflict: source %s belongs to university %s, expected %s",
+			dataSourceID, sourceUniversityID, universityID,
+		)
+	}
+	if err = lockUniversityPublication(ctx, tx, sourceUniversityID); err != nil {
+		return fmt.Errorf("record group identity conflict: %w", err)
+	}
+
+	var currentMapping struct {
+		ExpectedName string `db:"expected_name"`
+		GroupName    string `db:"group_name"`
+	}
+	err = tx.GetContext(ctx, &currentMapping, `
+		SELECT mapping.expected_name, group_row.name AS group_name
+		FROM group_source_identity_mappings mapping
+		JOIN groups group_row ON group_row.id=mapping.group_id
+		WHERE mapping.data_source_id=$1 AND mapping.external_group_id=$2
+		FOR UPDATE OF mapping, group_row`, dataSourceID, conflict.ExternalGroupID)
+	if err == nil &&
+		strings.TrimSpace(currentMapping.ExpectedName) == strings.TrimSpace(conflict.IncomingName) &&
+		strings.TrimSpace(currentMapping.GroupName) == strings.TrimSpace(conflict.IncomingName) {
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("record group identity conflict: commit resolved mapping: %w", err)
+		}
+		return nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("record group identity conflict: inspect resolved mapping: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO group_identity_conflicts (
 			id, data_source_id, university_id, external_group_id,
 			existing_group_id, existing_name, incoming_name
@@ -139,6 +216,9 @@ func (r *GroupRepository) RecordIdentityConflict(
 	)
 	if err != nil {
 		return fmt.Errorf("record group identity conflict: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("record group identity conflict: commit: %w", err)
 	}
 	return nil
 }

@@ -180,6 +180,9 @@ func TestSignedSnapshotIntakeAndStaging(t *testing.T) {
 	if err != nil || candidate == nil {
 		t.Fatalf("load staged snapshot: candidate=%+v err=%v", candidate, err)
 	}
+	if len(candidate.Payload.Groups) != 1 || candidate.Payload.Groups[0].ExternalID != "group-1" {
+		t.Fatalf("staged connector snapshot lost external group identity: %+v", candidate.Payload.Groups)
+	}
 	var nameBeforeActivation string
 	if err = db.GetContext(ctx, &nameBeforeActivation,
 		`SELECT name FROM universities WHERE id=$1`, universityID); err != nil {
@@ -251,6 +254,18 @@ func TestSignedSnapshotIntakeAndStaging(t *testing.T) {
 		t.Fatalf("activate connector snapshot: %v", result.err)
 	}
 	activated := result.snapshot
+	var mappedGroupID string
+	if err = db.GetContext(ctx, &mappedGroupID, `
+		SELECT group_id FROM group_source_identity_mappings
+		WHERE data_source_id=$1 AND external_group_id='group-1'`, sourceID); err != nil {
+		t.Fatalf("load connector group identity mapping: %v", err)
+	}
+	if mappedGroupID != activated.Payload.Groups[0].ID {
+		t.Fatalf("connector external group mapped to %q, want %q", mappedGroupID, activated.Payload.Groups[0].ID)
+	}
+	if mappedGroupID == "group-1" {
+		t.Fatal("connector external identity replaced the canonical group id")
+	}
 	var nameAfterActivation string
 	if err = db.GetContext(ctx, &nameAfterActivation,
 		`SELECT name FROM universities WHERE id=$1`, universityID); err != nil {

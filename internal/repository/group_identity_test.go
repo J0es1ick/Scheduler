@@ -26,6 +26,9 @@ func TestCanonicalizeSnapshotGroupIDsPreservesExistingIdentity(t *testing.T) {
 	if remapped != 1 || result.Groups[0].ID != "isuct:group:21299" {
 		t.Fatalf("canonical group = %+v, remapped = %d", result.Groups[0], remapped)
 	}
+	if result.Groups[0].ExternalID != "isuct:group:23093" {
+		t.Fatalf("external group id = %q", result.Groups[0].ExternalID)
+	}
 	if result.Groups[0].Lessons[0].GroupID != "isuct:group:21299" {
 		t.Fatalf("lesson group id = %q", result.Groups[0].Lessons[0].GroupID)
 	}
@@ -106,5 +109,74 @@ func TestCanonicalizeSnapshotGroupIDsRejectsStaleApprovedMapping(t *testing.T) {
 	var conflict *GroupIdentityConflictError
 	if !errors.As(err, &conflict) || conflict.IncomingName != "3-ЭЭ-В" {
 		t.Fatalf("unexpected stale mapping result: conflict=%+v err=%v", conflict, err)
+	}
+}
+
+func TestCanonicalizeSnapshotDiscoversNameBasedMapping(t *testing.T) {
+	payload := domain.ScheduleSnapshot{
+		Groups: []domain.SnapshotGroup{{
+			ID:      "external-new-id",
+			Name:    "1-ЭЭ-В",
+			Lessons: []domain.Lesson{{GroupID: "external-new-id", Subject: "Математика"}},
+		}},
+	}
+	existing := []domain.Group{{ID: "canonical-id", Name: "1-ЭЭ-В"}}
+	canonical, remapped, mappings, err := canonicalizeSnapshotGroupIDs(payload, existing, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remapped != 1 || canonical.Groups[0].ID != "canonical-id" || canonical.Groups[0].Lessons[0].GroupID != "canonical-id" {
+		t.Fatalf("unexpected canonical snapshot: %+v", canonical)
+	}
+	if canonical.Groups[0].ExternalID != "external-new-id" {
+		t.Fatalf("external group id = %q", canonical.Groups[0].ExternalID)
+	}
+	mapping, ok := mappings["external-new-id"]
+	if !ok || mapping.GroupID != "canonical-id" || mapping.ExpectedName != "1-ЭЭ-В" {
+		t.Fatalf("mapping was not discovered: %+v", mappings)
+	}
+}
+
+func TestCanonicalizeSnapshotPreservesExternalIdentityAcrossStages(t *testing.T) {
+	payload := domain.ScheduleSnapshot{
+		Groups: []domain.SnapshotGroup{{
+			ID:      "external-new-id",
+			Name:    "1-ЭЭ-В",
+			Lessons: []domain.Lesson{{GroupID: "external-new-id"}},
+		}},
+	}
+	existing := []domain.Group{{ID: "canonical-id", Name: "1-ЭЭ-В"}}
+	staged, _, _, err := canonicalizeSnapshotGroupIDs(payload, existing, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, remapped, mappings, err := canonicalizeSnapshotGroupIDs(staged, existing, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remapped != 0 || published.Groups[0].ID != "canonical-id" {
+		t.Fatalf("published group = %+v, remapped = %d", published.Groups[0], remapped)
+	}
+	mapping, ok := mappings["external-new-id"]
+	if !ok || mapping.GroupID != "canonical-id" {
+		t.Fatalf("external mapping was lost between stages: %+v", mappings)
+	}
+}
+
+func TestCanonicalizeSnapshotKeepsCanonicalIDForNewExternalGroup(t *testing.T) {
+	payload := domain.ScheduleSnapshot{Groups: []domain.SnapshotGroup{{
+		ID: "group:stable-hash", ExternalID: "source-group-101", Name: "1-ЭЭ-В",
+		Lessons: []domain.Lesson{{GroupID: "group:stable-hash"}},
+	}}}
+	canonical, remapped, mappings, err := canonicalizeSnapshotGroupIDs(payload, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remapped != 0 || canonical.Groups[0].ID != "group:stable-hash" ||
+		canonical.Groups[0].Lessons[0].GroupID != "group:stable-hash" {
+		t.Fatalf("new external group lost canonical identity: %+v", canonical.Groups[0])
+	}
+	if mapping := mappings["source-group-101"]; mapping.GroupID != "group:stable-hash" {
+		t.Fatalf("new external mapping = %+v", mapping)
 	}
 }
