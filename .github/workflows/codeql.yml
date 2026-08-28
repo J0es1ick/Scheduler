@@ -3,6 +3,7 @@ name: CodeQL
 on:
   push:
     branches: [master, main]
+    tags: ["v*"]
   pull_request:
     branches: [master, main]
   schedule:
@@ -19,9 +20,24 @@ jobs:
       matrix:
         language: [go, javascript-typescript]
     steps:
-      - uses: actions/checkout@v7
-      - uses: github/codeql-action/init@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938
         with:
           languages: ${{ matrix.language }}
-      - uses: github/codeql-action/autobuild@v4
-      - uses: github/codeql-action/analyze@v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        if: matrix.language == 'go'
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            web/admin/package-lock.json
+            web/site/package-lock.json
+      - name: Build embedded web assets
+        if: matrix.language == 'go'
+        run: |
+          npm ci --prefix web/admin
+          npm run build --prefix web/admin
+          npm ci --prefix web/site
+          npm run build --prefix web/site
+      - uses: github/codeql-action/autobuild@cdf488f595d80d6e07e03d4674febd5ab45fa938
+      - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938

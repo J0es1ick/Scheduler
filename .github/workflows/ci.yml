@@ -12,10 +12,10 @@ jobs:
     name: Secret scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Reject committed environment files
@@ -30,14 +30,14 @@ jobs:
     name: Go checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
         with:
           go-version-file: go.mod
           cache: true
       - name: Check Go module metadata
         run: go mod tidy -diff
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: "22"
           cache: npm
@@ -70,8 +70,8 @@ jobs:
       run:
         working-directory: web/${{ matrix.app }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: "22"
           cache: npm
@@ -85,8 +85,8 @@ jobs:
     name: Python Connector SDK
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: "3.12"
       - run: python -m pip install ./sdk/python
@@ -100,12 +100,14 @@ jobs:
       run:
         working-directory: web/admin
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: web/admin/package-lock.json
+          cache-dependency-path: |
+            web/admin/package-lock.json
+            web/site/package-lock.json
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
@@ -126,17 +128,20 @@ jobs:
       DATABASE_RESTORE_PASSWORD: ci-restore-database-password
       ADMIN_METRICS_TOKEN: ci-metrics-token-with-at-least-32-characters
       BOT_TELEGRAM_API_URL: http://telegram-mock:8080
+      BOT_TELEGRAM_API_ALLOW_INSECURE: "true"
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: web/admin/package-lock.json
+          cache-dependency-path: |
+            web/admin/package-lock.json
+            web/site/package-lock.json
       - run: cp .env.example .env
       - run: docker compose config --quiet
       - name: Run the one-shot migrator and start HTTP services
@@ -174,15 +179,35 @@ jobs:
           expected=$(find migration -name '*.up.sql' | wc -l | tr -d ' ')
           actual=$(docker compose exec -T postgres psql -U postgres -d scheduler -tAc 'SELECT COUNT(*) FROM schema_migrations')
           test "$actual" = "$expected"
-      - name: Build embedded admin assets
+      - name: Build embedded web assets
         run: |
           npm ci --prefix web/admin
           npm run build --prefix web/admin
-      - name: Run PostgreSQL integration tests
+          npm ci --prefix web/site
+          npm run build --prefix web/site
+      - name: Run PostgreSQL integration tests in isolated databases
         env:
-          TEST_DATABASE_URL: postgres://postgres:ci-superuser-password@127.0.0.1:55432/scheduler?sslmode=disable
           TEST_SITE_DATABASE_URL: postgres://scheduler_site:ci-site-database-password@127.0.0.1:55432/scheduler?sslmode=disable
-        run: go test -tags=integration ./internal/database ./internal/repository ./internal/admin ./internal/connectorapi ./internal/site -count=1
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_database=""
+          cleanup_test_database() {
+            if [ -n "$test_database" ]; then
+              docker compose exec -T postgres dropdb -U postgres --if-exists "$test_database"
+            fi
+          }
+          trap cleanup_test_database EXIT
+          for package in database repository admin connectorapi; do
+            test_database="scheduler_ci_${package}"
+            docker compose exec -T postgres createdb -U postgres "$test_database"
+            export TEST_DATABASE_URL="postgres://postgres:ci-superuser-password@127.0.0.1:55432/${test_database}?sslmode=disable"
+            go test -race -p 1 -tags=integration "./internal/${package}" -count=1
+            cleanup_test_database
+            test_database=""
+          done
+          unset TEST_DATABASE_URL
+          go test -race -tags=integration ./internal/site -count=1
       - name: Create and restore-verify a backup
         run: |
           docker compose up -d --build backup
@@ -198,9 +223,41 @@ jobs:
             sleep 2
           done
           exit 1
+      - name: Restore an authenticated encrypted offsite copy
+        shell: bash
+        run: |
+          key_dir="$RUNNER_TEMP/scheduler-backup-keys"
+          offsite_dir="$RUNNER_TEMP/scheduler-backup-offsite"
+          mkdir -p "$key_dir" "$offsite_dir"
+          backup_uid=$(docker compose run --rm --no-deps --entrypoint id backup -u)
+          backup_gid=$(docker compose run --rm --no-deps --entrypoint id backup -g)
+          sudo chown "$backup_uid:$backup_gid" "$key_dir" "$offsite_dir"
+          sudo chmod 700 "$key_dir" "$offsite_dir"
+          recipient=$(docker compose run --rm --no-deps --entrypoint /bin/sh \
+            -v "$key_dir:/keys" backup -ec \
+            'umask 077; age-keygen --output /keys/identity; age-keygen -y /keys/identity')
+          docker compose run --rm --no-deps --entrypoint /bin/sh \
+            -v "$offsite_dir:/offsite" \
+            -e BACKUP_REQUIRE_OFFSITE=true \
+            -e BACKUP_OFFSITE_DIRECTORY=/offsite \
+            -e BACKUP_AGE_RECIPIENT="$recipient" \
+            backup -ec \
+            'export PGPASSWORD="$DATABASE_PASSWORD" PGSSLMODE="$DATABASE_SSLMODE"; . /usr/local/lib/scheduler-backup-lib.sh; validate_offsite; create_local_backup; upload_offsite_backup "$last_local_backup"'
+          docker compose run --rm --no-deps --entrypoint /usr/local/bin/scheduler-verify-backup \
+            -v "$key_dir:/keys:ro" -v "$offsite_dir:/offsite:ro" \
+            -e DATABASE_USER=scheduler_restore \
+            -e DATABASE_PASSWORD=ci-restore-database-password \
+            -e BACKUP_VERIFY_OFFSITE=true \
+            -e BACKUP_OFFSITE_DIRECTORY=/offsite \
+            -e BACKUP_AGE_IDENTITY_FILE=/keys/identity \
+            backup
       - name: Compose diagnostics
         if: failure()
         run: docker compose logs --no-color --tail=200
       - name: Stop Compose
         if: always()
         run: docker compose --profile ci down -v --remove-orphans
+      - name: Remove temporary backup keys and copies
+        if: always()
+        shell: bash
+        run: sudo rm -rf -- "${RUNNER_TEMP:?}/scheduler-backup-keys" "${RUNNER_TEMP:?}/scheduler-backup-offsite"

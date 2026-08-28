@@ -14,40 +14,64 @@ permissions:
 jobs:
   image:
     runs-on: ubuntu-latest
+    env:
+      BOT_TOKEN: 123456:release-smoke-not-a-real-token
+      DATABASE_NAME: scheduler
+      POSTGRES_SUPERUSER: postgres
+      POSTGRES_SUPERUSER_PASSWORD: release-superuser-password
+      DATABASE_MIGRATOR_PASSWORD: release-migrator-password
+      DATABASE_BOT_PASSWORD: release-bot-database-password
+      DATABASE_ADMIN_PASSWORD: release-admin-database-password
+      DATABASE_SITE_PASSWORD: release-site-database-password
+      DATABASE_BACKUP_PASSWORD: release-backup-database-password
+      DATABASE_RESTORE_PASSWORD: release-restore-database-password
+      ADMIN_METRICS_TOKEN: release-metrics-token-with-at-least-32-characters
+      BOT_TELEGRAM_API_URL: http://telegram-mock:8080
+      BOT_TELEGRAM_API_ALLOW_INSECURE: "true"
     steps:
-      - uses: actions/checkout@v7
-      - name: Require a successful CI run for this exact commit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Require successful CI and CodeQL runs for this exact commit
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           for attempt in $(seq 1 120); do
-            success=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&status=success&per_page=1" --jq '.total_count')
-            if [ "$success" -gt 0 ]; then
+            ci_success=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&status=success&per_page=1" --jq '.total_count')
+            codeql_success=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/codeql.yml/runs?head_sha=${GITHUB_SHA}&status=success&per_page=1" --jq '.total_count')
+            if [ "$ci_success" -gt 0 ] && [ "$codeql_success" -gt 0 ]; then
               exit 0
             fi
             sleep 10
           done
-          echo "No successful CI run exists for ${GITHUB_SHA}; refusing to publish a release image."
+          echo "Successful CI and CodeQL runs do not both exist for ${GITHUB_SHA}; refusing to publish a release image."
           exit 1
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v5
-        id: meta
+      - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051
+        id: candidate-meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/scheduler
+          tags: type=raw,value=candidate-${{ github.sha }}
+          flavor: latest=false
+      - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051
+        id: release-meta
         with:
           images: ghcr.io/${{ github.repository_owner }}/scheduler
           tags: type=ref,event=tag
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         id: build
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.candidate-meta.outputs.tags }}
+          labels: ${{ steps.release-meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
           provenance: mode=max
           sbom: true
@@ -55,8 +79,68 @@ jobs:
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
             BUILD_TIME=${{ github.event.head_commit.timestamp }}
-      - uses: actions/attest-build-provenance@v3
+      - name: Smoke-test the exact candidate image
+        id: smoke
+        env:
+          SCHEDULER_IMAGE: ${{ steps.candidate-meta.outputs.tags }}@${{ steps.build.outputs.digest }}
+        run: |
+          cp .env.example .env
+          docker compose --profile ci up -d --no-build telegram-mock postgres admin site
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:18080/api/ready >/dev/null \
+              && curl --fail --silent http://127.0.0.1:18081/api/ready >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              docker compose --profile ci ps
+              exit 1
+            fi
+            sleep 2
+          done
+          docker compose exec -T postgres psql -U postgres -d scheduler \
+            -c "UPDATE data_sources SET is_enabled=FALSE"
+          docker compose --profile ci up -d --no-build bot
+          for attempt in $(seq 1 60); do
+            if docker compose exec -T bot wget -q -O - http://127.0.0.1:8082/ready >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose --profile ci ps
+          exit 1
+      - name: Compose diagnostics
+        if: failure() && steps.smoke.outcome == 'failure'
+        env:
+          SCHEDULER_IMAGE: ${{ steps.candidate-meta.outputs.tags }}@${{ steps.build.outputs.digest }}
+        run: docker compose --profile ci logs --no-color --tail=200
+      - name: Stop candidate smoke stack
+        if: always() && (steps.smoke.outcome == 'success' || steps.smoke.outcome == 'failure')
+        env:
+          SCHEDULER_IMAGE: ${{ steps.candidate-meta.outputs.tags }}@${{ steps.build.outputs.digest }}
+        run: docker compose --profile ci down -v --remove-orphans
+      - name: Promote the tested digest to the release tags
+        id: promote
+        env:
+          CANDIDATE_IMAGE: ${{ steps.candidate-meta.outputs.tags }}
+          RELEASE_TAGS: ${{ steps.release-meta.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        shell: bash
+        run: |
+          image="${CANDIDATE_IMAGE%:*}"
+          tags=()
+          while IFS= read -r tag; do
+            if [ -n "$tag" ]; then
+              tags+=(--tag "$tag")
+            fi
+          done <<< "$RELEASE_TAGS"
+          if [ "${#tags[@]}" -eq 0 ]; then
+            echo "No release tags were generated."
+            exit 1
+          fi
+          docker buildx imagetools create "${tags[@]}" "$image@$DIGEST"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
         with:
-          subject-name: ghcr.io/${{ github.repository_owner }}/scheduler
+          subject-name: ${{ steps.promote.outputs.image }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
