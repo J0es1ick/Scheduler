@@ -1,5 +1,43 @@
 # Эксплуатация Scheduler
 
+## Режим окружения
+
+Для локальной разработки используйте `DEPLOYMENT_ENV=development`. Перед публичным запуском
+установите `DEPLOYMENT_ENV=production`: приложение тогда не запустится с небезопасным режимом
+PostgreSQL, HTTP-адресом альтернативного Telegram API, отключённым Secure-флагом cookie или
+некорректным публичным адресом админки. База production-окружения должна использовать
+`DATABASE_SSLMODE=require`, `verify-ca` или `verify-full`.
+
+Встроенный PostgreSQL из `docker-compose.yml` предназначен для локальной разработки и не включает
+TLS. Для production задайте `DATABASE_CONTAINER_HOST`, `DATABASE_CONTAINER_PORT` и безопасный
+`DATABASE_CONTAINER_SSLMODE` для внешнего PostgreSQL с TLS; Compose передаст их процессам
+приложения как обычные `DATABASE_HOST`, `DATABASE_PORT` и `DATABASE_SSLMODE`. Отдельные переменные
+без суффикса `CONTAINER` остаются настройками запуска Go-процессов непосредственно на хосте.
+
+`postgres-bootstrap` использует те же адрес, порт и SSL-режим, поэтому при заданном внешнем хосте
+роли и права создаются именно во внешней БД, а не во встроенном контейнере. Для `verify-ca` и
+`verify-full` при необходимости задайте контейнерные пути `PGSSLROOTCERT`, `PGSSLCERT` и `PGSSLKEY`.
+Compose передаёт только пути; сертификаты и закрытый клиентский ключ подключайте read-only volume или
+Docker secret ко всем сервисам, которые подключаются к этой БД: `postgres-bootstrap`, `migrator`,
+`bot`, `admin`, `site` и `backup`. Закрытый ключ не следует хранить в `.env` или
+передавать содержимым переменной окружения. Backup и проверка восстановления передают
+`DATABASE_SSLMODE` в libpq через `PGSSLMODE`, поэтому `pg_isready`, `pg_dump`, `psql`, `createdb`,
+`dropdb` и `pg_restore` используют одну TLS-политику.
+
+При работе с внешней БД встроенный PostgreSQL запускать не требуется. После создания самой БД,
+настройки подключения, сертификатов и внешнего хранилища резервных копий выполните сервисы явно:
+
+```powershell
+docker compose build app-image backup
+docker compose run --rm --no-deps postgres-bootstrap
+docker compose run --rm --no-deps migrator
+docker compose up -d --no-deps bot admin site backup
+```
+
+Следующий шаг выполняйте только после успешного завершения предыдущего. В этом варианте
+`--no-deps` намеренно отключает локальную цепочку зависимостей; обычный `docker compose up`
+остаётся сценарием с встроенным PostgreSQL.
+
 ## Административный доступ
 
 Основной рабочий вход выполняется через Telegram Mini App. Сервер проверяет подпись `initData` и
@@ -69,11 +107,12 @@ PostgreSQL, поэтому незавершённый обход продолж�
 
 ```powershell
 $env:TEST_DATABASE_URL = "postgres://postgres:password@127.0.0.1:55432/scheduler_test?sslmode=disable"
-go test -tags=integration ./internal/database ./internal/repository ./internal/admin ./internal/connectorapi -count=1
+go test -p 1 -tags=integration ./internal/database ./internal/repository ./internal/admin ./internal/connectorapi ./internal/site -count=1
 ```
 
 Интеграционный тест создаёт временные записи и удаляет их после проверки, но запускать его против
-рабочей базы всё равно не следует.
+рабочей базы всё равно не следует. Пакеты используют общие очереди и выполняются последовательно
+(`-p 1`), чтобы тестовый воркер одного пакета не забирал события другого.
 
 ## Ограничение нагрузки бота
 
@@ -97,8 +136,9 @@ go test -tags=integration ./internal/database ./internal/repository ./internal/a
 
 Compose smoke в CI обращается именно к `/ready`. Для независимости от внешнего Telegram в CI
 запускается локальная заглушка Bot API через профиль `ci`; адрес передаётся в
-`BOT_TELEGRAM_API_URL`. В рабочем окружении эту переменную оставляйте пустой: тогда используется
-официальный Telegram Bot API.
+`BOT_TELEGRAM_API_URL`, а HTTP явно разрешается через `BOT_TELEGRAM_API_ALLOW_INSECURE=true`.
+Этот флаг допустим только для изолированной локальной заглушки. В рабочем окружении обе переменные
+оставляйте пустыми: тогда используется официальный Telegram Bot API.
 
 ## Восстановление публикаций при обновлении
 
@@ -159,33 +199,66 @@ Compose-сервис `backup` создаёт резервные копии Postg
 выполнять после изменения схемы и не реже одного раза в месяц.
 
 В production обязательна зашифрованная копия вне хоста. Подключите внешнее/NAS/S3-FUSE-хранилище
-к контейнеру и файл с отдельной парольной фразой только для чтения, затем задайте:
+к контейнеру, создайте отдельную пару ключей `age` и передайте backup-процессу только публичный
+recipient:
 
 ```env
 BACKUP_OFFSITE_DIRECTORY=/offsite
-BACKUP_ENCRYPTION_PASSPHRASE_FILE=/run/secrets/backup_passphrase
+BACKUP_AGE_RECIPIENT=age1...
+BACKUP_REQUIRE_OFFSITE=true
 ```
 
-Внешнее хранилище получит только AES-256-CBC/PBKDF2-файл `.dump.enc` и его SHA-256. Локальная
-незашифрованная копия остаётся в закрытом Docker volume для быстрого восстановления. Если задана
+Identity создаётся один раз командой `age-keygen -o backup_age_identity`; выведенный публичный
+recipient задаётся через `BACKUP_AGE_RECIPIENT`. Сам identity-файл должен находиться в отдельном
+хранилище секретов и не передаваться постоянно работающему backup-контейнеру: для создания копии
+достаточно публичного recipient, а закрытый ключ нужен только при явной проверке восстановления.
+Каталог `/offsite` подключается через production override Compose; он намеренно не привязан к пути
+хоста в основном `docker-compose.yml`.
+
+Внешнее хранилище получит только зашифрованный `age`/X25519-файл `.dump.age` и его SHA-256. Формат
+`age` аутентифицирует содержимое: незаметно изменить ciphertext и пересчитать checksum недостаточно,
+расшифрование подменённой копии завершится ошибкой. SHA-256 остаётся быстрой проверкой случайного
+повреждения до расшифрования. Локальная незашифрованная копия остаётся в закрытом Docker volume для
+быстрого восстановления. Если задана
 лишь одна из двух переменных или внешнее хранилище недоступно, проход считается неуспешным и
 повторяется через короткий интервал. При повторе отправки используется уже созданный локальный dump:
 новые копии каждые пять минут не создаются, а локальная retention-очистка продолжает выполняться.
 Healthcheck отдельно проверяет свежесть локальной и off-host копий; предел внешней копии задаётся
-`BACKUP_OFFSITE_MAX_AGE_SECONDS`.
+`BACKUP_OFFSITE_MAX_AGE_SECONDS`. `BACKUP_REQUIRE_OFFSITE=true` обязателен для production: при нём
+backup-контейнер и его healthcheck не считаются работоспособными без доступного внешнего каталога и
+валидного публичного recipient. Значение `false` оставлено только для локальной разработки.
+При `DEPLOYMENT_ENV=production` значение `false` теперь отклоняется ещё до первого дампа и самим
+healthcheck, поэтому production-развёртывание не сможет незаметно остаться без внешней копии.
 
 Настоящая проверка именно зашифрованной внешней копии выполняется так:
 
 ```powershell
 $env:DATABASE_USER = '<DATABASE_RESTORE_USER>'
 $env:DATABASE_PASSWORD = '<DATABASE_RESTORE_PASSWORD>'
-docker compose exec -e BACKUP_VERIFY_OFFSITE=true -e DATABASE_USER -e DATABASE_PASSWORD backup scheduler-verify-backup
+$identity = (Resolve-Path '.\secrets\backup_age_identity').Path
+docker compose run --rm --no-deps `
+  --volume "${identity}:/run/secrets/backup_age_identity:ro" `
+  -e BACKUP_VERIFY_OFFSITE=true `
+  -e BACKUP_AGE_IDENTITY_FILE=/run/secrets/backup_age_identity `
+  -e DATABASE_USER `
+  -e DATABASE_PASSWORD `
+  --entrypoint /usr/local/bin/scheduler-verify-backup `
+  backup
 ```
 
-Команда проверяет SHA-256 зашифрованного файла, расшифровывает его только во временный файл,
-восстанавливает отдельную временную БД и сверяет все миграции с текущим образом. Учётная запись,
+Команда проверяет SHA-256 и аутентичность зашифрованного файла, расшифровывает его только во
+временный файл, восстанавливает отдельную временную БД и сверяет все миграции с текущим образом. Учётная запись,
 используемая только для такой проверки, должна иметь право `CREATEDB`; рабочим процессам приложения
-это право не требуется.
+это право не требуется. Команда создаёт одноразовый контейнер и подключает закрытый identity-файл
+только на время проверки; постоянный backup-процесс его не получает.
+
+Новые копии всегда создаются в формате `.dump.age`. Старые `.dump.enc`, созданные через
+AES-256-CBC/PBKDF2, не имеют криптографической проверки подлинности и по умолчанию не принимаются.
+Для разового переноса старого архива можно явно передать
+`BACKUP_ALLOW_LEGACY_AES_CBC=true`, `BACKUP_ENCRYPTION_PASSPHRASE_FILE=<старый файл>` вместе с
+`BACKUP_VERIFY_OFFSITE=true`, проверить восстановление и сразу создать новую `.dump.age`-копию.
+Обе legacy-переменные передавайте только одноразовой команде проверки, а не постоянному backup-сервису.
+Постоянно включать совместимость с legacy-форматом нельзя.
 
 `postgres-bootstrap` создаёт эту роль вместе с отдельными ролями migrator, bot, admin, site и backup.
 Постоянный контейнер `backup` получает только read-only-учётные данные. Скрипт
