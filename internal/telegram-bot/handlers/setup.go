@@ -28,12 +28,16 @@ func (h *Handler) HandleSearchTypeSelect(c tgbotapi.Context) error {
 	var prompt string
 	switch searchType {
 	case dto.SearchTypeGroup:
+		state.TeacherSearchOrigin = ""
 		prompt = groupInputPrompt(state.UniversityID)
 	case dto.SearchTypeTeacher:
-		prompt = "Введите преподавателя (пример: Сизова О.В.):"
+		prompt = teacherSearchPrompt()
+		state.TeacherSearchOrigin = "search"
 	case dto.SearchTypeRoom:
+		state.TeacherSearchOrigin = ""
 		prompt = "Введите аудиторию (пример: А206):"
 	case dto.SearchTypeDiscipline:
+		state.TeacherSearchOrigin = ""
 		prompt = "Введите дисциплину (пример: Большие данные):"
 	default:
 		return respondStaleCallback(c)
@@ -53,11 +57,16 @@ func (h *Handler) HandleTextInput(c tgbotapi.Context) error {
 
 	userID := c.Sender().ID
 	state := h.StateManager.Get(userID)
+	input := strings.TrimSpace(c.Text())
+	if state == nil || state.Step == "done" {
+		handled, err := h.handleQuickTextInput(c, input)
+		if handled {
+			return err
+		}
+	}
 	if state == nil {
 		return c.Send("Неизвестная команда.\n\nСписок команд: /help")
 	}
-
-	input := strings.TrimSpace(c.Text())
 
 	switch state.Step {
 	case "awaiting_hotline_submission":
@@ -137,6 +146,11 @@ func (h *Handler) HandleTextInput(c tgbotapi.Context) error {
 		state.SearchQuery = input
 		h.StateManager.Set(userID, state)
 		return h.HandleSearchResult(c, state)
+
+	case "choosing_teacher":
+		ctx, cancel := reqCtx()
+		defer cancel()
+		return h.beginTeacherSearch(ctx, c, state, input, state.TeacherSearchOrigin)
 
 	default:
 		return c.Send("Неизвестная команда.\n\nСписок команд: /help")

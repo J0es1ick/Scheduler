@@ -152,13 +152,33 @@ func (r *LessonRepository) GetLessonsByTeacher(
 	var lessons []domain.Lesson
 	err := r.db.SelectContext(ctx, &lessons,
 		lessonWithGroupSelect+` WHERE lesson.university_id = $1
-			AND lesson.teacher ILIKE '%' || BTRIM($2) || '%'
+			AND $2<>'' AND STRPOS(LOWER(REGEXP_REPLACE(BTRIM(lesson.teacher), '[[:space:]]+', ' ', 'g')), $2)>0
+			AND study_group.is_active
 			ORDER BY lesson.day_of_week, lesson.time_start, study_group.name`,
-		universityID, teacher)
+		universityID, normalizedSearch(teacher))
 	if err != nil {
 		return nil, fmt.Errorf("get lessons by university=%s teacher=%q: %w", universityID, teacher, err)
 	}
 	return lessons, nil
+}
+
+func (r *LessonRepository) GetTeacherNames(
+	ctx context.Context,
+	universityID string,
+) ([]string, error) {
+	var names []string
+	err := r.db.SelectContext(ctx, &names, `
+		SELECT DISTINCT BTRIM(lesson.teacher)
+		FROM effective_lessons lesson
+		JOIN groups study_group ON study_group.id=lesson.group_id
+		WHERE lesson.university_id=$1
+		  AND study_group.is_active
+		  AND BTRIM(lesson.teacher)<>''
+		ORDER BY BTRIM(lesson.teacher)`, universityID)
+	if err != nil {
+		return nil, fmt.Errorf("get teacher names by university=%s: %w", universityID, err)
+	}
+	return names, nil
 }
 
 func (r *LessonRepository) GetLessonsByRoom(
@@ -169,9 +189,9 @@ func (r *LessonRepository) GetLessonsByRoom(
 	var lessons []domain.Lesson
 	err := r.db.SelectContext(ctx, &lessons,
 		lessonWithGroupSelect+` WHERE lesson.university_id = $1
-			AND lesson.room ILIKE '%' || BTRIM($2) || '%'
+			AND $2<>'' AND STRPOS(LOWER(REGEXP_REPLACE(BTRIM(lesson.room), '[[:space:]]+', ' ', 'g')), $2)>0
 			ORDER BY lesson.day_of_week, lesson.time_start, study_group.name`,
-		universityID, room)
+		universityID, normalizedSearch(room))
 	if err != nil {
 		return nil, fmt.Errorf("get lessons by university=%s room=%q: %w", universityID, room, err)
 	}

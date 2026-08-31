@@ -10,6 +10,31 @@ import (
 	tele "gopkg.in/telebot.v3"
 )
 
+func TestSubgroupSettingsExposeEverySupportedSubgroup(t *testing.T) {
+	item := domain.GroupSubscription{GroupID: "group", Subgroup: 100}
+	seen := map[string]bool{}
+	for page := range 10 {
+		menu := SubgroupSettings(item, 0, page)
+		for _, row := range menu.InlineKeyboard {
+			for _, button := range row {
+				if len([]byte(button.Data)) > 64 {
+					t.Fatal("subgroup callback exceeds Telegram limit")
+				}
+				seen[button.Text] = true
+			}
+		}
+	}
+	for subgroup := 1; subgroup <= 100; subgroup++ {
+		label := fmt.Sprintf("Подгруппа %d", subgroup)
+		if subgroup == 100 {
+			label = "● " + label
+		}
+		if !seen[label] {
+			t.Errorf("subgroup %d cannot be selected", subgroup)
+		}
+	}
+}
+
 func TestMainMenuKeepsOnlyFrequentActions(t *testing.T) {
 	menu := MainMenu()
 	want := [][]string{
@@ -268,6 +293,10 @@ func TestAllSubscriptionCallbacksFitTelegramLimit(t *testing.T) {
 		ScheduleCalendarWithBack(time.Now(), "schedule_week", time.Now(), "14", "p"+GroupToken(item.GroupID)),
 		WeekDaySelector(time.Now(), 14, "p"+GroupToken(item.GroupID)),
 		ScheduleExportFormats("p"+GroupToken(item.GroupID), "2026-09-07", 14),
+		TeacherMatches([]string{"Константинов Е.С.", "Константинов А.В."}, "teacher-flow"),
+		TeacherScheduleDayNavigation(time.Now(), "Константинов Е.С.", TeacherToken("isuct", "Константинов Е.С.")),
+		TeacherScheduleWeekNavigation(time.Now(), "Константинов Е.С.", 14, TeacherToken("isuct", "Константинов Е.С.")),
+		SearchScheduleViewSettings(domain.ScheduleViewVisual),
 	}
 	for _, menu := range menus {
 		for _, row := range menu.InlineKeyboard {

@@ -17,6 +17,7 @@ func privateCommands() []tele.Command {
 		{Text: "today", Description: "Расписание на сегодня"},
 		{Text: "tomorrow", Description: "Расписание на завтра"},
 		{Text: "week", Description: "Расписание на неделю"},
+		{Text: "twoweeks", Description: "Расписание на две недели"},
 		{Text: "date", Description: "Выбрать дату"},
 		{Text: "search", Description: "Поиск занятий"},
 		{Text: "settings", Description: "Мои группы и уведомления"},
@@ -40,6 +41,7 @@ func groupCommands() []tele.Command {
 		{Text: "tomorrow", Description: "Расписание на завтра"},
 		{Text: "date", Description: "Расписание на выбранную дату"},
 		{Text: "week", Description: "Расписание на неделю"},
+		{Text: "twoweeks", Description: "Расписание на две недели"},
 		{Text: "chat_settings", Description: "Группа расписания этого чата"},
 		{Text: "sources", Description: "Источники расписания"},
 		{Text: "connect_source", Description: "Подключить своё расписание"},
@@ -106,6 +108,9 @@ func Register(ctx context.Context, bot *tele.Bot, handler *handlers.Handler) <-c
 	bot.Handle(&tele.Btn{Unique: "open_schedule_group"}, handler.HandleOpenScheduleGroup)
 	bot.Handle(&tele.Btn{Unique: "open_main_menu"}, handler.HandleOpenMainMenu)
 	bot.Handle(&tele.Btn{Unique: "cancel_search"}, handler.HandleCancelSearch)
+	bot.Handle(&tele.Btn{Unique: "select_teacher"}, handler.HandleTeacherSelect)
+	bot.Handle(&tele.Btn{Unique: "cancel_teacher_selection"}, handler.HandleCancelTeacherSelection)
+	bot.Handle(&tele.Btn{Unique: "search_teacher_again"}, handler.HandleSearchTeacherAgain)
 	bot.Handle(&tele.Btn{Unique: "back_university_selection"}, handler.HandleBackUniversitySelection)
 	bot.Handle(&tele.Btn{Unique: "close_inline"}, handler.HandleCloseInline)
 	bot.Handle(&tele.Btn{Unique: "back_more"}, handler.HandleBackMore)
@@ -135,6 +140,8 @@ func Register(ctx context.Context, bot *tele.Bot, handler *handlers.Handler) <-c
 	bot.Handle(&tele.Btn{Unique: "open_hotline"}, handler.HandleOpenHotline)
 	bot.Handle(&tele.Btn{Unique: "show_privacy"}, handler.HandleShowPrivacy)
 	bot.Handle(&tele.Btn{Unique: "show_help"}, handler.HandleShowHelp)
+	bot.Handle(&tele.Btn{Unique: "search_view_settings"}, handler.HandleSearchViewSettings)
+	bot.Handle(&tele.Btn{Unique: "set_search_view"}, handler.HandleSetSearchView)
 	bot.Handle(&tele.Btn{Unique: "chat_change_group"}, handler.HandleChatChangeGroup)
 	bot.Handle(&tele.Btn{Unique: "request_unset_chat_group"}, handler.HandleRequestUnsetChatGroup)
 	bot.Handle(&tele.Btn{Unique: "confirm_unset_chat_group"}, handler.HandleConfirmUnsetChatGroup)
@@ -146,6 +153,7 @@ func Register(ctx context.Context, bot *tele.Bot, handler *handlers.Handler) <-c
 	bot.Handle("Сегодня", handler.HandleToday)
 	bot.Handle("Завтра", handler.HandleTomorrow)
 	bot.Handle("Неделя", handler.HandleWeek)
+	bot.Handle("Две недели", handler.HandleTwoWeeks)
 	bot.Handle("Выбрать дату", handler.HandleDate)
 	bot.Handle("По дню недели", handler.HandleWeekDay)
 	bot.Handle("Поиск", handler.PrivateOnly(handler.HandleSearch))

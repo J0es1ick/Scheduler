@@ -8,7 +8,7 @@ import (
 
 func TestPrivateCommandMenuContainsOnlyPrimaryCommands(t *testing.T) {
 	commands := privateCommands()
-	if len(commands) > 10 {
+	if len(commands) > 11 {
 		t.Fatalf("private command picker is cluttered: %d commands", len(commands))
 	}
 	for _, hidden := range []string{"admin", "metrics", "hotline", "privacy", "delete_me"} {
@@ -16,7 +16,7 @@ func TestPrivateCommandMenuContainsOnlyPrimaryCommands(t *testing.T) {
 			t.Errorf("advanced command %q must not clutter the primary picker", hidden)
 		}
 	}
-	for _, primary := range []string{"start", "today", "tomorrow", "week", "date", "search", "settings", "help"} {
+	for _, primary := range []string{"start", "today", "tomorrow", "week", "twoweeks", "date", "search", "settings", "help"} {
 		if !containsCommand(commands, primary) {
 			t.Errorf("primary command %q is missing", primary)
 		}

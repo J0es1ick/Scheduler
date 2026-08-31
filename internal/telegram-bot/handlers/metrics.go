@@ -64,6 +64,8 @@ func formatServiceMetrics(metrics *domain.ServiceMetrics) string {
 
 	lines := []string{
 		"Метрики Scheduler",
+		fmt.Sprintf("Самое старое сообщение в очереди: %s", time.Duration(metrics.OldestPendingSeconds)*time.Second),
+		fmt.Sprintf("Нарушения связей подписок: %d", metrics.SubscriptionIntegrityIssues),
 		"",
 		fmt.Sprintf("Пользователи: %d", metrics.Users),
 		fmt.Sprintf("Подписки: %d", metrics.Subscriptions),

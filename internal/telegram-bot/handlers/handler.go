@@ -25,7 +25,7 @@ type Handler struct {
 	SubscriptionService   subscriptionService
 	SupportRequestService *service.SupportRequestService
 	MetricsService        *service.MetricsService
-	ChatProfileService    *service.ChatProfileService
+	ChatProfileService    chatProfileService
 	AdminPublicURL        string
 	ProjectURL            string
 	scheduleMessagesMu    sync.Mutex
@@ -43,6 +43,13 @@ type universityService interface {
 	GetSourceFreshness(context.Context, string) (*domain.SourceFreshness, error)
 }
 
+type chatProfileService interface {
+	Set(context.Context, string, string, string, string) error
+	Get(context.Context, string) (*domain.ChatScheduleProfile, error)
+	Delete(context.Context, string) error
+	SetScheduleView(context.Context, string, domain.ScheduleViewFormat) error
+}
+
 type userService interface {
 	RegisterOrGetUser(context.Context, string, string) (*domain.User, error)
 	GetUser(context.Context, string) (*domain.User, error)
@@ -52,6 +59,7 @@ type userService interface {
 	SetNotificationsEnabled(context.Context, string, bool) error
 	SetLessonReminder(context.Context, string, bool, int) error
 	SetQuietHours(context.Context, string, bool, string, string) error
+	SetSearchScheduleView(context.Context, string, domain.ScheduleViewFormat) error
 	ExportData(context.Context, string) (*domain.UserDataExport, error)
 	DeleteOwnData(context.Context, string) error
 }
@@ -67,6 +75,7 @@ type scheduleService interface {
 	GetScheduleForGroupRange(context.Context, string, time.Time, time.Time) (map[time.Time][]domain.Lesson, error)
 	GetScheduleForTeacherRange(context.Context, string, string, time.Time, time.Time) (map[time.Time][]domain.Lesson, error)
 	GetScheduleForRoomRange(context.Context, string, string, time.Time, time.Time) (map[time.Time][]domain.Lesson, error)
+	FindTeachers(context.Context, string, string) ([]string, error)
 }
 
 type subscriptionService interface {

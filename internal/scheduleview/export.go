@@ -30,6 +30,7 @@ type exportLesson struct {
 	Type      string `json:"type"`
 	Teacher   string `json:"teacher,omitempty"`
 	Room      string `json:"room,omitempty"`
+	Group     string `json:"group,omitempty"`
 	Subgroup  int    `json:"subgroup,omitempty"`
 }
 
@@ -54,7 +55,7 @@ func RenderCSV(request Request) ([]byte, error) {
 	writer := csv.NewWriter(&output)
 	writer.Comma = ';'
 	if err := writer.Write([]string{
-		"Дата", "День недели", "Начало", "Окончание", "Предмет", "Тип", "Преподаватель", "Аудитория", "Подгруппа",
+		"Дата", "День недели", "Начало", "Окончание", "Предмет", "Тип", "Преподаватель", "Аудитория", "Группа", "Подгруппа",
 	}); err != nil {
 		return nil, fmt.Errorf("write schedule CSV header: %w", err)
 	}
@@ -68,6 +69,7 @@ func RenderCSV(request Request) ([]byte, error) {
 			lesson.Type,
 			lesson.Teacher,
 			lesson.Room,
+			lesson.Group,
 			strconv.Itoa(lesson.Subgroup),
 		}
 		for index := range row {
@@ -109,6 +111,9 @@ func RenderICS(request Request) ([]byte, error) {
 		description := lesson.Type
 		if lesson.Teacher != "" {
 			description += " · " + lesson.Teacher
+		}
+		if lesson.Group != "" {
+			description += " · группа " + lesson.Group
 		}
 		if lesson.Subgroup > 0 {
 			description += fmt.Sprintf(" · подгруппа %d", lesson.Subgroup)
@@ -177,6 +182,7 @@ func flattenLessons(request Request) []exportLesson {
 				Type:      lessonTypeExportName(lesson.Type),
 				Teacher:   lesson.Teacher,
 				Room:      lesson.Room,
+				Group:     lesson.GroupName,
 				Subgroup:  lesson.Subgroup,
 			})
 		}

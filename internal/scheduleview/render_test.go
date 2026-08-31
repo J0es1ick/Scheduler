@@ -38,6 +38,30 @@ func TestRenderPNGProducesReadableImage(t *testing.T) {
 	}
 }
 
+func TestResearchWorkKeepsActualDurationInVisualDetails(t *testing.T) {
+	lesson := domain.Lesson{Subject: "Научно-исследовательская работа", TimeStart: "08:00", TimeEnd: "17:25", Teacher: "Иванов И.И."}
+	slot := visualTimeSlot(lesson, true)
+	if slot != (timeSlot{"08:00", "09:35"}) {
+		t.Fatalf("research block must use first row: %+v", slot)
+	}
+	if got := visualLessonDetails(lesson, slot); got != "08:00–17:25 · Иванов И.И." {
+		t.Fatalf("duration was lost: %q", got)
+	}
+	if slot := visualTimeSlot(lesson, false); slot.end != "17:25" {
+		t.Fatal("daily time badge changed actual duration")
+	}
+	if lesson.TimeEnd != "17:25" {
+		t.Fatal("rendering modified source lesson")
+	}
+}
+
+func TestTeacherVisualDetailsShowGroupInsteadOfRepeatingTeacher(t *testing.T) {
+	lesson := domain.Lesson{Teacher: "Сизова О.В.", GroupName: "3/42", Room: "А208"}
+	if got := lessonDetailsWithOptions(lesson, true); got != "группа 3/42 · А208" {
+		t.Fatalf("teacher schedule details = %q", got)
+	}
+}
+
 func TestRenderDaySeparatesTimeAndLessonCards(t *testing.T) {
 	fontFaces, err := loadFaces()
 	if err != nil {
@@ -94,6 +118,29 @@ func TestRenderDayCentersEmptyState(t *testing.T) {
 	}
 }
 
+func TestRenderDayUsesEqualVerticalPanelPadding(t *testing.T) {
+	fontFaces, err := loadFaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	date := time.Date(2026, time.September, 8, 0, 0, 0, 0, time.Local)
+	lessons := []domain.Lesson{
+		{TimeStart: "08:00", TimeEnd: "09:35", Subject: "Первая пара", Type: domain.LessonTypePractice},
+		{TimeStart: "09:50", TimeEnd: "11:25", Subject: "Вторая пара", Type: domain.LessonTypeLecture},
+		{TimeStart: "12:10", TimeEnd: "13:45", Subject: "Третья пара", Type: domain.LessonTypeLab},
+	}
+	canvas := renderDay(Request{University: "ИГХТУ", Group: "4/147", From: date, Days: 1}, Day{Date: date, Lessons: lessons}, fontFaces)
+	panel := image.Rect(35, 150, canvas.Bounds().Dx()-35, canvas.Bounds().Dy()-35)
+	const lessonHeight = 145
+	lastRowBottom := panel.Min.Y + 20 + (len(lessons)-1)*lessonHeight + lessonHeight - 12
+	if top, bottom := 20, panel.Max.Y-lastRowBottom; top != bottom {
+		t.Fatalf("daily panel padding top=%d bottom=%d", top, bottom)
+	}
+	if got, want := canvas.Bounds().Dy(), 213+len(lessons)*lessonHeight; got != want {
+		t.Fatalf("daily image height=%d, want %d", got, want)
+	}
+}
+
 func TestRenderPNGWaitsWhenConcurrencyLimitIsFull(t *testing.T) {
 	for range maxConcurrentPNGRenders {
 		pngRenderSlots <- struct{}{}
@@ -136,14 +183,14 @@ func TestScheduleExportsIncludeLesson(t *testing.T) {
 		Days:       1,
 		Schedule: []Day{{Date: date, Lessons: []domain.Lesson{{
 			TimeStart: "08:00", TimeEnd: "09:35", Subject: "Математика, часть 1",
-			Type: domain.LessonTypeLecture, Room: "А-101",
+			Type: domain.LessonTypeLecture, Room: "А-101", GroupName: "4/147",
 		}}}},
 	}
 	jsonPayload, err := RenderJSON(request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{`"university": "ИГХТУ"`, `"subject": "Математика, часть 1"`, `"date": "2026-09-07"`} {
+	for _, expected := range []string{`"university": "ИГХТУ"`, `"subject": "Математика, часть 1"`, `"date": "2026-09-07"`, `"group": "4/147"`} {
 		if !strings.Contains(string(jsonPayload), expected) {
 			t.Fatalf("JSON does not contain %q:\n%s", expected, jsonPayload)
 		}
@@ -223,7 +270,7 @@ func TestRenderCSVEscapesUntrustedLessonFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse rendered CSV: %v", err)
 	}
-	if len(records) != 2 || len(records[1]) != 9 {
+	if len(records) != 2 || len(records[1]) != 10 {
 		t.Fatalf("unexpected CSV records: %#v", records)
 	}
 	for index, want := range map[int]string{

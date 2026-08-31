@@ -73,6 +73,36 @@ func TestFormatSchedulePeriodLabelsTwoWeekRange(t *testing.T) {
 	}
 }
 
+func TestTwoWeekTextSeparatesWeeks(t *testing.T) {
+	from := time.Date(2026, time.August, 31, 0, 0, 0, 0, time.UTC)
+	days := []dto.DaySchedule{
+		{Date: from.AddDate(0, 0, 1), Lessons: []domain.Lesson{{Subject: "Первая", TimeStart: "09:50", TimeEnd: "11:25"}}},
+		{Date: from.AddDate(0, 0, 7), Lessons: []domain.Lesson{{Subject: "Вторая", TimeStart: "09:50", TimeEnd: "11:25"}}},
+	}
+	formatted := formatScheduleDays(days, false, from, 14)
+	if strings.Count(formatted, "<b>Первая неделя</b>") != 1 ||
+		strings.Count(formatted, "<b>Вторая неделя</b>") != 1 {
+		t.Fatalf("two-week headings missing: %q", formatted)
+	}
+	if strings.Index(formatted, "<b>Первая неделя</b>") > strings.Index(formatted, "Вторник, 01.09.2026") ||
+		strings.Index(formatted, "<b>Вторая неделя</b>") > strings.Index(formatted, "Понедельник, 07.09.2026") {
+		t.Fatalf("two-week headings are misplaced: %q", formatted)
+	}
+}
+
+func TestTwoWeekTextMarksEmptyWeek(t *testing.T) {
+	from := time.Date(2026, time.August, 31, 0, 0, 0, 0, time.UTC)
+	days := []dto.DaySchedule{{
+		Date:    from.AddDate(0, 0, 8),
+		Lessons: []domain.Lesson{{Subject: "Только вторая", TimeStart: "09:50", TimeEnd: "11:25"}},
+	}}
+	formatted := formatScheduleDays(days, false, from, 14)
+	firstWeek := formatted[:strings.Index(formatted, "<b>Вторая неделя</b>")]
+	if !strings.Contains(firstWeek, "Занятий нет.") {
+		t.Fatalf("empty first week is not marked: %q", formatted)
+	}
+}
+
 func TestScheduleWeekStartUsesMonday(t *testing.T) {
 	selected := time.Date(2026, time.August, 14, 15, 30, 0, 0, time.UTC)
 	want := time.Date(2026, time.August, 10, 0, 0, 0, 0, time.UTC)

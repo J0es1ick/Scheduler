@@ -3,6 +3,7 @@ package keyboards
 import (
 	"crypto/sha256"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
@@ -211,6 +212,17 @@ func CancelButton(arguments ...string) *tgbotapi.ReplyMarkup {
 	return menu
 }
 
+func TeacherMatches(names []string, nonce string) *tgbotapi.ReplyMarkup {
+	menu := &tgbotapi.ReplyMarkup{}
+	rows := make([]tgbotapi.Row, 0, len(names)+1)
+	for index, name := range names {
+		rows = append(rows, menu.Row(menu.Data(name, "select_teacher", fmt.Sprint(index), nonce)))
+	}
+	rows = append(rows, menu.Row(menu.Data("Назад", "cancel_teacher_selection", nonce)))
+	menu.Inline(rows...)
+	return menu
+}
+
 func BackButton(action string, arguments ...string) *tgbotapi.ReplyMarkup {
 	menu := &tgbotapi.ReplyMarkup{}
 	menu.Inline(menu.Row(menu.Data("Назад", action, arguments...)))
@@ -373,7 +385,7 @@ func SubscriptionActions(item domain.GroupSubscription, page int) *tgbotapi.Repl
 	return menu
 }
 
-func SubgroupSettings(item domain.GroupSubscription, page int) *tgbotapi.ReplyMarkup {
+func SubgroupSettings(item domain.GroupSubscription, page int, subgroupPages ...int) *tgbotapi.ReplyMarkup {
 	menu := &tgbotapi.ReplyMarkup{}
 	groupToken := GroupToken(item.GroupID)
 	label := func(value int, text string) string {
@@ -382,14 +394,26 @@ func SubgroupSettings(item domain.GroupSubscription, page int) *tgbotapi.ReplyMa
 		}
 		return text
 	}
-	menu.Inline(
-		menu.Row(menu.Data(label(0, "Все подгруппы"), "set_subscription_subgroup", groupToken, "0", fmt.Sprint(page))),
-		menu.Row(
-			menu.Data(label(1, "Подгруппа 1"), "set_subscription_subgroup", groupToken, "1", fmt.Sprint(page)),
-			menu.Data(label(2, "Подгруппа 2"), "set_subscription_subgroup", groupToken, "2", fmt.Sprint(page)),
-		),
-		menu.Row(menu.Data("Назад", "open_subscription", groupToken, fmt.Sprint(page))),
-	)
+	subgroupPage := max(0, item.Subgroup-1) / 10
+	if len(subgroupPages) > 0 {
+		subgroupPage = min(9, max(0, subgroupPages[0]))
+	}
+	rows := []tgbotapi.Row{menu.Row(menu.Data(label(0, "Все подгруппы"), "set_subscription_subgroup", groupToken, "0", fmt.Sprint(page)))}
+	for value := subgroupPage*10 + 1; value <= subgroupPage*10+10; value += 2 {
+		rows = append(rows, menu.Row(
+			menu.Data(label(value, fmt.Sprintf("Подгруппа %d", value)), "set_subscription_subgroup", groupToken, fmt.Sprint(value), fmt.Sprint(page)),
+			menu.Data(label(value+1, fmt.Sprintf("Подгруппа %d", value+1)), "set_subscription_subgroup", groupToken, fmt.Sprint(value+1), fmt.Sprint(page)),
+		))
+	}
+	var navigation []tgbotapi.Btn
+	if subgroupPage > 0 {
+		navigation = append(navigation, menu.Data("← Подгруппы", "subgroup_settings", groupToken, fmt.Sprint(page), fmt.Sprint(subgroupPage-1)))
+	}
+	if subgroupPage < 9 {
+		navigation = append(navigation, menu.Data("Подгруппы →", "subgroup_settings", groupToken, fmt.Sprint(page), fmt.Sprint(subgroupPage+1)))
+	}
+	rows = append(rows, menu.Row(navigation...), menu.Row(menu.Data("Назад", "open_subscription", groupToken, fmt.Sprint(page))))
+	menu.Inline(rows...)
 	return menu
 }
 
@@ -463,12 +487,30 @@ func HotlineTypeSelector(nonce ...string) *tgbotapi.ReplyMarkup {
 func MoreMenu() *tgbotapi.ReplyMarkup {
 	menu := &tgbotapi.ReplyMarkup{}
 	menu.Inline(
+		menu.Row(menu.Data("Формат расписания из поиска", "search_view_settings")),
 		menu.Row(menu.Data("Источники расписания", "show_sources")),
 		menu.Row(menu.Data("Подключить своё расписание", "show_connector")),
 		menu.Row(menu.Data("Сообщить о расписании", "open_hotline")),
 		menu.Row(menu.Data("Конфиденциальность и данные", "show_privacy")),
 		menu.Row(menu.Data("Помощь", "show_help")),
 		menu.Row(menu.Data("Закрыть", "close_inline")),
+	)
+	return menu
+}
+
+func SearchScheduleViewSettings(format domain.ScheduleViewFormat) *tgbotapi.ReplyMarkup {
+	menu := &tgbotapi.ReplyMarkup{}
+	compactLabel := "Компактный текст"
+	visualLabel := "Визуальная таблица"
+	if format == domain.ScheduleViewCompact {
+		compactLabel = "● " + compactLabel
+	} else {
+		visualLabel = "● " + visualLabel
+	}
+	menu.Inline(
+		menu.Row(menu.Data(compactLabel, "set_search_view", string(domain.ScheduleViewCompact))),
+		menu.Row(menu.Data(visualLabel, "set_search_view", string(domain.ScheduleViewVisual))),
+		menu.Row(menu.Data("Назад", "back_more")),
 	)
 	return menu
 }
@@ -483,15 +525,29 @@ func BackToMoreMenu() *tgbotapi.ReplyMarkup {
 }
 
 func ScheduleDayNavigation(date time.Time, groupName string, groupChat bool, groupID string, reference ...string) *tgbotapi.ReplyMarkup {
-	menu := &tgbotapi.ReplyMarkup{}
 	token := firstArgument(reference)
 	if token == "" {
 		token = scheduleGroupToken(groupID)
 	}
+	return scheduleDayNavigation(date, "Группа: "+groupName, "open_schedule_group", groupChat, groupID != "", token)
+}
+
+func TeacherScheduleDayNavigation(date time.Time, teacherName, reference string) *tgbotapi.ReplyMarkup {
+	return scheduleDayNavigation(date, "Преподаватель: "+teacherName, "search_teacher_again", false, true, reference)
+}
+
+func scheduleDayNavigation(
+	date time.Time,
+	targetLabel string,
+	targetAction string,
+	groupChat bool,
+	canExport bool,
+	token string,
+) *tgbotapi.ReplyMarkup {
+	menu := &tgbotapi.ReplyMarkup{}
 	today := time.Now().In(date.Location())
-	groupLabel := "Группа: " + groupName
 	if groupChat {
-		groupLabel = "Настройки чата"
+		targetLabel = "Настройки чата"
 	}
 	rows := []tgbotapi.Row{
 		menu.Row(
@@ -512,7 +568,7 @@ func ScheduleDayNavigation(date time.Time, groupName string, groupChat bool, gro
 			),
 		),
 	}
-	if groupID != "" {
+	if canExport {
 		rows = append(rows, menu.Row(menu.Data(
 			"Скачать расписание",
 			"open_schedule_exports",
@@ -522,10 +578,10 @@ func ScheduleDayNavigation(date time.Time, groupName string, groupChat bool, gro
 		)))
 	}
 	if groupChat {
-		rows = append(rows, menu.Row(menu.Data(groupLabel, "open_schedule_group")))
+		rows = append(rows, menu.Row(menu.Data(targetLabel, "open_schedule_group")))
 	} else {
 		rows = append(rows, menu.Row(
-			menu.Data(groupLabel, "open_schedule_group", token),
+			menu.Data(targetLabel, targetAction, token),
 			menu.Data("Главное меню", "open_main_menu"),
 		))
 	}
@@ -534,11 +590,27 @@ func ScheduleDayNavigation(date time.Time, groupName string, groupChat bool, gro
 }
 
 func ScheduleWeekNavigation(from time.Time, groupName string, groupChat bool, groupID string, daysCount int, reference ...string) *tgbotapi.ReplyMarkup {
-	menu := &tgbotapi.ReplyMarkup{}
 	token := firstArgument(reference)
 	if token == "" {
 		token = scheduleGroupToken(groupID)
 	}
+	return scheduleWeekNavigation(from, "Группа: "+groupName, "open_schedule_group", groupChat, groupID != "", daysCount, token)
+}
+
+func TeacherScheduleWeekNavigation(from time.Time, teacherName string, daysCount int, reference string) *tgbotapi.ReplyMarkup {
+	return scheduleWeekNavigation(from, "Преподаватель: "+teacherName, "search_teacher_again", false, true, daysCount, reference)
+}
+
+func scheduleWeekNavigation(
+	from time.Time,
+	targetLabel string,
+	targetAction string,
+	groupChat bool,
+	canExport bool,
+	daysCount int,
+	token string,
+) *tgbotapi.ReplyMarkup {
+	menu := &tgbotapi.ReplyMarkup{}
 	step := 7
 	periodLabel := "Неделя"
 	currentLabel := "Текущая"
@@ -547,9 +619,8 @@ func ScheduleWeekNavigation(from time.Time, groupName string, groupChat bool, gr
 		periodLabel = "2 недели"
 		currentLabel = "Текущие"
 	}
-	groupLabel := "Группа: " + groupName
 	if groupChat {
-		groupLabel = "Настройки чата"
+		targetLabel = "Настройки чата"
 	}
 	rows := []tgbotapi.Row{
 		menu.Row(
@@ -575,7 +646,7 @@ func ScheduleWeekNavigation(from time.Time, groupName string, groupChat bool, gr
 	} else {
 		rows = append(rows, menu.Row(menu.Data("Две недели", "schedule_week", from.Format("2006-01-02"), "14", token)))
 	}
-	if groupID != "" {
+	if canExport {
 		rows = append(rows, menu.Row(menu.Data(
 			"Скачать расписание",
 			"open_schedule_exports",
@@ -585,10 +656,10 @@ func ScheduleWeekNavigation(from time.Time, groupName string, groupChat bool, gr
 		)))
 	}
 	if groupChat {
-		rows = append(rows, menu.Row(menu.Data(groupLabel, "open_schedule_group")))
+		rows = append(rows, menu.Row(menu.Data(targetLabel, "open_schedule_group")))
 	} else {
 		rows = append(rows, menu.Row(
-			menu.Data(groupLabel, "open_schedule_group", token),
+			menu.Data(targetLabel, targetAction, token),
 			menu.Data("Главное меню", "open_main_menu"),
 		))
 	}
@@ -624,6 +695,12 @@ func ScheduleExportResultNavigation(groupToken, from string, daysCount int) *tgb
 func GroupToken(groupID string) string {
 	digest := sha256.Sum256([]byte(groupID))
 	return fmt.Sprintf("%x", digest[:8])
+}
+
+func TeacherToken(universityID, teacherName string) string {
+	value := strings.ToLower(strings.Join(strings.Fields(teacherName), " "))
+	digest := sha256.Sum256([]byte(universityID + "\x00" + value))
+	return "t" + fmt.Sprintf("%x", digest[:8])
 }
 
 func scheduleGroupToken(groupID string) string {

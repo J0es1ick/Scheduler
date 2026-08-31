@@ -524,6 +524,10 @@ func (s *navigationUserService) MarkTelegramMenuConfigured(context.Context, stri
 	return nil
 }
 
+func (s *navigationUserService) IsAdmin(context.Context, string) (bool, error) {
+	return s.user.IsAdmin, nil
+}
+
 type navigationGroupService struct {
 	*service.GroupService
 	group       domain.Group
@@ -644,7 +648,7 @@ func TestUniversitySelectionBackAndCloseRestoreCompletedState(t *testing.T) {
 
 	callback(42, "\fcancel_university_selection|"+restored.FlowNonce)
 	bot.ProcessUpdate(tele.Update{Message: &tele.Message{
-		Text: "NEW-1", Chat: &tele.Chat{ID: 42, Type: tele.ChatPrivate}, Sender: &tele.User{ID: 42},
+		Text: "обычный текст", Chat: &tele.Chat{ID: 42, Type: tele.ChatPrivate}, Sender: &tele.User{ID: 42},
 	}})
 
 	if groupService.nameLookups != 0 {

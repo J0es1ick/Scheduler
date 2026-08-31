@@ -186,7 +186,7 @@ func (h *Handler) sendEmptyTargetDate(
 	target *scheduleTarget,
 	date time.Time,
 ) error {
-	markup := keyboards.ScheduleDayNavigation(date, target.GroupName, isGroupChat(c), target.GroupID, target.navigationReference())
+	markup := scheduleDayNavigationForTarget(date, target, isGroupChat(c))
 	return h.sendScheduleView(ctx, c, []dto.DaySchedule{{Date: date}}, target, date, 1, markup, "")
 }
 

@@ -24,6 +24,9 @@ func (h *Handler) HandleSearch(c tgbotapi.Context) error {
 		return c.Send("Сначала настройте профиль: /start")
 	}
 	state.Step = "choosing_search_type"
+	state.SearchQuery = ""
+	state.TeacherCandidates = nil
+	state.TeacherSearchOrigin = ""
 	state.FlowNonce = newFlowNonce()
 	h.StateManager.Set(c.Sender().ID, state)
 	return c.Send("Выберите критерий поиска:", keyboards.SearchTypeSelector(state.FlowNonce))
@@ -110,12 +113,11 @@ func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) e
 		return h.sendTargetWeek(ctx, c, target, h.targetNow(ctx, target), 7)
 
 	case dto.SearchTypeTeacher:
-		showGroupNames = true
-		data, err := h.ScheduleService.GetScheduleForTeacherRange(ctx, state.UniversityID, state.SearchQuery, now, to)
-		if err != nil {
-			return c.Send("Ошибка получения расписания.")
+		origin := state.TeacherSearchOrigin
+		if origin == "" {
+			origin = "search"
 		}
-		days = mapToDaySchedule(data)
+		return h.beginTeacherSearch(ctx, c, state, state.SearchQuery, origin)
 
 	case dto.SearchTypeRoom:
 		showGroupNames = true

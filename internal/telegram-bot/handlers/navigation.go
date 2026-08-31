@@ -282,6 +282,9 @@ func (h *Handler) HandleBackUniversitySelection(c tele.Context) error {
 }
 
 func (h *Handler) HandleShowSources(c tele.Context) error {
+	if err := h.finishTransientFlow(c); err != nil {
+		return err
+	}
 	_ = c.Respond()
 	ctx, cancel := reqCtx()
 	defer cancel()
@@ -299,11 +302,17 @@ func (h *Handler) HandleOpenHotline(c tele.Context) error {
 }
 
 func (h *Handler) HandleShowPrivacy(c tele.Context) error {
+	if err := h.finishTransientFlow(c); err != nil {
+		return err
+	}
 	_ = c.Respond()
 	return editOrSend(c, privacyText(), keyboards.BackToMoreMenu())
 }
 
 func (h *Handler) HandleShowHelp(c tele.Context) error {
+	if err := h.finishTransientFlow(c); err != nil {
+		return err
+	}
 	_ = c.Respond()
 	ctx, cancel := reqCtx()
 	defer cancel()

@@ -155,10 +155,14 @@ func (h *Handler) HandleSubgroupSettings(c tele.Context) error {
 		return c.Respond(&tele.CallbackResponse{Text: "Подписка уже удалена"})
 	}
 	_ = c.Respond()
+	var subgroupPage []int
+	if len(callbackArguments(c)) > 2 {
+		subgroupPage = []int{callbackPage(c, 2)}
+	}
 	return editOrSend(
 		c,
 		fmt.Sprintf("Подгруппа для %s · %s\n\nОбщие занятия будут показаны при любом выборе.", item.UniversityName, item.GroupName),
-		keyboards.SubgroupSettings(item, callbackPage(c, 1)),
+		keyboards.SubgroupSettings(item, callbackPage(c, 1), subgroupPage...),
 	)
 }
 

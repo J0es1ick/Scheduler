@@ -83,13 +83,15 @@ func groupQueryVariants(query string) []string {
 	if len(parts) < 2 {
 		return variants
 	}
-	separator := "-"
+	separators := []string{"-"}
 	if len(parts) == 2 && digitsOnly(parts[0]) && digitsOnly(parts[1]) {
-		separator = "/"
+		separators = []string{"/", "-"}
 	}
-	canonical := strings.Join(parts, separator)
-	if !strings.EqualFold(query, canonical) {
-		variants = append(variants, canonical)
+	for _, separator := range separators {
+		canonical := strings.Join(parts, separator)
+		if !slices.ContainsFunc(variants, func(variant string) bool { return strings.EqualFold(variant, canonical) }) {
+			variants = append(variants, canonical)
+		}
 	}
 	return variants
 }

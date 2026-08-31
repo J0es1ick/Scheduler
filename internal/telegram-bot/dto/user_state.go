@@ -9,6 +9,8 @@ type UserState struct {
 	Query                              string
 	GroupID                            string
 	SearchQuery                        string
+	TeacherCandidates                  []string
+	TeacherSearchOrigin                string
 	HotlineType                        string
 	Step                               string
 	FlowNonce                          string

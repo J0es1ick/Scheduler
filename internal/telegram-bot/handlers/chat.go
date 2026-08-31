@@ -19,6 +19,7 @@ import (
 type scheduleTarget struct {
 	GroupID      string
 	GroupName    string
+	TeacherName  string
 	UniversityID string
 	University   string
 	ViewFormat   domain.ScheduleViewFormat
@@ -27,11 +28,25 @@ type scheduleTarget struct {
 }
 
 func (target *scheduleTarget) navigationReference() string {
+	if target.TeacherName != "" {
+		return keyboards.TeacherToken(target.UniversityID, target.TeacherName)
+	}
 	reference := keyboards.GroupToken(target.GroupID)
 	if target.Public {
 		return "p" + reference
 	}
 	return reference
+}
+
+func (target *scheduleTarget) showGroupNames() bool {
+	return target.TeacherName != ""
+}
+
+func (target *scheduleTarget) displayName() string {
+	if target.TeacherName != "" {
+		return "Преподаватель: " + target.TeacherName
+	}
+	return target.GroupName
 }
 
 func isGroupChat(c tele.Context) bool {
@@ -85,6 +100,9 @@ func (h *Handler) showChatSettings(c tele.Context, edit bool) error {
 		profile.GroupName,
 		chatViewLabel(profile.ViewFormat),
 	)
+	if profile.Unavailable {
+		text += "\n\nГруппа временно недоступна. Привязка сохранена; её можно изменить или удалить."
+	}
 	if edit {
 		return editOrSend(c, text, keyboards.ChatSettings(profile.GroupName, isAdmin, profile.ViewFormat))
 	}
@@ -111,6 +129,9 @@ func (h *Handler) HandleRequestUnsetChatGroup(c tele.Context) error {
 	}
 	isAdmin, err := chatAdministrator(c)
 	if err != nil || !isAdmin {
+		if c.Callback() == nil {
+			return c.Send("Удалить привязку может только администратор чата.")
+		}
 		return c.Respond(&tele.CallbackResponse{Text: "Удалить привязку может только администратор чата", ShowAlert: true})
 	}
 	state := h.StateManager.Get(c.Sender().ID)
@@ -121,6 +142,9 @@ func (h *Handler) HandleRequestUnsetChatGroup(c tele.Context) error {
 	state.PendingChatUnlinkChatID = strconv.FormatInt(c.Chat().ID, 10)
 	state.PendingChatUnlinkExpiresAt = time.Now().Add(10 * time.Minute)
 	h.StateManager.Set(c.Sender().ID, state)
+	if c.Callback() == nil {
+		return c.Send("Удалить привязку расписания к этому чату?", keyboards.UnsetChatConfirmation(state.PendingChatUnlinkToken))
+	}
 	_ = c.Respond()
 	return editOrSend(
 		c,
@@ -231,6 +255,13 @@ func (h *Handler) HandleSetChatGroup(c tele.Context) error {
 	if len(groups) == 0 {
 		return c.Send("Группа не найдена в актуальном расписании. Проверьте вуз и написание.")
 	}
+	if groups[0].Suggested {
+		var names []string
+		for _, group := range groups {
+			names = append(names, group.Name)
+		}
+		return c.Send("Возможно, вы имели в виду: " + strings.Join(names, ", ") + ". Повторите /set_chat_group с точным названием; настройка чата не изменена.")
+	}
 	if len(groups) > 1 {
 		return c.Send(
 			"Найдено несколько похожих групп. Укажите полное название и ID вуза.\n\n" + h.chatGroupSetupHint(ctx),
@@ -299,24 +330,7 @@ func (h *Handler) HandleUnsetChatGroup(c tele.Context) error {
 	if !isGroupChat(c) {
 		return c.Send("Эта команда предназначена для групповых чатов.")
 	}
-	isAdmin, err := chatAdministrator(c)
-	if err != nil {
-		return c.Send("Не удалось проверить права администратора чата.")
-	}
-	if !isAdmin {
-		return c.Send("Удалить настройку может только администратор этого чата.")
-	}
-	ctx, cancel := reqCtx()
-	defer cancel()
-	err = h.ChatProfileService.Delete(ctx, strconv.FormatInt(c.Chat().ID, 10))
-	if errors.Is(err, sql.ErrNoRows) {
-		return c.Send("Группа расписания для этого чата не была настроена.")
-	}
-	if err != nil {
-		slog.Error("delete chat schedule profile failed", "chat_id", c.Chat().ID, "err", err)
-		return c.Send("Не удалось удалить настройку чата.")
-	}
-	return c.Send("Привязка расписания удалена.")
+	return h.HandleRequestUnsetChatGroup(c)
 }
 
 func (h *Handler) scheduleTarget(
@@ -342,6 +356,10 @@ func (h *Handler) scheduleTarget(
 				"Для этого чата расписание ещё не настроено. " +
 					"Администратор может использовать /set_chat_group.",
 			)
+			return nil
+		}
+		if profile.Unavailable {
+			_ = telegramContext.Send("Группа " + profile.GroupName + " временно недоступна. Привязка чата сохранена; администратор может выбрать другую группу через /chat_settings.")
 			return nil
 		}
 		return &scheduleTarget{
