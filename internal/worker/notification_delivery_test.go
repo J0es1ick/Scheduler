@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -21,6 +22,7 @@ type notificationRepositoryStub struct {
 	mark          func(context.Context, string, string) error
 	scheduleLimit int
 	outboxLimit   int
+	consume       bool
 }
 
 func (r *notificationRepositoryStub) ClaimPending(_ context.Context, limit int) ([]domain.NotificationDelivery, error) {
@@ -30,7 +32,57 @@ func (r *notificationRepositoryStub) ClaimPending(_ context.Context, limit int) 
 
 func (r *notificationRepositoryStub) ClaimBotOutbox(_ context.Context, limit int) ([]domain.BotOutboxDelivery, error) {
 	r.outboxLimit = limit
+	if r.consume {
+		items := r.outbox[:min(limit, len(r.outbox))]
+		r.outbox = r.outbox[len(items):]
+		return items, nil
+	}
 	return r.outbox, nil
+}
+
+func TestNotificationWorkerDrainsLargeQueueInBoundedRounds(t *testing.T) {
+	const total = 10_000
+	repo := &notificationRepositoryStub{
+		consume: true,
+		renew:   func(context.Context, string, []string) error { return nil },
+		active:  func(context.Context, string, string) (bool, error) { return true, nil },
+	}
+	for index := range total {
+		repo.outbox = append(repo.outbox, domain.BotOutboxDelivery{ID: fmt.Sprint(index), UserID: fmt.Sprint(index + 1), Body: "notice", ClaimToken: "owner"})
+	}
+	marked := map[string]bool{}
+	repo.mark = func(_ context.Context, id, _ string) error {
+		if marked[id] {
+			t.Errorf("duplicate delivery %s", id)
+		}
+		marked[id] = true
+		return nil
+	}
+	var sent int
+	w := &NotificationWorker{
+		repository: repo, batchSize: 250, maxBatches: 4,
+		waitSend: func(ctx context.Context, _ string) error { return ctx.Err() },
+		bot: notificationSenderFunc(func(tele.Recipient, interface{}, ...interface{}) (*tele.Message, error) {
+			sent++
+			return &tele.Message{}, nil
+		}),
+	}
+	for round := range 10 {
+		if err := w.tick(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if sent != (round+1)*1000 {
+			t.Fatalf("round %d sent=%d", round, sent)
+		}
+	}
+	if len(marked) != total || len(repo.outbox) != 0 {
+		t.Fatalf("marked=%d pending=%d", len(marked), len(repo.outbox))
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := w.tick(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation ignored: %v", err)
+	}
 }
 
 func (r *notificationRepositoryStub) RenewDeliveryClaims(ctx context.Context, token string, ids []string) error {
@@ -96,7 +148,7 @@ func TestNotificationWorkerFencesBothQueuesAndBoundsBatch(t *testing.T) {
 	if sent != 2 || marked["schedule"] != "schedule-owner" || marked["outbox"] != "outbox-owner" {
 		t.Fatalf("sent=%d marked=%v", sent, marked)
 	}
-	if repo.scheduleLimit != 25 || repo.outboxLimit != 25 {
+	if repo.scheduleLimit != notificationBatchSize || repo.outboxLimit != notificationBatchSize {
 		t.Fatalf("unbounded delivery batch: schedule=%d outbox=%d", repo.scheduleLimit, repo.outboxLimit)
 	}
 }

@@ -208,7 +208,9 @@ func main() {
 		30*time.Second,
 	)
 	reminderDone := reminderWorker.Start(ctx, workerMonitor)
-	notificationWorker := worker.NewNotificationWorker(notificationRepo, bot, 15*time.Second)
+	notificationWorker := worker.NewNotificationWorker(notificationRepo, bot,
+		time.Duration(cfg.NotificationPollSeconds)*time.Second,
+		worker.NotificationOptions{BatchSize: cfg.NotificationBatchSize, MaxBatches: cfg.NotificationMaxBatches})
 	notificationDone := notificationWorker.Start(ctx, workerMonitor)
 	go keepAdminMenusConfigured(ctx, bot, userRepo, cfg.Admin.PublicURL)
 

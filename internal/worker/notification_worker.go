@@ -14,7 +14,7 @@ import (
 	tele "gopkg.in/telebot.v3"
 )
 
-const notificationBatchSize = 25
+const notificationBatchSize = 250
 const notificationRetention = 90 * 24 * time.Hour
 const telegramGlobalInterval = 40 * time.Millisecond
 const telegramRecipientInterval = 1100 * time.Millisecond
@@ -42,6 +42,9 @@ type notificationSender interface {
 }
 
 type NotificationWorker struct {
+	batchSize          int
+	maxBatches         int
+	waitSend           func(context.Context, string) error
 	repository         notificationDeliveryRepository
 	bot                notificationSender
 	interval           time.Duration
@@ -50,12 +53,27 @@ type NotificationWorker struct {
 	recipients         map[string]time.Time
 }
 
+type NotificationOptions struct {
+	BatchSize  int
+	MaxBatches int
+}
+
 func NewNotificationWorker(
 	repository *repository.NotificationRepository,
 	bot *tele.Bot,
 	interval time.Duration,
+	options ...NotificationOptions,
 ) *NotificationWorker {
+	settings := NotificationOptions{BatchSize: notificationBatchSize, MaxBatches: 4}
+	if len(options) > 0 {
+		settings = options[0]
+	}
+	if interval <= 0 {
+		interval = time.Second
+	}
 	return &NotificationWorker{
+		batchSize:          min(1000, max(1, settings.BatchSize)),
+		maxBatches:         min(20, max(1, settings.MaxBatches)),
 		repository:         repository,
 		bot:                bot,
 		interval:           interval,
@@ -120,10 +138,36 @@ func (w *NotificationWorker) tick(ctx context.Context, monitors ...*Monitor) err
 	if len(monitors) > 0 {
 		monitor = monitors[0]
 	}
-	items, err := w.repository.ClaimPending(ctx, notificationBatchSize)
+	batchSize := w.batchSize
+	if batchSize <= 0 {
+		batchSize = notificationBatchSize
+	}
+	maxBatches := w.maxBatches
+	if maxBatches <= 0 {
+		maxBatches = 4
+	}
+	started := time.Now()
+	for range maxBatches {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		full, err := w.drainBatch(ctx, monitor, batchSize)
+		if err != nil {
+			return err
+		}
+		monitor.Heartbeat(NotificationWorkerName)
+		if !full || time.Since(started) >= 20*time.Second {
+			break
+		}
+	}
+	return nil
+}
+
+func (w *NotificationWorker) drainBatch(ctx context.Context, monitor *Monitor, batchSize int) (bool, error) {
+	items, err := w.repository.ClaimPending(ctx, batchSize)
 	if err != nil {
 		slog.Error("notification worker: claim failed", "err", err)
-		return err
+		return false, err
 	}
 	if len(items) > 0 {
 		ids := make([]string, len(items))
@@ -134,23 +178,23 @@ func (w *NotificationWorker) tick(ctx context.Context, monitors ...*Monitor) err
 			monitor, func(guard *notificationClaimGuard) error {
 				return w.deliverScheduleBatch(guard.ctx, items, guard)
 			}); err != nil {
-			return err
+			return false, err
 		}
 	}
 
-	outbox, err := w.repository.ClaimBotOutbox(ctx, notificationBatchSize)
+	outbox, err := w.repository.ClaimBotOutbox(ctx, batchSize)
 	if err != nil {
 		slog.Error("notification worker: claim bot outbox failed", "err", err)
-		return err
+		return false, err
 	}
 	if len(outbox) == 0 {
-		return nil
+		return len(items) >= batchSize, nil
 	}
 	ids := make([]string, len(outbox))
 	for index, item := range outbox {
 		ids[index] = item.ID
 	}
-	return w.withClaims(ctx, outbox[0].ClaimToken, ids, w.repository.RenewBotOutboxClaims,
+	err = w.withClaims(ctx, outbox[0].ClaimToken, ids, w.repository.RenewBotOutboxClaims,
 		monitor, func(guard *notificationClaimGuard) error {
 			for _, item := range outbox {
 				if err := w.deliverBotOutbox(guard.ctx, item, guard); err != nil {
@@ -159,6 +203,7 @@ func (w *NotificationWorker) tick(ctx context.Context, monitors ...*Monitor) err
 			}
 			return nil
 		})
+	return len(items) >= batchSize || len(outbox) >= batchSize, err
 }
 
 func (w *NotificationWorker) withClaims(
@@ -421,6 +466,9 @@ func telegramRetryPolicy(deliveryErr error, attempt int) (time.Duration, bool) {
 }
 
 func (w *NotificationWorker) waitForTelegram(ctx context.Context, recipient string) error {
+	if w.waitSend != nil {
+		return w.waitSend(ctx, recipient)
+	}
 	next := w.lastSend.Add(telegramGlobalInterval)
 	if recipientNext := w.recipients[recipient].Add(telegramRecipientInterval); recipientNext.After(next) {
 		next = recipientNext
