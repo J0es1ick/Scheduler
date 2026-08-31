@@ -144,6 +144,21 @@ jobs:
             web/site/package-lock.json
       - run: cp .env.example .env
       - run: docker compose config --quiet
+      - name: Validate production Compose and monitoring
+        env:
+          PRODUCTION_DATABASE_HOST: db.example.test
+          PRODUCTION_DB_CA_FILE: /tmp/scheduler-ca.pem
+          PRODUCTION_OFFSITE_PATH: /tmp/scheduler-offsite
+          SITE_PUBLIC_URL: https://scheduler.example.test
+          BACKUP_AGE_RECIPIENT: age1ci-configuration-only
+          SCHEDULER_IMAGE: scheduler-app:local
+          SCHEDULER_BACKUP_IMAGE: scheduler-postgres-backup:local
+          MONITORING_METRICS_TOKEN_FILE: /tmp/scheduler-metrics-token
+          MONITORING_WEBHOOK_URL_FILE: /tmp/scheduler-webhook-url
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.production.yml -f docker-compose.monitoring.yml config --quiet
+          docker run --rm --entrypoint promtool -v "$PWD/docker/monitoring:/config:ro" prom/prometheus:v3.5.0 check rules /config/alerts.yml
+          docker run --rm --entrypoint amtool -v "$PWD/docker/monitoring:/config:ro" prom/alertmanager:v0.28.1 check-config /config/alertmanager.yml
       - name: Run the one-shot migrator and start HTTP services
         run: docker compose --profile ci up -d --build telegram-mock postgres admin site
       - name: Wait for reconciled services

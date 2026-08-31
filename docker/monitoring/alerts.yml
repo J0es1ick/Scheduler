@@ -1,0 +1,80 @@
+groups:
+  - name: scheduler
+    rules:
+      - alert: SchedulerUnavailable
+        expr: probe_success{job="scheduler-readiness"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Сервис Scheduler не готов к работе: {{ $labels.instance }}"
+      - alert: SchedulerMetricsUnavailable
+        expr: up{job=~"scheduler|scheduler-host|scheduler-readiness"} == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Мониторинг не получает метрики: {{ $labels.job }}"
+      - alert: SchedulerQueueDelayed
+        expr: scheduler_oldest_pending_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Сообщения Scheduler ожидают отправки более пяти минут"
+      - alert: SchedulerDeliveryFailed
+        expr: sum(scheduler_notification_queue{status="failed"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Есть сообщения с исчерпанными попытками доставки"
+      - alert: SchedulerParserStale
+        expr: sum(scheduler_sources{state=~"stale|error"}) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Один или несколько источников расписания не обновляются"
+      - alert: SchedulerSubscriptionIntegrity
+        expr: scheduler_subscription_integrity_issues > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Нарушена целостность подписок и основных групп"
+      - alert: SchedulerBackupStale
+        expr: time() - scheduler_backup_last_success_timestamp_seconds > scheduler_backup_max_age_seconds
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Резервная копия Scheduler устарела: {{ $labels.kind }}"
+      - alert: SchedulerBackupMetricsMissing
+        expr: absent(scheduler_backup_last_success_timestamp_seconds{kind="local"})
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Нет данных об успешном резервном копировании"
+      - alert: SchedulerDiskLow
+        expr: node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes < 0.15 and node_filesystem_readonly == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "На диске {{ $labels.mountpoint }} осталось менее 15% места"
+      - alert: SchedulerOffsiteMetricsMissing
+        expr: absent(scheduler_backup_last_success_timestamp_seconds{kind="offsite"})
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Нет данных об успешном внешнем резервном копировании"
+      - alert: SchedulerAlertDeliveryFailed
+        expr: increase(alertmanager_notifications_failed_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Alertmanager не может доставить внешние оповещения"

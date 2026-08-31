@@ -1,4 +1,7 @@
 .env
+.env.production
+.env.production.local
+.secrets/
 *.zip
 /migrations
 .gocache/

@@ -1,5 +1,8 @@
 .git
 .env
+.env.production
+.env.production.local
+.secrets
 .gocache
 .gocache-*
 .cache

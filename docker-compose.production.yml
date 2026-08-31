@@ -1,0 +1,106 @@
+x-production-database: &production-database
+  DEPLOYMENT_ENV: production
+  DATABASE_HOST: ${PRODUCTION_DATABASE_HOST:?PRODUCTION_DATABASE_HOST is required}
+  DATABASE_PORT: ${PRODUCTION_DATABASE_PORT:-5432}
+  DATABASE_SSLMODE: verify-full
+  PGSSLROOTCERT: /run/certs/postgres-ca.pem
+
+x-production-volumes: &production-volumes
+  - ${PRODUCTION_DB_CA_FILE:?PRODUCTION_DB_CA_FILE is required}:/run/certs/postgres-ca.pem:ro
+
+services:
+  app-image:
+    image: ${SCHEDULER_IMAGE:?SCHEDULER_IMAGE is required}
+    build: !reset null
+    pull_policy: always
+
+  postgres:
+    profiles: [local-database]
+
+  preflight:
+    image: ${SCHEDULER_IMAGE:?SCHEDULER_IMAGE is required}
+    entrypoint: [/app/scheduler-preflight]
+    command: []
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    pids_limit: 64
+    environment:
+      <<: *production-database
+      DATABASE_NAME: ${DATABASE_NAME:-scheduler}
+      DATABASE_USER: ${DATABASE_MIGRATOR_USER:-scheduler_migrator}
+      DATABASE_PASSWORD: ${DATABASE_MIGRATOR_PASSWORD:?DATABASE_MIGRATOR_PASSWORD is required}
+      DATABASE_MIGRATOR_USER: ${DATABASE_MIGRATOR_USER:-scheduler_migrator}
+      DATABASE_MIGRATOR_PASSWORD: ${DATABASE_MIGRATOR_PASSWORD:?DATABASE_MIGRATOR_PASSWORD is required}
+      DATABASE_BOT_USER: ${DATABASE_BOT_USER:-scheduler_bot}
+      DATABASE_BOT_PASSWORD: ${DATABASE_BOT_PASSWORD:?DATABASE_BOT_PASSWORD is required}
+      DATABASE_ADMIN_USER: ${DATABASE_ADMIN_USER:-scheduler_admin}
+      DATABASE_ADMIN_PASSWORD: ${DATABASE_ADMIN_PASSWORD:?DATABASE_ADMIN_PASSWORD is required}
+      DATABASE_SITE_USER: ${DATABASE_SITE_USER:-scheduler_site}
+      DATABASE_SITE_PASSWORD: ${DATABASE_SITE_PASSWORD:?DATABASE_SITE_PASSWORD is required}
+      DATABASE_BACKUP_USER: ${DATABASE_BACKUP_USER:-scheduler_backup}
+      DATABASE_BACKUP_PASSWORD: ${DATABASE_BACKUP_PASSWORD:?DATABASE_BACKUP_PASSWORD is required}
+      DATABASE_RESTORE_USER: ${DATABASE_RESTORE_USER:-scheduler_restore}
+      DATABASE_RESTORE_PASSWORD: ${DATABASE_RESTORE_PASSWORD:?DATABASE_RESTORE_PASSWORD is required}
+      ADMIN_COOKIE_SECURE: "true"
+      ADMIN_ACCESS_LOGIN_ENABLED: "false"
+      ADMIN_PUBLIC_URL: ${ADMIN_PUBLIC_URL:?ADMIN_PUBLIC_URL is required}
+      SITE_PUBLIC_URL: ${SITE_PUBLIC_URL:?SITE_PUBLIC_URL is required}
+      ADMIN_METRICS_TOKEN: ${ADMIN_METRICS_TOKEN:?ADMIN_METRICS_TOKEN is required}
+      BOT_TOKEN: ${BOT_TOKEN:?BOT_TOKEN is required}
+      BACKUP_REQUIRE_OFFSITE: "true"
+      BACKUP_OFFSITE_DIRECTORY: /offsite
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:?BACKUP_AGE_RECIPIENT is required}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_MAX_AGE_SECONDS: ${BACKUP_MAX_AGE_SECONDS:-90000}
+      BACKUP_OFFSITE_MAX_AGE_SECONDS: ${BACKUP_OFFSITE_MAX_AGE_SECONDS:-90000}
+    volumes:
+      - ${PRODUCTION_DB_CA_FILE:?PRODUCTION_DB_CA_FILE is required}:/run/certs/postgres-ca.pem:ro
+      - ${PRODUCTION_OFFSITE_PATH:?PRODUCTION_OFFSITE_PATH is required}:/offsite:ro
+
+  postgres-bootstrap:
+    environment:
+      <<: *production-database
+    volumes: *production-volumes
+    depends_on: !override
+      preflight:
+        condition: service_completed_successfully
+
+  migrator:
+    environment:
+      <<: *production-database
+    volumes: *production-volumes
+
+  bot:
+    environment:
+      <<: *production-database
+      BOT_TELEGRAM_API_ALLOW_INSECURE: "false"
+    volumes: *production-volumes
+
+  admin:
+    environment:
+      <<: *production-database
+      ADMIN_ACCESS_LOGIN_ENABLED: "false"
+      ADMIN_ACCESS_TOKEN: ""
+      ADMIN_COOKIE_SECURE: "true"
+      ADMIN_PUBLIC_URL: ${ADMIN_PUBLIC_URL:?ADMIN_PUBLIC_URL is required}
+    volumes: *production-volumes
+
+  site:
+    environment:
+      <<: *production-database
+    volumes: *production-volumes
+
+  backup:
+    image: ${SCHEDULER_BACKUP_IMAGE:?SCHEDULER_BACKUP_IMAGE is required}
+    build: !reset null
+    environment:
+      <<: *production-database
+      BACKUP_REQUIRE_OFFSITE: "true"
+      BACKUP_OFFSITE_DIRECTORY: /offsite
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:?BACKUP_AGE_RECIPIENT is required}
+    volumes:
+      - ${PRODUCTION_DB_CA_FILE:?PRODUCTION_DB_CA_FILE is required}:/run/certs/postgres-ca.pem:ro
+      - ${PRODUCTION_OFFSITE_PATH:?PRODUCTION_OFFSITE_PATH is required}:/offsite

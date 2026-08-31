@@ -21,6 +21,9 @@ type Config struct {
 	BotMaxConcurrentHandlers int            `mapstructure:"BOT_MAX_CONCURRENT_HANDLERS"`
 	BotMaxPendingPerSender   int            `mapstructure:"BOT_MAX_PENDING_PER_SENDER"`
 	BotStateTTLMinutes       int            `mapstructure:"BOT_STATE_TTL_MINUTES"`
+	NotificationBatchSize    int            `mapstructure:"BOT_NOTIFICATION_BATCH_SIZE"`
+	NotificationMaxBatches   int            `mapstructure:"BOT_NOTIFICATION_MAX_BATCHES"`
+	NotificationPollSeconds  int            `mapstructure:"BOT_NOTIFICATION_POLL_SECONDS"`
 	ProjectURL               string         `mapstructure:"PROJECT_URL"`
 	BotPublicURL             string         `mapstructure:"BOT_PUBLIC_URL"`
 	Database                 DatabaseConfig `mapstructure:",squash"`
@@ -100,6 +103,9 @@ func initConfig(requireBotToken bool) (*Config, error) {
 	reader.SetDefault("BOT_MAX_CONCURRENT_HANDLERS", 32)
 	reader.SetDefault("BOT_MAX_PENDING_PER_SENDER", 8)
 	reader.SetDefault("BOT_STATE_TTL_MINUTES", 30)
+	reader.SetDefault("BOT_NOTIFICATION_BATCH_SIZE", 250)
+	reader.SetDefault("BOT_NOTIFICATION_MAX_BATCHES", 4)
+	reader.SetDefault("BOT_NOTIFICATION_POLL_SECONDS", 1)
 	reader.SetDefault("BOT_TELEGRAM_API_ALLOW_INSECURE", false)
 	reader.SetDefault("ADMIN_ACCESS_LOGIN_ENABLED", false)
 	reader.SetDefault("ADMIN_COOKIE_SECURE", true)
@@ -117,6 +123,9 @@ func initConfig(requireBotToken bool) (*Config, error) {
 		"BOT_MAX_CONCURRENT_HANDLERS",
 		"BOT_MAX_PENDING_PER_SENDER",
 		"BOT_STATE_TTL_MINUTES",
+		"BOT_NOTIFICATION_BATCH_SIZE",
+		"BOT_NOTIFICATION_MAX_BATCHES",
+		"BOT_NOTIFICATION_POLL_SECONDS",
 		"PROJECT_URL",
 		"BOT_PUBLIC_URL",
 		"DATABASE_HOST",
@@ -230,6 +239,9 @@ func (c *Config) validate(requireBotToken bool) error {
 	}
 	c.Database.SSLMode = sslMode
 	if c.DeploymentEnvironment == "production" {
+		if c.Admin.AccessKeyLoginEnabled {
+			return errors.New("ADMIN_ACCESS_LOGIN_ENABLED must be false in production")
+		}
 		if sslMode == "disable" || sslMode == "allow" || sslMode == "prefer" {
 			return errors.New("DATABASE_SSLMODE must be require, verify-ca, or verify-full in production")
 		}
@@ -290,6 +302,15 @@ func (c *Config) validate(requireBotToken bool) error {
 	}
 	if c.BotStateTTLMinutes <= 0 {
 		return errors.New("BOT_STATE_TTL_MINUTES must be greater than zero")
+	}
+	if c.NotificationBatchSize < 1 || c.NotificationBatchSize > 1000 {
+		return errors.New("BOT_NOTIFICATION_BATCH_SIZE must be between 1 and 1000")
+	}
+	if c.NotificationMaxBatches < 1 || c.NotificationMaxBatches > 20 {
+		return errors.New("BOT_NOTIFICATION_MAX_BATCHES must be between 1 and 20")
+	}
+	if c.NotificationPollSeconds < 1 || c.NotificationPollSeconds > 60 {
+		return errors.New("BOT_NOTIFICATION_POLL_SECONDS must be between 1 and 60")
 	}
 	return nil
 }

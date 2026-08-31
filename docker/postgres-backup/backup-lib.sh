@@ -61,6 +61,24 @@ write_success_marker() {
   marker_tmp="${marker}.partial"
   printf '%s\n' "$(date -u +%s)" > "$marker_tmp" || return 1
   mv "$marker_tmp" "$marker" || return 1
+  write_backup_metrics || return 1
+}
+
+write_backup_metrics() {
+  local_timestamp=0
+  offsite_timestamp=0
+  [ ! -s "$local_success_marker" ] || local_timestamp="$(cat "$local_success_marker")"
+  [ ! -s "$offsite_success_marker" ] || offsite_timestamp="$(cat "$offsite_success_marker")"
+  metrics="${BACKUP_DIRECTORY}/scheduler-backup.prom"
+  {
+    printf 'scheduler_backup_last_success_timestamp_seconds{kind="local"} %s\n' "$local_timestamp"
+    printf 'scheduler_backup_max_age_seconds{kind="local"} %s\n' "${BACKUP_MAX_AGE_SECONDS:-90000}"
+    if offsite_requested; then
+      printf 'scheduler_backup_last_success_timestamp_seconds{kind="offsite"} %s\n' "$offsite_timestamp"
+      printf 'scheduler_backup_max_age_seconds{kind="offsite"} %s\n' "${BACKUP_OFFSITE_MAX_AGE_SECONDS:-90000}"
+    fi
+  } > "${metrics}.partial" || return 1
+  mv "${metrics}.partial" "$metrics" || return 1
 }
 
 create_local_backup() {

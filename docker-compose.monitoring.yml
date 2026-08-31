@@ -1,0 +1,67 @@
+x-monitor-runtime: &monitor-runtime
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 128
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  prometheus:
+    <<: *monitor-runtime
+    image: prom/prometheus:v3.5.0
+    command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.retention.time=15d, --storage.tsdb.retention.size=2GB]
+    mem_limit: 512m
+    cpus: 0.5
+    ports: ["127.0.0.1:19090:9090"]
+    volumes:
+      - ./docker/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ${MONITORING_METRICS_TOKEN_FILE:?MONITORING_METRICS_TOKEN_FILE is required}:/run/secrets/admin-metrics-token:ro
+      - prometheus-data:/prometheus
+
+  alertmanager:
+    <<: *monitor-runtime
+    image: prom/alertmanager:v0.28.1
+    command: [--config.file=/etc/alertmanager/alertmanager.yml, --storage.path=/alertmanager, --cluster.listen-address=]
+    mem_limit: 128m
+    cpus: 0.25
+    ports: ["127.0.0.1:19093:9093"]
+    volumes:
+      - ./docker/monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ${MONITORING_WEBHOOK_URL_FILE:?MONITORING_WEBHOOK_URL_FILE is required}:/run/secrets/alerts-webhook-url:ro
+      - alertmanager-data:/alertmanager
+
+  blackbox:
+    <<: *monitor-runtime
+    image: prom/blackbox-exporter:v0.27.0
+    command: [--config.file=/etc/blackbox.yml]
+    mem_limit: 128m
+    cpus: 0.25
+    volumes:
+      - ./docker/monitoring/blackbox.yml:/etc/blackbox.yml:ro
+
+  node-exporter:
+    <<: *monitor-runtime
+    image: prom/node-exporter:v1.9.1
+    command:
+      - --path.rootfs=/host
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --collector.disable-defaults
+      - --collector.filesystem
+      - --collector.textfile
+      - --collector.textfile.directory=/textfile
+    mem_limit: 128m
+    cpus: 0.25
+    volumes:
+      - /:/host:ro,rslave
+      - pgbackups:/textfile:ro
+
+volumes:
+  prometheus-data:
+  alertmanager-data:
