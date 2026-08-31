@@ -8,35 +8,106 @@ PostgreSQL, HTTP-адресом альтернативного Telegram API, о�
 некорректным публичным адресом админки. База production-окружения должна использовать
 `DATABASE_SSLMODE=require`, `verify-ca` или `verify-full`.
 
-Встроенный PostgreSQL из `docker-compose.yml` предназначен для локальной разработки и не включает
-TLS. Для production задайте `DATABASE_CONTAINER_HOST`, `DATABASE_CONTAINER_PORT` и безопасный
-`DATABASE_CONTAINER_SSLMODE` для внешнего PostgreSQL с TLS; Compose передаст их процессам
-приложения как обычные `DATABASE_HOST`, `DATABASE_PORT` и `DATABASE_SSLMODE`. Отдельные переменные
-без суффикса `CONTAINER` остаются настройками запуска Go-процессов непосредственно на хосте.
+Встроенный PostgreSQL предназначен для разработки. Для production используется отдельный
+`docker-compose.production.yml` поверх основного файла, Docker Compose версии 2.24.4 или новее
+и внешний PostgreSQL с `verify-full`. Локальный `.env` менять не требуется: подготовьте
+отдельный, исключённый из Git `.env.production`.
 
-`postgres-bootstrap` использует те же адрес, порт и SSL-режим, поэтому при заданном внешнем хосте
-роли и права создаются именно во внешней БД, а не во встроенном контейнере. Для `verify-ca` и
-`verify-full` при необходимости задайте контейнерные пути `PGSSLROOTCERT`, `PGSSLCERT` и `PGSSLKEY`.
-Compose передаёт только пути; сертификаты и закрытый клиентский ключ подключайте read-only volume или
-Docker secret ко всем сервисам, которые подключаются к этой БД: `postgres-bootstrap`, `migrator`,
-`bot`, `admin`, `site` и `backup`. Закрытый ключ не следует хранить в `.env` или
-передавать содержимым переменной окружения. Backup и проверка восстановления передают
-`DATABASE_SSLMODE` в libpq через `PGSSLMODE`, поэтому `pg_isready`, `pg_dump`, `psql`, `createdb`,
-`dropdb` и `pg_restore` используют одну TLS-политику.
+Обязательные настройки production-файла:
 
-При работе с внешней БД встроенный PostgreSQL запускать не требуется. После создания самой БД,
-настройки подключения, сертификатов и внешнего хранилища резервных копий выполните сервисы явно:
+- `SCHEDULER_IMAGE` — проверенный образ приложения; для выпуска используйте ссылку с `@sha256:...`.
+- `SCHEDULER_BACKUP_IMAGE` — предварительно собранный и проверенный образ из `docker/postgres-backup`.
+- `PRODUCTION_DATABASE_HOST`, `PRODUCTION_DATABASE_PORT`, `DATABASE_NAME` — существующая внешняя БД.
+- `PRODUCTION_DB_CA_FILE` — абсолютный путь к PEM-сертификату CA PostgreSQL на хосте.
+- Все шесть пар `DATABASE_<ROLE>_USER` / `DATABASE_<ROLE>_PASSWORD`: разные роли и разные пароли
+  длиной от 24 символов. Роли: `MIGRATOR`, `BOT`, `ADMIN`, `SITE`, `BACKUP`, `RESTORE`.
+- `POSTGRES_SUPERUSER` / `POSTGRES_SUPERUSER_PASSWORD` используются только одноразовым bootstrap
+  для создания ролей и передачи владения БД. Runtime-контейнеры их не получают.
+- `BOT_TOKEN`, `ADMIN_METRICS_TOKEN`, `ADMIN_PUBLIC_URL`, `SITE_PUBLIC_URL` — реальные секреты
+  и публичные HTTPS-адреса. Метрики используют отдельный токен от 32 символов.
+- `PRODUCTION_OFFSITE_PATH` — существующее подключённое внешнее хранилище, доступное backup-процессу
+  на запись. Обычная папка на том же диске не является offsite-копией: проверка видит доступность
+  каталога, но не может доказать независимость сервера хранения.
+- `BACKUP_AGE_RECIPIENT` — публичный получатель `age`. Закрытый ключ хранится отдельно и нужен
+  только при восстановлении. Интервал backup — от 60 секунд до суток, допустимый возраст —
+  больше интервала, но не больше двух суток.
 
 ```powershell
-docker compose build app-image backup
-docker compose run --rm --no-deps postgres-bootstrap
-docker compose run --rm --no-deps migrator
-docker compose up -d --no-deps bot admin site backup
+docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml config --quiet
+docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml run --rm --no-deps preflight
+docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml up -d bot admin site backup
+docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml run --rm --no-deps preflight --database
 ```
 
-Следующий шаг выполняйте только после успешного завершения предыдущего. В этом варианте
-`--no-deps` намеренно отключает локальную цепочку зависимостей; обычный `docker compose up`
-остаётся сценарием с встроенным PostgreSQL.
+Следующий шаг выполняется только после успешного предыдущего. Preflight автоматически включён и в
+цепочку запуска перед bootstrap. Он проверяет параметры, CA, отдельные роли и настройки backup;
+режим `--database` после миграций проверяет реальные TLS-соединения runtime-ролей и целостность
+подписок. Встроенный контейнер PostgreSQL не запускается. Сервисы получают сертификат только для
+чтения, Secure-cookie включены, вход по аварийному ключу выключен. HTTPS-терминацию и доверенные
+адреса обратного прокси по-прежнему настраивает оператор. Перед открытием доступа проверьте
+HTTPS снаружи, вход через Telegram и восстановление внешней копии.
+
+## Права БД и обновление исторических данных
+
+Bootstrap создаёт роли, но не выдаёт bot/admin право изменения всех будущих таблиц. После каждой
+миграции migrator транзакционно устанавливает явный список разрешений. Bot обслуживает подписки,
+парсинг и очереди, но не назначает административные роли, не создаёт сессии админки,
+не читает CSRF-секреты и не редактирует содержимое
+ручных исправлений. Admin управляет источниками и ручными изменениями, но не переписывает журнал
+миграций и состояние воркеров. Сайт читает только публичные представления, backup — данные для
+дампа. `DATABASE_APPLY_RUNTIME_GRANTS=true` и имена bot/admin-ролей автоматически передаются
+контейнеру migrator. При ручном запуске migrator эти переменные нужно передать явно.
+
+Миграция 038 добавляет недостающие подписки для сохранённых основных групп и удаляет только
+подписки на уже отсутствующие группы. Существующие настройки формата и подгруппы сохраняются,
+включая подписки на неактивные группы. Внешние ключи предотвращают повторное нарушение связей.
+Диагностический запрос должен возвращать два нуля:
+
+```sql
+SELECT * FROM subscription_integrity;
+```
+
+Проверка включена в readiness бота, метрики админки и `/metrics`. Обычные операции над подписками
+используют общую блокировку ссылок, удаление группы администратором — исключительную: удаление
+не пересекается с перестройкой основного профиля, а независимые пользовательские операции
+могут выполняться параллельно.
+
+## Очередь и внешние оповещения
+
+`BOT_NOTIFICATION_BATCH_SIZE=250`, `BOT_NOTIFICATION_MAX_BATCHES=4` и
+`BOT_NOTIFICATION_POLL_SECONDS=1` управляют обработкой очереди. За проход выполняется не более
+четырёх пакетов каждой очереди; между пакетами проверяется бюджет 20 секунд. Текущий пакет
+завершается с продлением lease, поэтому это не жёсткий таймаут отправки. Глобальная пауза 40 мс
+и пауза одного получателя 1100 мс сохраняются. Время настоящей массовой доставки ограничено
+Telegram: тест на 10 000 сообщений проверяет алгоритм с имитацией сети, а не обещает такую
+скорость реальному API. Возраст старейшего ожидающего сообщения виден в `/metrics` и
+`scheduler_oldest_pending_seconds`; ожидание тихих часов также входит в этот возраст.
+
+Для Linux-хоста подготовлен `docker-compose.monitoring.yml`: Prometheus, Alertmanager,
+проверка readiness через Blackbox Exporter и Node Exporter для диска и отметок backup.
+Укажите `MONITORING_METRICS_TOKEN_FILE` — файл со значением `ADMIN_METRICS_TOKEN`, и
+`MONITORING_WEBHOOK_URL_FILE` — файл с HTTPS-адресом приёмника webhook Alertmanager.
+Храните их вне Git, например в `.secrets/`, и разрешите контейнерам чтение. Приёмник должен
+понимать формат webhook Alertmanager: обычный URL Telegram Bot API для этого не подходит.
+
+```powershell
+docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml -f docker-compose.monitoring.yml up -d prometheus alertmanager blackbox node-exporter
+```
+
+Интерфейсы доступны только локально: Prometheus на `19090`, Alertmanager на `19093`.
+Правила проверяют readiness, отсутствие метрик, задержки и ошибки доставки, устаревшие источники,
+нарушение связей подписок, возраст локальной и offsite-копий и остаток места на диске.
+Backup записывает атомарный файл `scheduler-backup.prom`, Node Exporter читает его из backup-volume.
+Правила находятся в `docker/monitoring/alerts.yml`; пороги необходимо соотнести с тихими часами
+и реальным расписанием источников. Для обнаружения полного отказа хоста эти же проверки нужно
+выполнять также с отдельного сервера мониторинга: локальные контейнеры не переживут отказ хоста.
+
+Проверка синтаксиса:
+
+```powershell
+docker run --rm --entrypoint promtool -v "${PWD}/docker/monitoring:/config:ro" prom/prometheus:v3.5.0 check rules /config/alerts.yml
+docker run --rm --entrypoint amtool -v "${PWD}/docker/monitoring:/config:ro" prom/alertmanager:v0.28.1 check-config /config/alertmanager.yml
+```
 
 ## Административный доступ
 
