@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -27,10 +28,36 @@ func openOperationalIntegrationDB(t *testing.T) (*sqlx.DB, context.Context) {
 		t.Fatal("TEST_DATABASE_URL is required for integration tests")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	db, err := sqlx.ConnectContext(ctx, "pgx", databaseURL)
+	base, err := sqlx.ConnectContext(ctx, "pgx", databaseURL)
 	if err != nil {
 		cancel()
 		t.Fatalf("connect integration database: %v", err)
+	}
+	schema := "operational_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	if _, err = base.ExecContext(ctx, `CREATE SCHEMA `+schema); err != nil {
+		base.Close()
+		cancel()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
+		defer stop()
+		if _, err := base.ExecContext(cleanupCtx, `DROP SCHEMA `+schema+` CASCADE`); err != nil {
+			t.Errorf("drop isolated schema: %v", err)
+		}
+		base.Close()
+	})
+	parsed, err := url.Parse(databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsed.Query()
+	query.Set("search_path", schema)
+	parsed.RawQuery = query.Encode()
+	db, err := sqlx.ConnectContext(ctx, "pgx", parsed.String())
+	if err != nil {
+		cancel()
+		t.Fatal(err)
 	}
 	if err = database.ApplyMigrations(ctx, db); err != nil {
 		_ = db.Close()

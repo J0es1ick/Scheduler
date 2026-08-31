@@ -15,6 +15,7 @@ import (
 
 	appmigration "github.com/J0es1ick/Scheduler/migration"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
 )
@@ -36,6 +37,109 @@ func TestApplyMigrationsWithSingleConnection(t *testing.T) {
 	defer cancel()
 	if err = ApplyMigrations(ctx, db); err != nil {
 		t.Fatalf("apply migrations with one connection: %v", err)
+	}
+}
+
+func TestRuntimeDatabasePrivileges(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db, err := sqlx.ConnectContext(ctx, "pgx", os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err = ApplyMigrations(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	botRole := "bot_test_" + replaceHyphens(uuid.NewString())
+	adminRole := "admin_test_" + replaceHyphens(uuid.NewString())
+	for _, role := range []string{botRole, adminRole} {
+		if _, err = db.ExecContext(ctx, "CREATE ROLE "+pgx.Identifier{role}.Sanitize()); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			db.ExecContext(context.Background(), "DROP OWNED BY "+pgx.Identifier{role}.Sanitize())
+			db.ExecContext(context.Background(), "DROP ROLE "+pgx.Identifier{role}.Sanitize())
+		})
+	}
+	if _, err = db.ExecContext(ctx, "GRANT UPDATE (admin_role) ON users TO "+pgx.Identifier{botRole}.Sanitize()); err != nil {
+		t.Fatal(err)
+	}
+	if err = ApplyRuntimeGrants(ctx, db, botRole, adminRole); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		role, table, privilege string
+		want                   bool
+	}{
+		{botRole, "admin_sessions", "INSERT", false}, {botRole, "schema_migrations", "UPDATE", false},
+		{botRole, "lesson_overrides", "INSERT", false}, {botRole, "subscriptions", "INSERT", true},
+		{botRole, "notification_deliveries", "UPDATE", true}, {adminRole, "worker_status", "UPDATE", false},
+		{adminRole, "schema_migrations", "DELETE", false}, {adminRole, "admin_sessions", "INSERT", true},
+	} {
+		var allowed bool
+		if err = db.GetContext(ctx, &allowed, `SELECT has_table_privilege($1,$2,$3)`, test.role, test.table, test.privilege); err != nil {
+			t.Fatal(err)
+		}
+		if allowed != test.want {
+			t.Errorf("%s %s %s: %t", test.role, test.table, test.privilege, allowed)
+		}
+	}
+	var csrfReadable bool
+	if err = db.GetContext(ctx, &csrfReadable, `SELECT has_column_privilege($1,'admin_sessions','csrf_token','SELECT')`, botRole); err != nil || csrfReadable {
+		t.Fatalf("bot can read admin CSRF secrets: %t %v", csrfReadable, err)
+	}
+	var rolesWritable bool
+	if err = db.GetContext(ctx, &rolesWritable, `SELECT has_column_privilege($1,'users','admin_role','UPDATE') OR has_column_privilege($1,'users','is_admin','INSERT')`, botRole); err != nil || rolesWritable {
+		t.Fatalf("bot can assign administrative roles: %t %v", rolesWritable, err)
+	}
+	var searchViewWritable bool
+	if err = db.GetContext(ctx, &searchViewWritable, `SELECT has_column_privilege($1,'users','search_schedule_view_format','UPDATE')`, botRole); err != nil || !searchViewWritable {
+		t.Fatalf("bot cannot update search schedule format: %t %v", searchViewWritable, err)
+	}
+}
+
+func TestReconcileHistoricalSubscriptions(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db, cleanup := isolatedMigrationSchema(t, ctx, os.Getenv("TEST_DATABASE_URL"))
+	defer cleanup()
+	if err := applyMigrationsThrough(ctx, db, "037_notification_delivery_leases.up.sql"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO universities (id,name,full_name,schedule_url) VALUES ('u','U','University','https://example.test');
+		INSERT INTO groups (id,university_id,name,is_active) VALUES ('g','u','G',FALSE), ('g2','u','G2',TRUE);
+		INSERT INTO users (id,default_group_id) VALUES ('legacy','g'), ('existing','g2');
+		INSERT INTO subscriptions (id,user_id,object_id,object_type,schedule_view_format,subgroup)
+		VALUES ('orphan','legacy','deleted','group','visual',0), ('preserved','existing','g2','group','compact',17);
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyMigrations(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckSubscriptionIntegrity(ctx, db.DB); err != nil {
+		t.Fatal(err)
+	}
+	var valid bool
+	if err := db.GetContext(ctx, &valid, `SELECT
+		EXISTS (SELECT 1 FROM subscriptions WHERE user_id='legacy' AND group_id='g')
+		AND EXISTS (SELECT 1 FROM subscriptions WHERE id='preserved' AND subgroup=17 AND schedule_view_format='compact')
+		AND NOT EXISTS (SELECT 1 FROM subscriptions WHERE id='orphan')`); err != nil || !valid {
+		t.Fatalf("reconciliation lost preferences: valid=%t err=%v", valid, err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO subscriptions (id,user_id,object_id,object_type) VALUES ('bad','legacy','missing','group')`); err == nil {
+		t.Fatal("orphan group subscription accepted")
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE users SET default_group_id='g2' WHERE id='legacy'`); err == nil {
+		t.Fatal("default without subscription accepted")
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM groups WHERE id='g'`); err != nil {
+		t.Fatalf("group deletion did not clear references: %v", err)
+	}
+	if err := CheckSubscriptionIntegrity(ctx, db.DB); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/J0es1ick/Scheduler/internal/database"
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/jmoiron/sqlx"
 )
@@ -20,6 +21,9 @@ func NewSubscriptionRepository(db *sqlx.DB) *SubscriptionRepository {
 }
 
 func (r *SubscriptionRepository) UpsertSubscription(ctx context.Context, id, userID, objectID, objectType string) error {
+	if objectType == "group" {
+		return r.UpsertActiveGroupSubscription(ctx, id, userID, objectID)
+	}
 	now := time.Now()
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO subscriptions (id, user_id, object_id, object_type, created_at, updated_at)
@@ -42,6 +46,9 @@ func (r *SubscriptionRepository) UpsertActiveGroupSubscription(
 		return fmt.Errorf("subscribe active group: begin: %w", err)
 	}
 	defer tx.Rollback()
+	if err = database.LockGroupReferences(ctx, tx, false); err != nil {
+		return err
+	}
 	if err = lockActiveGroup(ctx, tx, groupID); err != nil {
 		return err
 	}
@@ -67,10 +74,13 @@ func (r *SubscriptionRepository) SubscribeAndSetDefault(
 		return fmt.Errorf("subscribe and set default: begin: %w", err)
 	}
 	defer tx.Rollback()
-	if err = lockUser(ctx, tx, userID); err != nil {
+	if err = database.LockGroupReferences(ctx, tx, false); err != nil {
 		return err
 	}
 	if err = lockActiveGroup(ctx, tx, groupID); err != nil {
+		return err
+	}
+	if err = lockUser(ctx, tx, userID); err != nil {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, `
@@ -99,10 +109,13 @@ func (r *SubscriptionRepository) SetDefaultSubscribedGroup(
 		return fmt.Errorf("set subscribed default: begin: %w", err)
 	}
 	defer tx.Rollback()
-	if err = lockUser(ctx, tx, userID); err != nil {
+	if err = database.LockGroupReferences(ctx, tx, false); err != nil {
 		return err
 	}
 	if err = lockActiveGroup(ctx, tx, groupID); err != nil {
+		return err
+	}
+	if err = lockUser(ctx, tx, userID); err != nil {
 		return err
 	}
 	var subscribed bool
@@ -135,9 +148,12 @@ func (r *SubscriptionRepository) UnsubscribeAndSelectDefault(
 		return "", fmt.Errorf("unsubscribe and select default: begin: %w", err)
 	}
 	defer tx.Rollback()
+	if err = database.LockGroupReferences(ctx, tx, false); err != nil {
+		return "", err
+	}
 	var currentDefault sql.NullString
 	if err = tx.GetContext(ctx, &currentDefault, `
-		SELECT default_group_id FROM users WHERE id=$1 FOR UPDATE`, userID); errors.Is(err, sql.ErrNoRows) {
+		SELECT default_group_id FROM users WHERE id=$1 FOR NO KEY UPDATE`, userID); errors.Is(err, sql.ErrNoRows) {
 		return "", sql.ErrNoRows
 	} else if err != nil {
 		return "", fmt.Errorf("unsubscribe and select default: lock user: %w", err)
@@ -167,9 +183,10 @@ func (r *SubscriptionRepository) UnsubscribeAndSelectDefault(
 			SELECT s.object_id
 			FROM subscriptions s
 			JOIN groups g ON g.id=s.object_id AND g.is_active
+			JOIN universities u ON u.id=g.university_id AND u.is_active
 			WHERE s.user_id=$1 AND s.object_type='group'
-			ORDER BY s.updated_at DESC, s.created_at DESC
-			LIMIT 1`, userID)
+			ORDER BY s.updated_at DESC, s.created_at DESC, s.id
+			LIMIT 1 FOR SHARE OF g, u SKIP LOCKED`, userID)
 		if errors.Is(err, sql.ErrNoRows) {
 			newDefault = ""
 		} else if err != nil {
@@ -192,7 +209,7 @@ func (r *SubscriptionRepository) UnsubscribeAndSelectDefault(
 
 func lockUser(ctx context.Context, tx *sqlx.Tx, userID string) error {
 	var id string
-	if err := tx.GetContext(ctx, &id, `SELECT id FROM users WHERE id=$1 FOR UPDATE`, userID); errors.Is(err, sql.ErrNoRows) {
+	if err := tx.GetContext(ctx, &id, `SELECT id FROM users WHERE id=$1 FOR NO KEY UPDATE`, userID); errors.Is(err, sql.ErrNoRows) {
 		return sql.ErrNoRows
 	} else if err != nil {
 		return fmt.Errorf("lock user %s: %w", userID, err)
@@ -201,9 +218,16 @@ func lockUser(ctx context.Context, tx *sqlx.Tx, userID string) error {
 }
 
 func lockActiveGroup(ctx context.Context, tx *sqlx.Tx, groupID string) error {
+	var universityID string
+	if err := tx.GetContext(ctx, &universityID, `SELECT university_id FROM groups WHERE id=$1`, groupID); err != nil {
+		return fmt.Errorf("load group university: %w", err)
+	}
 	var id string
+	if err := tx.GetContext(ctx, &id, `SELECT id FROM universities WHERE id=$1 AND is_active FOR SHARE`, universityID); err != nil {
+		return fmt.Errorf("lock active university: %w", err)
+	}
 	if err := tx.GetContext(ctx, &id, `
-		SELECT id FROM groups WHERE id=$1 AND is_active FOR SHARE`, groupID); errors.Is(err, sql.ErrNoRows) {
+		SELECT id FROM groups WHERE id=$1 AND university_id=$2 AND is_active FOR SHARE`, groupID, universityID); errors.Is(err, sql.ErrNoRows) {
 		return sql.ErrNoRows
 	} else if err != nil {
 		return fmt.Errorf("lock active group %s: %w", groupID, err)
@@ -216,7 +240,7 @@ func (r *SubscriptionRepository) GetGroupSubscriptions(ctx context.Context, user
 	err := r.db.SelectContext(ctx, &items, `
 		SELECT s.id, s.user_id, g.id AS group_id, g.name AS group_name,
 			g.university_id, u.name AS university_name,
-			(users.default_group_id = g.id) AS is_default,
+			COALESCE(users.default_group_id = g.id, FALSE) AS is_default,
 			(g.is_active AND u.is_active) AS is_active,
 			s.schedule_view_format, s.subgroup,
 			s.created_at, s.updated_at
@@ -316,6 +340,10 @@ func (r *SubscriptionRepository) GetSubscriptionsByUserID(ctx context.Context, u
 }
 
 func (r *SubscriptionRepository) DeleteSubscriptionByObject(ctx context.Context, userID, objectID, objectType string) error {
+	if objectType == "group" {
+		_, err := r.UnsubscribeAndSelectDefault(ctx, userID, objectID)
+		return err
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("delete subscription user=%s obj=%s/%s: begin: %w", userID, objectType, objectID, err)
@@ -330,16 +358,6 @@ func (r *SubscriptionRepository) DeleteSubscriptionByObject(ctx context.Context,
 	if rows, _ := result.RowsAffected(); rows == 0 {
 		return sql.ErrNoRows
 	}
-	if objectType == "group" {
-		if _, err = tx.ExecContext(ctx, `
-			UPDATE notification_deliveries d
-			SET status='cancelled', updated_at=NOW()
-			FROM schedule_change_events e
-			WHERE d.event_id=e.id AND d.user_id=$1 AND e.group_id=$2
-				AND d.status='pending'`, userID, objectID); err != nil {
-			return fmt.Errorf("cancel pending notifications user=%s group=%s: %w", userID, objectID, err)
-		}
-	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("delete subscription user=%s obj=%s/%s: commit: %w", userID, objectType, objectID, err)
 	}
@@ -347,7 +365,15 @@ func (r *SubscriptionRepository) DeleteSubscriptionByObject(ctx context.Context,
 }
 
 func (r *SubscriptionRepository) DeleteSubscription(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM subscriptions WHERE id = $1`, id)
+	subscription, err := r.GetSubscriptionByID(ctx, id)
+	if err != nil || subscription == nil {
+		return err
+	}
+	if subscription.ObjectType == "group" {
+		_, err = r.UnsubscribeAndSelectDefault(ctx, subscription.UserID, subscription.ObjectID)
+		return err
+	}
+	_, err = r.db.ExecContext(ctx, `DELETE FROM subscriptions WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("delete subscription %s: %w", id, err)
 	}

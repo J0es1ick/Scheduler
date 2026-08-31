@@ -287,8 +287,8 @@ func (r *ParseLogRepository) RunOperationalRetention(ctx context.Context) (bool,
 		`DELETE FROM connector_request_nonces WHERE ctid IN (
 			SELECT ctid FROM connector_request_nonces WHERE expires_at<NOW() LIMIT 1000
 		 )`,
-		`DELETE FROM admin_sessions WHERE ctid IN (
-			SELECT ctid FROM admin_sessions WHERE expires_at<NOW() LIMIT 1000
+		`DELETE FROM admin_sessions WHERE token_hash IN (
+			SELECT token_hash FROM admin_sessions WHERE expires_at<NOW() LIMIT 1000
 		 )`,
 		`DELETE FROM lesson_source_identities WHERE ctid IN (
 			SELECT identity.ctid FROM lesson_source_identities identity

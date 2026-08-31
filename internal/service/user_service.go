@@ -78,6 +78,17 @@ func (s *UserService) SetQuietHours(ctx context.Context, userID string, enabled 
 	return s.userRepo.SetQuietHours(ctx, userID, enabled, start, end)
 }
 
+func (s *UserService) SetSearchScheduleView(
+	ctx context.Context,
+	userID string,
+	format domain.ScheduleViewFormat,
+) error {
+	if format != domain.ScheduleViewCompact && format != domain.ScheduleViewVisual {
+		return fmt.Errorf("unsupported search schedule view format")
+	}
+	return s.userRepo.SetSearchScheduleView(ctx, userID, format)
+}
+
 func (s *UserService) ExportData(ctx context.Context, userID string) (*domain.UserDataExport, error) {
 	return s.userRepo.ExportUserData(ctx, userID)
 }

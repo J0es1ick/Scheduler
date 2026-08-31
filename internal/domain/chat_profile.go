@@ -9,6 +9,7 @@ type ChatScheduleProfile struct {
 	GroupName      string             `db:"group_name"`
 	UniversityID   string             `db:"university_id"`
 	UniversityName string             `db:"university_name"`
+	Unavailable    bool               `db:"unavailable"`
 	ViewFormat     ScheduleViewFormat `db:"schedule_view_format"`
 	ConfiguredBy   string             `db:"configured_by"`
 	CreatedAt      time.Time          `db:"created_at"`

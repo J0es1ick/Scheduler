@@ -76,9 +76,9 @@ func (r *GroupRepository) GetGroupByName(ctx context.Context, universityID strin
 		manually_disabled, created_at, updated_at
 		FROM groups
 		WHERE university_id = $1
-		  AND LOWER(BTRIM(name)) = LOWER(BTRIM($2))
+		  AND LOWER(REGEXP_REPLACE(BTRIM(name), '[[:space:]]+', ' ', 'g')) = $2
 		  AND is_active = TRUE`
-	err := r.db.GetContext(ctx, &group, query, universityID, name)
+	err := r.db.GetContext(ctx, &group, query, universityID, normalizedSearch(name))
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -118,7 +118,12 @@ func (r *GroupRepository) FindActiveByName(
 	name string,
 ) ([]domain.Group, error) {
 	var groups []domain.Group
-	where := `name ILIKE '%' || BTRIM($1) || '%' AND is_active=TRUE`
+	name = normalizedSearch(name)
+	if name == "" {
+		return []domain.Group{}, nil
+	}
+	where := `STRPOS(LOWER(REGEXP_REPLACE(BTRIM(name), '[[:space:]]+', ' ', 'g')), $1)>0 AND is_active=TRUE
+		AND EXISTS (SELECT 1 FROM universities u WHERE u.id=groups.university_id AND u.is_active)`
 	args := []any{name}
 	if universityID != "" {
 		where += ` AND university_id=$2`
@@ -138,6 +143,27 @@ func (r *GroupRepository) FindActiveByName(
 	}
 	if groups == nil {
 		groups = []domain.Group{}
+	}
+	if len(groups) == 0 && universityID != "" {
+		var candidates []domain.Group
+		if err := r.db.SelectContext(ctx, &candidates, `
+			SELECT g.id, g.university_id, g.name, g.is_active, g.source_active,
+				g.manually_disabled, g.created_at, g.updated_at
+			FROM groups g JOIN universities u ON u.id=g.university_id
+			WHERE g.university_id=$1 AND g.is_active AND u.is_active
+				AND ABS(CHAR_LENGTH(REGEXP_REPLACE(BTRIM(g.name), '[[:space:]]+', ' ', 'g'))-CHAR_LENGTH($2))<=1
+			ORDER BY g.name, g.id LIMIT 500`, universityID, name); err != nil {
+			return nil, fmt.Errorf("suggest active groups: %w", err)
+		}
+		for _, candidate := range candidates {
+			if closeSearchMatch(candidate.Name, name) {
+				candidate.Suggested = true
+				groups = append(groups, candidate)
+				if len(groups) == 10 {
+					break
+				}
+			}
+		}
 	}
 	return groups, nil
 }

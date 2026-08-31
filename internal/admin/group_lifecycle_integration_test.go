@@ -4,12 +4,16 @@ package admin
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/database"
+	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
@@ -67,10 +71,11 @@ func TestGroupLifecycle(t *testing.T) {
 		) VALUES ($1,$2,'TEST-OLD',FALSE,FALSE,FALSE,NOW()-INTERVAL '1 year',NOW())`,
 		oldGroupID, universityID)
 	mustExec("create user", `
-		INSERT INTO users (id, default_group_id) VALUES ($1,$2)`, userID, groupID)
+		INSERT INTO users (id) VALUES ($1)`, userID)
 	mustExec("create subscription", `
 		INSERT INTO subscriptions (id, user_id, object_id, object_type)
 		VALUES ($1,$2,$3,'group')`, "group-lifecycle-subscription-"+suffix, userID, groupID)
+	mustExec("set default", `UPDATE users SET default_group_id=$2 WHERE id=$1`, userID, groupID)
 	mustExec("create chat", `
 		INSERT INTO chat_schedule_profiles (chat_id, title, default_group_id, configured_by)
 		VALUES ($1,'Lifecycle chat',$2,$3)`, chatID, groupID, userID)
@@ -157,5 +162,61 @@ func TestGroupLifecycle(t *testing.T) {
 			"group deletion left related data: group=%d subscriptions=%d chats=%d defaults=%d",
 			groupCount, subscriptionCount, chatCount, defaultCount,
 		)
+	}
+}
+
+func TestGroupDeletionAndUnsubscribeDoNotDeadlock(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db, err := sqlx.ConnectContext(ctx, "pgx", os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err = database.ApplyMigrations(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	suffix := uuid.NewString()
+	t.Cleanup(func() {
+		db.ExecContext(context.Background(), `DELETE FROM users WHERE id LIKE $1`, suffix+"%")
+		db.ExecContext(context.Background(), `DELETE FROM universities WHERE id=$1`, suffix)
+	})
+	if _, err = db.ExecContext(ctx, `INSERT INTO universities (id,name,full_name,schedule_url) VALUES ($1,$1,$1,'')`, suffix); err != nil {
+		t.Fatal(err)
+	}
+	for round := range 20 {
+		id := suffix + fmt.Sprint(round)
+		if _, err = db.ExecContext(ctx, `INSERT INTO groups (id,university_id,name,is_active,source_active) VALUES ($1,$2,$1,FALSE,FALSE)`, id, suffix); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = db.ExecContext(ctx, `INSERT INTO users (id) VALUES ($1)`, id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = db.ExecContext(ctx, `INSERT INTO subscriptions (id,user_id,object_id,object_type) VALUES ($1,$1,$1,'group')`, id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = db.ExecContext(ctx, `UPDATE users SET default_group_id=$1 WHERE id=$1`, id); err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		results := make(chan error, 2)
+		var wg sync.WaitGroup
+		wg.Go(func() { <-start; _, err := NewStore(db).DeleteGroup(ctx, id); results <- err })
+		wg.Go(func() {
+			<-start
+			_, err := repository.NewSubscriptionRepository(db).UnsubscribeAndSelectDefault(ctx, id, id)
+			results <- err
+		})
+		close(start)
+		wg.Wait()
+		close(results)
+		for err := range results {
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				t.Fatal(err)
+			}
+		}
+		if err = database.CheckSubscriptionIntegrity(ctx, db.DB); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

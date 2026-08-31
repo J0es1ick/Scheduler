@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/J0es1ick/Scheduler/internal/database"
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/jmoiron/sqlx"
 )
@@ -23,14 +24,12 @@ func NewUserRepository(db *sqlx.DB) *UserRepository {
 
 func (r *UserRepository) CreateUser(ctx context.Context, id, username string, isAdmin bool) (string, error) {
 	now := time.Now()
-	role := "none"
+	query := `INSERT INTO users (id, username, created_at, updated_at) VALUES ($1, $2, $3, $4)`
+	args := []any{id, username, now, now}
 	if isAdmin {
-		role = "owner"
+		query = `INSERT INTO users (id, username, created_at, updated_at, is_admin, admin_role) VALUES ($1,$2,$3,$4,TRUE,'owner')`
 	}
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO users (id, username, is_admin, admin_role, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		id, username, isAdmin, role, now, now)
+	_, err := r.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return "", fmt.Errorf("create user: %w", err)
 	}
@@ -45,6 +44,7 @@ func (r *UserRepository) GetUserByID(ctx context.Context, id string) (*domain.Us
 			reminder_enabled, reminder_minutes, quiet_hours_enabled,
 			to_char(quiet_hours_start, 'HH24:MI') AS quiet_hours_start,
 			to_char(quiet_hours_end, 'HH24:MI') AS quiet_hours_end,
+			search_schedule_view_format,
 			created_at, updated_at
 		 FROM users WHERE id = $1`, id)
 	if err != nil {
@@ -64,6 +64,7 @@ func (r *UserRepository) GetUserByUsername(ctx context.Context, username string)
 			reminder_enabled, reminder_minutes, quiet_hours_enabled,
 			to_char(quiet_hours_start, 'HH24:MI') AS quiet_hours_start,
 			to_char(quiet_hours_end, 'HH24:MI') AS quiet_hours_end,
+			search_schedule_view_format,
 			created_at, updated_at
 		 FROM users WHERE username = $1`, username)
 	if err != nil {
@@ -83,6 +84,7 @@ func (r *UserRepository) GetAllUsers(ctx context.Context) ([]domain.User, error)
 			reminder_enabled, reminder_minutes, quiet_hours_enabled,
 			to_char(quiet_hours_start, 'HH24:MI') AS quiet_hours_start,
 			to_char(quiet_hours_end, 'HH24:MI') AS quiet_hours_end,
+			search_schedule_view_format,
 			created_at, updated_at FROM users`)
 	if err != nil {
 		return nil, fmt.Errorf("get all users: %w", err)
@@ -137,13 +139,12 @@ func (r *UserRepository) UpdateUsername(ctx context.Context, id, username string
 }
 
 func (r *UserRepository) SetDefaultGroup(ctx context.Context, userID, groupID string) error {
-	var value any
 	if groupID != "" {
-		value = groupID
+		return NewSubscriptionRepository(r.db).SetDefaultSubscribedGroup(ctx, userID, groupID)
 	}
 	result, err := r.db.ExecContext(ctx,
-		`UPDATE users SET default_group_id = $1, updated_at = NOW() WHERE id = $2`,
-		value, userID,
+		`UPDATE users SET default_group_id = NULL, updated_at = NOW() WHERE id = $1`,
+		userID,
 	)
 	if err != nil {
 		return fmt.Errorf("set default group for user %s: %w", userID, err)
@@ -160,6 +161,9 @@ func (r *UserRepository) SetNotificationsEnabled(ctx context.Context, userID str
 		return fmt.Errorf("set notifications for user %s: begin: %w", userID, err)
 	}
 	defer tx.Rollback()
+	if err = database.LockGroupReferences(ctx, tx, false); err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx,
 		`UPDATE users SET notifications_enabled = $1, updated_at = NOW() WHERE id = $2`,
 		enabled, userID,
@@ -195,6 +199,9 @@ func (r *UserRepository) SetLessonReminder(
 		return fmt.Errorf("set lesson reminder for user %s: begin: %w", userID, err)
 	}
 	defer tx.Rollback()
+	if err = database.LockGroupReferences(ctx, tx, false); err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, `
 		UPDATE users
 		SET reminder_enabled=$1, reminder_minutes=$2, updated_at=NOW()
@@ -244,6 +251,24 @@ func (r *UserRepository) SetQuietHours(
 	return nil
 }
 
+func (r *UserRepository) SetSearchScheduleView(
+	ctx context.Context,
+	userID string,
+	format domain.ScheduleViewFormat,
+) error {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE users
+		SET search_schedule_view_format=$1, updated_at=NOW()
+		WHERE id=$2`, format, userID)
+	if err != nil {
+		return fmt.Errorf("set search schedule view for user %s: %w", userID, err)
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (r *UserRepository) DeleteUser(ctx context.Context, id string) error {
 	randomMarker := make([]byte, 16)
 	if _, err := rand.Read(randomMarker); err != nil {
@@ -255,6 +280,9 @@ func (r *UserRepository) DeleteUser(ctx context.Context, id string) error {
 		return fmt.Errorf("delete user %s: begin: %w", id, err)
 	}
 	defer tx.Rollback()
+	if err = database.LockGroupReferences(ctx, tx, false); err != nil {
+		return err
+	}
 	var role struct {
 		IsAdmin   bool   `db:"is_admin"`
 		AdminRole string `db:"admin_role"`

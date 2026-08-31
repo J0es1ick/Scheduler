@@ -416,6 +416,7 @@ scheduler_reminder_worker_cursor_pending %d
 		operations.ReminderWorker.LastFailures,
 		reminderCursorPending,
 	)
+	_, _ = fmt.Fprintf(w, "scheduler_subscription_integrity_issues %d\n", operations.SubscriptionIntegrityIssues)
 }
 
 func unixTimestamp(value *time.Time) int64 {

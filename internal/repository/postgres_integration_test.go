@@ -325,7 +325,7 @@ func TestPostgresRepositoryFlow(t *testing.T) {
 	if err != nil || containsUser(pendingMenus, userID) {
 		t.Fatalf("configured user remains in pending menu sync: found=%t err=%v", containsUser(pendingMenus, userID), err)
 	}
-	if err = users.SetDefaultGroup(ctx, userID, groupID); err != nil {
+	if err = subscriptions.SubscribeAndSetDefault(ctx, subscriptionID, userID, groupID); err != nil {
 		t.Fatalf("set default group: %v", err)
 	}
 	if err = users.SetLessonReminder(ctx, userID, true, 15); err != nil {
@@ -347,6 +347,16 @@ func TestPostgresRepositoryFlow(t *testing.T) {
 	}
 	if storedUser.DefaultGroupID != groupID || !storedUser.ReminderEnabled {
 		t.Fatalf("unexpected stored user: %+v", storedUser)
+	}
+	if storedUser.SearchScheduleView != domain.ScheduleViewVisual {
+		t.Fatalf("default search schedule view = %q, want visual", storedUser.SearchScheduleView)
+	}
+	if err = users.SetSearchScheduleView(ctx, userID, domain.ScheduleViewCompact); err != nil {
+		t.Fatalf("set search schedule view: %v", err)
+	}
+	storedUser, err = users.GetUserByID(ctx, userID)
+	if err != nil || storedUser == nil || storedUser.SearchScheduleView != domain.ScheduleViewCompact {
+		t.Fatalf("search schedule view was not saved: user=%+v err=%v", storedUser, err)
 	}
 	items, err := subscriptions.GetGroupSubscriptions(ctx, userID)
 	if err != nil {
@@ -379,7 +389,6 @@ func TestPostgresRepositoryFlow(t *testing.T) {
 	if !containsReminderRecipient(recipients, userID, groupID) {
 		t.Fatalf("integration user is absent from reminder recipients")
 	}
-
 	startedAt := time.Now().UTC().Add(-time.Second)
 	finishedAt := time.Now().UTC()
 	if err = workers.RecordRun(ctx, domain.WorkerRunResult{

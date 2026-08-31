@@ -3,6 +3,7 @@ package domain
 import "time"
 
 type Group struct {
+	Suggested        bool      `db:"-"`
 	ID               string    `db:"id"`
 	ExternalID       string    `db:"-"`
 	UniversityID     string    `db:"university_id"`

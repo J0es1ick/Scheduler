@@ -31,6 +31,11 @@ func (r *MetricsRepository) Get(ctx context.Context) (*domain.ServiceMetrics, er
 	result := &domain.ServiceMetrics{CheckedAt: time.Now()}
 	if err := r.db.GetContext(ctx, result, `
 		SELECT
+			(SELECT missing_default_subscriptions+orphan_group_subscriptions FROM subscription_integrity) AS subscription_integrity_issues,
+			COALESCE((SELECT EXTRACT(EPOCH FROM NOW()-MIN(created_at))::bigint FROM (
+				SELECT created_at FROM notification_deliveries WHERE status='pending'
+				UNION ALL SELECT created_at FROM bot_outbox WHERE status='pending'
+			) pending),0) AS oldest_pending_seconds,
 			(SELECT COUNT(*)::int FROM universities WHERE is_active) AS universities,
 			(SELECT COUNT(*)::int FROM groups WHERE is_active) AS groups,
 			(SELECT COUNT(*)::int FROM effective_lessons l

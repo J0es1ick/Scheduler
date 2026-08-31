@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/database"
+	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
@@ -96,5 +97,44 @@ func TestConcurrentOwnerDemotionKeepsAnOwner(t *testing.T) {
 	}
 	if owners < 1 {
 		t.Fatal("all owners were removed")
+	}
+}
+
+func TestConcurrentPromotionAndSelfDeletion(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db, err := sqlx.ConnectContext(ctx, "pgx", os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err = database.ApplyMigrations(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	for range 20 {
+		id := "promotion-" + uuid.NewString()
+		if _, err = repository.NewUserRepository(db).CreateUser(ctx, id, id, false); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { db.ExecContext(context.Background(), `DELETE FROM users WHERE id=$1`, id) })
+		start := make(chan struct{})
+		promoted, deleted := make(chan error, 1), make(chan error, 1)
+		go func() { <-start; promoted <- NewStore(db).UpdateUserAdminRole(ctx, id, "editor") }()
+		go func() { <-start; deleted <- repository.NewUserRepository(db).DeleteUser(ctx, id) }()
+		close(start)
+		promotionErr, deletionErr := <-promoted, <-deleted
+		if promotionErr == nil && deletionErr == nil {
+			t.Fatal("promoted administrator was deleted")
+		}
+		var count int
+		if err = db.GetContext(ctx, &count, `SELECT COUNT(*) FROM users WHERE id=$1 AND is_admin AND admin_role='editor'`, id); err != nil {
+			t.Fatal(err)
+		}
+		if promotionErr == nil && count != 1 {
+			t.Fatal("successful promotion did not preserve administrator")
+		}
+		if deletionErr != nil && promotionErr != nil {
+			t.Fatalf("both actions failed: promotion=%v deletion=%v", promotionErr, deletionErr)
+		}
 	}
 }

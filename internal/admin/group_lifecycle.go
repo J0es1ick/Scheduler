@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/J0es1ick/Scheduler/internal/database"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -58,6 +59,9 @@ func (s *Store) DeleteGroup(ctx context.Context, groupID string) (*GroupDeletion
 		return nil, fmt.Errorf("admin delete group: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = database.LockGroupReferences(ctx, tx, true); err != nil {
+		return nil, err
+	}
 
 	state, err := lockGroupLifecycle(ctx, tx, groupID)
 	if err != nil {

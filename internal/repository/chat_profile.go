@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/J0es1ick/Scheduler/internal/database"
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/jmoiron/sqlx"
 )
@@ -24,7 +25,18 @@ func (r *ChatProfileRepository) Upsert(
 	groupID string,
 	configuredBy string,
 ) error {
-	if _, err := r.db.ExecContext(ctx, `
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("upsert chat schedule profile: begin: %w", err)
+	}
+	defer tx.Rollback()
+	if err = database.LockGroupReferences(ctx, tx, false); err != nil {
+		return err
+	}
+	if err = lockActiveGroup(ctx, tx, groupID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `
 		INSERT INTO chat_schedule_profiles
 			(chat_id, title, default_group_id, configured_by)
 		VALUES ($1, $2, $3, $4)
@@ -37,7 +49,7 @@ func (r *ChatProfileRepository) Upsert(
 	); err != nil {
 		return fmt.Errorf("upsert chat schedule profile %s: %w", chatID, err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (r *ChatProfileRepository) Get(
@@ -49,10 +61,10 @@ func (r *ChatProfileRepository) Get(
 		SELECT p.chat_id, p.title, p.default_group_id,
 			g.name AS group_name, g.university_id,
 			u.name AS university_name, p.schedule_view_format, p.configured_by,
-			p.created_at, p.updated_at
+			p.created_at, p.updated_at, NOT (g.is_active AND u.is_active) AS unavailable
 		FROM chat_schedule_profiles p
-		JOIN groups g ON g.id=p.default_group_id AND g.is_active
-		JOIN universities u ON u.id=g.university_id AND u.is_active
+		JOIN groups g ON g.id=p.default_group_id
+		JOIN universities u ON u.id=g.university_id
 		WHERE p.chat_id=$1`, chatID)
 	if err != nil {
 		if err == sql.ErrNoRows {

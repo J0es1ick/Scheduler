@@ -223,6 +223,7 @@ func (s *Store) OperationalHealth(ctx context.Context) (*OperationalHealth, erro
 	}
 	if err := s.db.GetContext(ctx, result, `
 		SELECT
+			(SELECT missing_default_subscriptions + orphan_group_subscriptions FROM subscription_integrity) AS subscription_integrity_issues,
 			(SELECT COUNT(*)::int FROM notification_deliveries WHERE status='pending') AS pending_notifications,
 			(SELECT COUNT(*)::int FROM notification_deliveries WHERE status='failed') AS failed_notifications,
 			(SELECT COUNT(*)::int FROM bot_outbox WHERE status='pending') AS pending_outbox,
@@ -253,7 +254,7 @@ func (s *Store) OperationalHealth(ctx context.Context) (*OperationalHealth, erro
 	}
 	result.ReminderWorker = *workerStatus
 	result.Status = "healthy"
-	if result.SourcesStale > 0 || result.SourcesError > 0 ||
+	if result.SubscriptionIntegrityIssues > 0 || result.SourcesStale > 0 || result.SourcesError > 0 ||
 		result.SourcesQuarantined > 0 || result.FailedNotifications > 0 ||
 		result.FailedOutbox > 0 || result.FailedConnectorRuns > 0 || result.OldestPendingSeconds > 300 ||
 		result.ReminderWorker.LastError != "" ||

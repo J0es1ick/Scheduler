@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/buildinfo"
+	"github.com/J0es1ick/Scheduler/internal/database"
 )
 
 type databasePinger interface {
@@ -79,6 +80,9 @@ func (h *Health) ready(w http.ResponseWriter, request *http.Request) {
 	if h.database != nil {
 		ctx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
 		checks["database"] = h.database.PingContext(ctx) == nil
+		if db, ok := h.database.(database.IntegrityQuerier); ok {
+			checks["subscriptions"] = database.CheckSubscriptionIntegrity(ctx, db) == nil
+		}
 		cancel()
 	}
 	if h.workers != nil {

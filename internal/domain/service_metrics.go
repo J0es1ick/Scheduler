@@ -3,26 +3,28 @@ package domain
 import "time"
 
 type ServiceMetrics struct {
-	Universities          int `db:"universities"`
-	Groups                int `db:"groups"`
-	Lessons               int `db:"lessons"`
-	Users                 int `db:"users"`
-	Subscriptions         int `db:"subscriptions"`
-	SourcesTotal          int
-	SourcesHealthy        int
-	SourcesRunning        int
-	SourcesStale          int
-	SourcesError          int
-	SourcesQuarantined    int
-	SourcesDisabled       int
-	PendingNotifications  int        `db:"pending_notifications"`
-	FailedNotifications   int        `db:"failed_notifications"`
-	PendingOutbox         int        `db:"pending_outbox"`
-	FailedOutbox          int        `db:"failed_outbox"`
-	DatabaseBytes         int64      `db:"database_bytes"`
-	ConnectorPayloadBytes int64      `db:"connector_payload_bytes"`
-	SnapshotPayloadBytes  int64      `db:"snapshot_payload_bytes"`
-	LastSuccessfulParseAt *time.Time `db:"last_successful_parse_at"`
-	ReminderWorker        WorkerStatus
-	CheckedAt             time.Time
+	OldestPendingSeconds        int64 `db:"oldest_pending_seconds"`
+	SubscriptionIntegrityIssues int64 `db:"subscription_integrity_issues"`
+	Universities                int   `db:"universities"`
+	Groups                      int   `db:"groups"`
+	Lessons                     int   `db:"lessons"`
+	Users                       int   `db:"users"`
+	Subscriptions               int   `db:"subscriptions"`
+	SourcesTotal                int
+	SourcesHealthy              int
+	SourcesRunning              int
+	SourcesStale                int
+	SourcesError                int
+	SourcesQuarantined          int
+	SourcesDisabled             int
+	PendingNotifications        int        `db:"pending_notifications"`
+	FailedNotifications         int        `db:"failed_notifications"`
+	PendingOutbox               int        `db:"pending_outbox"`
+	FailedOutbox                int        `db:"failed_outbox"`
+	DatabaseBytes               int64      `db:"database_bytes"`
+	ConnectorPayloadBytes       int64      `db:"connector_payload_bytes"`
+	SnapshotPayloadBytes        int64      `db:"snapshot_payload_bytes"`
+	LastSuccessfulParseAt       *time.Time `db:"last_successful_parse_at"`
+	ReminderWorker              WorkerStatus
+	CheckedAt                   time.Time
 }
