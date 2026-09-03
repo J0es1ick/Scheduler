@@ -29,6 +29,8 @@ RUN LDFLAGS="-s -w -X github.com/J0es1ick/Scheduler/internal/buildinfo.Version=$
     && CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o /out/scheduler-migrate ./cmd/migrate \
     && CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o /out/scheduler-preflight ./cmd/preflight \
     && CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o /out/scheduler-sync ./cmd/sync \
+    && CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o /out/scheduler-parser-worker ./cmd/parser-worker \
+    && CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o /out/scheduler-privacy-worker ./cmd/privacy-worker \
     && CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o /out/scheduler-connector ./cmd/connector
 
 FROM alpine:3.24

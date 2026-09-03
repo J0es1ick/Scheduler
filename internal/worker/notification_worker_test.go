@@ -14,8 +14,25 @@ func TestNotificationTextContainsScheduleContext(t *testing.T) {
 		UniversityName: "ИГХТУ",
 		GroupName:      "3/42",
 		Summary:        "Расписание обновлено: добавлено 2 занятия.",
+		IsDefault:      true,
 	})
 	for _, expected := range []string{"ИГХТУ", "3/42", "добавлено 2", "/week"} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("notification text %q does not contain %q", text, expected)
+		}
+	}
+}
+
+func TestNotificationTextUsesGroupSettingsForAdditionalSubscription(t *testing.T) {
+	text := notificationText(domain.NotificationDelivery{
+		UniversityName: "ИГЭУ",
+		GroupName:      "1-40",
+		Summary:        "Расписание обновлено: добавлено 22 занятия.",
+	})
+	if strings.Contains(text, "/week") {
+		t.Fatalf("additional group notification points to the default group: %q", text)
+	}
+	for _, expected := range []string{"/settings", "выберите эту группу"} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("notification text %q does not contain %q", text, expected)
 		}

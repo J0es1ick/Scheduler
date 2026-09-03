@@ -9,6 +9,7 @@ type NotificationDelivery struct {
 	GroupID        string     `db:"group_id"`
 	GroupName      string     `db:"group_name"`
 	UniversityName string     `db:"university_name"`
+	IsDefault      bool       `db:"is_default"`
 	Source         string     `db:"source"`
 	Summary        string     `db:"summary"`
 	Attempts       int        `db:"attempts"`

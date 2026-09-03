@@ -26,7 +26,7 @@ func (h *Handler) HandleAdmin(c telegram.Context) error {
 		slog.Warn("mini app URL is not configured", "err", err)
 		return c.Send("Mini App пока не опубликован. Проверьте ADMIN_PUBLIC_URL.")
 	}
-	if err = miniapp.ConfigureMenu(c.Bot(), c.Sender(), h.AdminPublicURL, true); err != nil {
+	if err = h.configureMiniAppMenu(ctx, c.Bot(), c.Sender(), true); err != nil {
 		slog.Warn("admin menu button configuration failed", "user_id", userID, "err", err)
 	} else if err = h.UserService.MarkTelegramMenuConfigured(
 		ctx, userID, miniapp.MenuFingerprint(h.AdminPublicURL, true),

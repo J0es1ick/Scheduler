@@ -33,7 +33,7 @@ func (h *Handler) HandleStart(c tele.Context) error {
 		slog.Error("user register failed", "telegramID", telegramID, "err", err)
 		return c.Send("Не удалось открыть профиль. Попробуйте ещё раз позже.")
 	}
-	if err = miniapp.ConfigureMenu(c.Bot(), c.Sender(), h.AdminPublicURL, user.IsAdmin); err != nil {
+	if err = h.configureMiniAppMenu(ctx, c.Bot(), c.Sender(), user.IsAdmin); err != nil {
 		slog.Debug("menu button configuration skipped", "user_id", user.ID, "err", err)
 	} else if err = h.UserService.MarkTelegramMenuConfigured(
 		ctx, user.ID, miniapp.MenuFingerprint(h.AdminPublicURL, user.IsAdmin),

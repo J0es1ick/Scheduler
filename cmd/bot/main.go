@@ -13,29 +13,21 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/J0es1ick/Scheduler/integrations/ivgpu"
 	"github.com/J0es1ick/Scheduler/internal/buildinfo"
 	"github.com/J0es1ick/Scheduler/internal/config"
 	"github.com/J0es1ick/Scheduler/internal/database"
-	"github.com/J0es1ick/Scheduler/internal/declarative"
 	"github.com/J0es1ick/Scheduler/internal/logging"
-	"github.com/J0es1ick/Scheduler/internal/managedparser"
 	"github.com/J0es1ick/Scheduler/internal/miniapp"
 	"github.com/J0es1ick/Scheduler/internal/repository"
-	"github.com/J0es1ick/Scheduler/internal/scraper/ispu"
-	"github.com/J0es1ick/Scheduler/internal/scraper/isuct"
 	"github.com/J0es1ick/Scheduler/internal/service"
 	botpkg "github.com/J0es1ick/Scheduler/internal/telegram-bot"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/handlers"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/state"
+	"github.com/J0es1ick/Scheduler/internal/telegramlimit"
 	"github.com/J0es1ick/Scheduler/internal/worker"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	tgbotapi "gopkg.in/telebot.v3"
 )
-
-// parserTickInterval — как часто воркер проверяет активные источники данных.
-// Реальный интервал обновления каждого источника хранится в data_sources.update_interval.
-const parserTickInterval = 5 * time.Minute
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -78,13 +70,16 @@ func main() {
 		}
 	}()
 
+	telegramLimiter := telegramlimit.New(
+		telegramlimit.DefaultGlobalInterval,
+		telegramlimit.DefaultRecipientInterval,
+	)
+	telegramHTTPClient := newTelegramHTTPClient(telegramLimiter)
 	bot, err := tgbotapi.NewBot(tgbotapi.Settings{
 		URL:     cfg.BotTelegramAPIURL,
 		Token:   cfg.BotToken,
-		OnError: botpkg.HandleError,
-		Client: &http.Client{
-			Timeout: 25 * time.Second,
-		},
+		OnError: telegramErrorHandler(telegramLimiter),
+		Client:  telegramHTTPClient,
 	})
 	if err != nil {
 		slog.Error("telegram bot init failed", "err", err)
@@ -109,18 +104,7 @@ func main() {
 	chatProfileRepo := repository.NewChatProfileRepository(db.DB)
 	reminderRepo := repository.NewReminderRepository(db.DB)
 	workerStatusRepo := repository.NewWorkerStatusRepository(db.DB)
-	dataSourceRepo := repository.NewDataSourceRepository(db.DB)
-	parseLogRepo := repository.NewParseLogRepository(db.DB)
 	notificationRepo := repository.NewNotificationRepository(db.DB)
-	snapshotRepo := repository.NewParserSnapshotRepository(db.DB)
-	diagnosticRepo := repository.NewParserDiagnosticRepository(db.DB)
-	reconciliationCtx, reconciliationCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	if err = snapshotRepo.EnsureNoPendingPublicationReconciliations(reconciliationCtx); err != nil {
-		reconciliationCancel()
-		slog.Error("publication reconciliation verification failed", "err", err)
-		os.Exit(1)
-	}
-	reconciliationCancel()
 
 	// --- Сервисы ---
 	scheduleService := service.NewScheduleService(lessonRepo, semesterRepo, groupRepo)
@@ -131,31 +115,13 @@ func main() {
 	chatProfileService := service.NewChatProfileService(chatProfileRepo)
 	groupService := service.NewGroupService(groupRepo)
 	universityService := service.NewUniversityService(universityRepo)
-	parserService := service.NewParserService(
-		dataSourceRepo, parseLogRepo, groupRepo, scheduleService,
-		snapshotRepo, notificationRepo, diagnosticRepo,
-	)
-
-	// --- Адаптеры ---
-	// semesterID не задаём при старте: ParserService резолвит его динамически
-	// перед каждым запуском через SemesterService.GetCurrentSemester.
-	isuctAdapter := isuct.New("")
-	parserService.RegisterAdapter(isuct.UniversityID, isuctAdapter)
-	slog.Info("adapter registered", "type", isuct.UniversityID)
-	ispuAdapter := ispu.New("")
-	parserService.RegisterAdapter(ispu.UniversityID, ispuAdapter)
-	slog.Info("adapter registered", "type", ispu.UniversityID)
-	parserService.RegisterAdapterFactory("managed:"+ivgpu.ParserID, managedparser.Factory(ivgpu.New))
-	parserService.RegisterAdapterFactory(declarative.AdapterType, declarative.AdapterFactory)
-	slog.Info("managed parser registered", "type", ivgpu.ParserID, "contract", ivgpu.Manifest().ContractVersion)
-
 	// --- Telegram ---
 	stateManager := state.NewManagerWithTTL(time.Duration(cfg.BotStateTTLMinutes) * time.Minute)
 	stateCleanupDone := stateManager.StartCleanup(ctx, time.Minute)
 	handler := handlers.NewHandler(
 		scheduleService, userService, groupService,
 		universityService, stateManager, subscriptionService, supportRequestService,
-		metricsService, chatProfileService, cfg.Admin.PublicURL, cfg.ProjectURL,
+		metricsService, chatProfileService, telegramLimiter, cfg.Admin.PublicURL, cfg.ProjectURL,
 	)
 	handlerTracker := botpkg.NewHandlerTracker()
 	bot.Use(
@@ -163,11 +129,12 @@ func main() {
 		handlerTracker.Middleware(),
 		botpkg.SerializeBySender(cfg.BotMaxPendingPerSender),
 		botpkg.LimitConcurrent(cfg.BotMaxConcurrentHandlers),
+		botpkg.CommandStatePolicy(stateManager),
+		botpkg.LimitOutboundByRecipient(ctx, telegramLimiter),
 	)
 	commandsReady := botpkg.Register(ctx, bot, handler)
 
 	workerMonitor := worker.NewMonitor()
-	workerMonitor.Register(worker.ParserWorkerName, 35*time.Minute)
 	workerMonitor.Register(worker.ReminderWorkerName, 2*time.Minute)
 	workerMonitor.Register(worker.NotificationWorkerName, 2*time.Minute)
 	health := botpkg.NewHealth(db.DB, workerMonitor)
@@ -196,11 +163,6 @@ func main() {
 		}
 	}()
 
-	// --- Фоновый воркер парсера ---
-	// Запускается после регистрации адаптеров, до старта бота.
-	// Останавливается вместе с ctx при получении сигнала.
-	parserWorker := worker.NewParserWorker(parserService, parserTickInterval)
-	parserDone := parserWorker.Start(ctx, workerMonitor)
 	reminderWorker := worker.NewReminderWorker(
 		reminderRepo,
 		workerStatusRepo,
@@ -210,9 +172,13 @@ func main() {
 	reminderDone := reminderWorker.Start(ctx, workerMonitor)
 	notificationWorker := worker.NewNotificationWorker(notificationRepo, bot,
 		time.Duration(cfg.NotificationPollSeconds)*time.Second,
-		worker.NotificationOptions{BatchSize: cfg.NotificationBatchSize, MaxBatches: cfg.NotificationMaxBatches})
+		worker.NotificationOptions{
+			BatchSize:  cfg.NotificationBatchSize,
+			MaxBatches: cfg.NotificationMaxBatches,
+			Limiter:    telegramLimiter,
+		})
 	notificationDone := notificationWorker.Start(ctx, workerMonitor)
-	go keepAdminMenusConfigured(ctx, bot, userRepo, cfg.Admin.PublicURL)
+	go keepAdminMenusConfigured(ctx, bot, userRepo, cfg.Admin.PublicURL, telegramLimiter)
 
 	// --- Бот ---
 	health.SetPolling(true)
@@ -241,13 +207,20 @@ func main() {
 	if err := handlerTracker.Wait(shutdownCtx); err != nil {
 		slog.Warn("Telegram handlers did not stop before deadline", "err", err)
 	}
-	if err := waitForBackgroundTasks(shutdownCtx, parserDone, reminderDone, notificationDone, stateCleanupDone); err != nil {
+	if err := waitForBackgroundTasks(shutdownCtx, reminderDone, notificationDone, stateCleanupDone); err != nil {
 		slog.Warn("background tasks did not stop before deadline", "err", err)
 	}
 	if err := healthServer.Shutdown(shutdownCtx); err != nil {
 		slog.Error("bot health server shutdown failed", "err", err)
 	}
 	slog.Info("bot stopped")
+}
+
+func newTelegramHTTPClient(limiter *telegramlimit.Limiter) *http.Client {
+	return &http.Client{
+		Timeout:   25 * time.Second,
+		Transport: telegramlimit.NewTransport(http.DefaultTransport, limiter),
+	}
 }
 
 func waitForBackgroundTasks(ctx context.Context, tasks ...<-chan struct{}) error {
@@ -269,6 +242,7 @@ func keepAdminMenusConfigured(
 	bot *tgbotapi.Bot,
 	users *repository.UserRepository,
 	publicURL string,
+	limiter *telegramlimit.Limiter,
 ) {
 	const syncInterval = 30 * time.Second
 	if _, err := miniapp.EditorURL(publicURL); err != nil {
@@ -277,7 +251,7 @@ func keepAdminMenusConfigured(
 	}
 	firstSync := true
 	for {
-		configured := configureAdminMenus(ctx, bot, users, publicURL)
+		configured := configureAdminMenus(ctx, bot, users, publicURL, limiter)
 		if configured {
 			if firstSync {
 				slog.Info("Mini App menu configured for administrators")
@@ -299,13 +273,12 @@ func configureAdminMenus(
 	bot *tgbotapi.Bot,
 	users *repository.UserRepository,
 	publicURL string,
+	limiter *telegramlimit.Limiter,
 ) bool {
 	const pageSize = 200
-	const requestInterval = 50 * time.Millisecond
 	regularFingerprint := miniapp.MenuFingerprint(publicURL, false)
 	adminFingerprint := miniapp.MenuFingerprint(publicURL, true)
 	afterID := ""
-	lastRequest := time.Time{}
 	for {
 		pageCtx, cancel := context.WithTimeout(parent, 5*time.Second)
 		items, err := users.GetUsersPendingMenuSync(
@@ -321,28 +294,26 @@ func configureAdminMenus(
 			if parseErr != nil {
 				continue
 			}
-			if err = waitUntil(parent, lastRequest.Add(requestInterval)); err != nil {
+			if err = limiter.Wait(parent, user.ID); err != nil {
 				return false
 			}
-			lastRequest = time.Now()
 			configureErr := miniapp.ConfigureMenu(
 				bot,
 				&tgbotapi.User{ID: telegramID},
 				publicURL,
 				user.IsAdmin,
 			)
-			var flood tgbotapi.FloodError
-			if errors.As(configureErr, &flood) {
-				if err = waitUntil(parent, time.Now().Add(time.Duration(flood.RetryAfter+1)*time.Second)); err != nil {
+			if _, limited := limiter.Observe(configureErr); limited {
+				if err = limiter.Wait(parent, user.ID); err != nil {
 					return false
 				}
-				lastRequest = time.Now()
 				configureErr = miniapp.ConfigureMenu(
 					bot,
 					&tgbotapi.User{ID: telegramID},
 					publicURL,
 					user.IsAdmin,
 				)
+				limiter.Observe(configureErr)
 			}
 			if configureErr != nil {
 				if !permanentTelegramMenuError(configureErr) {
@@ -384,17 +355,9 @@ func permanentTelegramMenuError(err error) bool {
 		strings.HasSuffix(message, "(404)")
 }
 
-func waitUntil(ctx context.Context, deadline time.Time) error {
-	delay := time.Until(deadline)
-	if delay <= 0 {
-		return nil
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
+func telegramErrorHandler(limiter *telegramlimit.Limiter) func(error, tgbotapi.Context) {
+	return func(err error, ctx tgbotapi.Context) {
+		limiter.Observe(err)
+		botpkg.HandleError(err, ctx, limiter)
 	}
 }

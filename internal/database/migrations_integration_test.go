@@ -53,7 +53,9 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 	}
 	botRole := "bot_test_" + replaceHyphens(uuid.NewString())
 	adminRole := "admin_test_" + replaceHyphens(uuid.NewString())
-	for _, role := range []string{botRole, adminRole} {
+	parserRole := "parser_test_" + replaceHyphens(uuid.NewString())
+	privacyRole := "privacy_test_" + replaceHyphens(uuid.NewString())
+	for _, role := range []string{botRole, adminRole, parserRole, privacyRole} {
 		if _, err = db.ExecContext(ctx, "CREATE ROLE "+pgx.Identifier{role}.Sanitize()); err != nil {
 			t.Fatal(err)
 		}
@@ -65,17 +67,50 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 	if _, err = db.ExecContext(ctx, "GRANT UPDATE (admin_role) ON users TO "+pgx.Identifier{botRole}.Sanitize()); err != nil {
 		t.Fatal(err)
 	}
-	if err = ApplyRuntimeGrants(ctx, db, botRole, adminRole); err != nil {
+	if _, err = db.ExecContext(ctx, "GRANT INSERT ON lessons TO "+pgx.Identifier{botRole}.Sanitize()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ExecContext(ctx, "GRANT DELETE ON users TO "+pgx.Identifier{parserRole}.Sanitize()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ExecContext(ctx, "GRANT SELECT ON lessons TO "+pgx.Identifier{privacyRole}.Sanitize()); err != nil {
+		t.Fatal(err)
+	}
+	if err = ApplyRuntimeGrants(ctx, db, botRole, adminRole, parserRole, privacyRole); err != nil {
 		t.Fatal(err)
 	}
 	for _, test := range []struct {
 		role, table, privilege string
 		want                   bool
 	}{
-		{botRole, "admin_sessions", "INSERT", false}, {botRole, "schema_migrations", "UPDATE", false},
-		{botRole, "lesson_overrides", "INSERT", false}, {botRole, "subscriptions", "INSERT", true},
-		{botRole, "notification_deliveries", "UPDATE", true}, {adminRole, "worker_status", "UPDATE", false},
-		{adminRole, "schema_migrations", "DELETE", false}, {adminRole, "admin_sessions", "INSERT", true},
+		{botRole, "admin_sessions", "INSERT", false},
+		{botRole, "schema_migrations", "UPDATE", false},
+		{botRole, "lessons", "INSERT", false},
+		{botRole, "parser_snapshots", "UPDATE", false},
+		{botRole, "privacy_deletion_requests", "UPDATE", false},
+		{botRole, "users", "DELETE", false},
+		{botRole, "lesson_overrides", "INSERT", false},
+		{botRole, "subscriptions", "INSERT", true},
+		{botRole, "notification_deliveries", "UPDATE", true},
+		{botRole, "support_requests", "INSERT", true},
+		{botRole, "support_requests", "UPDATE", false},
+		{botRole, "support_requests", "DELETE", false},
+		{adminRole, "worker_status", "UPDATE", false},
+		{adminRole, "operational_maintenance", "UPDATE", true},
+		{adminRole, "admin_audit_logs", "DELETE", true},
+		{adminRole, "schema_migrations", "DELETE", false},
+		{adminRole, "admin_sessions", "INSERT", true},
+		{parserRole, "lessons", "INSERT", true},
+		{parserRole, "parser_snapshots", "DELETE", true},
+		{parserRole, "operational_maintenance", "UPDATE", true},
+		{parserRole, "users", "SELECT", false},
+		{parserRole, "notification_deliveries", "INSERT", false},
+		{parserRole, "privacy_deletion_requests", "SELECT", false},
+		{privacyRole, "privacy_deletion_requests", "UPDATE", true},
+		{privacyRole, "users", "DELETE", false},
+		{privacyRole, "users", "UPDATE", false},
+		{privacyRole, "lessons", "SELECT", false},
+		{privacyRole, "admin_audit_logs", "DELETE", false},
 	} {
 		var allowed bool
 		if err = db.GetContext(ctx, &allowed, `SELECT has_table_privilege($1,$2,$3)`, test.role, test.table, test.privilege); err != nil {
@@ -96,6 +131,53 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 	var searchViewWritable bool
 	if err = db.GetContext(ctx, &searchViewWritable, `SELECT has_column_privilege($1,'users','search_schedule_view_format','UPDATE')`, botRole); err != nil || !searchViewWritable {
 		t.Fatalf("bot cannot update search schedule format: %t %v", searchViewWritable, err)
+	}
+	for _, test := range []struct {
+		role, function string
+		want           bool
+	}{
+		{botRole, "enqueue_privacy_deletion(text)", true},
+		{botRole, "enqueue_schedule_change(text,text,text,text)", false},
+		{parserRole, "enqueue_schedule_change(text,text,text,text)", true},
+		{parserRole, "enqueue_admin_alert(text,text)", true},
+		{parserRole, "scheduler_reconcile_notification_queue()", false},
+		{privacyRole, "enqueue_privacy_deletion(text)", false},
+		{privacyRole, "execute_privacy_deletion(text,text)", true},
+		{adminRole, "enqueue_schedule_change(text,text,text,text)", true},
+		{adminRole, "scheduler_request_notification_cancellation(text,text,text)", true},
+	} {
+		var allowed bool
+		if err = db.GetContext(ctx, &allowed,
+			`SELECT has_function_privilege($1,$2,'EXECUTE')`, test.role, test.function,
+		); err != nil {
+			t.Fatal(err)
+		}
+		if allowed != test.want {
+			t.Errorf("%s execute %s: %t", test.role, test.function, allowed)
+		}
+	}
+	privacyUserID := "privacy-role-test-" + uuid.NewString()
+	if _, err = db.ExecContext(ctx, `INSERT INTO users(id,username) VALUES ($1,'privacy-role-test')`, privacyUserID); err != nil {
+		t.Fatal(err)
+	}
+	privacyTx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer privacyTx.Rollback()
+	if _, err = privacyTx.ExecContext(ctx, "SET LOCAL ROLE "+pgx.Identifier{privacyRole}.Sanitize()); err != nil {
+		t.Fatal(err)
+	}
+	var deleted bool
+	if err = privacyTx.GetContext(ctx, &deleted, `SELECT execute_privacy_deletion($1,$2)`, privacyUserID, "deleted:"+uuid.NewString()); err != nil || !deleted {
+		t.Fatalf("privacy role deletion=%t err=%v", deleted, err)
+	}
+	if err = privacyTx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	var remaining int
+	if err = db.GetContext(ctx, &remaining, `SELECT COUNT(*) FROM users WHERE id=$1`, privacyUserID); err != nil || remaining != 0 {
+		t.Fatalf("privacy role left profile: count=%d err=%v", remaining, err)
 	}
 }
 

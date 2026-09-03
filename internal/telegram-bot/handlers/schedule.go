@@ -110,18 +110,6 @@ func (h *Handler) sendDaysWithMarkup(
 	return h.sendDaysWithOptions(c, days, universityID, markup, "", false, time.Time{}, 0)
 }
 
-func (h *Handler) sendDaysWithMarkupAndHeader(
-	c tgbotapi.Context,
-	days []dto.DaySchedule,
-	universityID string,
-	markup *tgbotapi.ReplyMarkup,
-	header string,
-	from time.Time,
-	daysCount int,
-) error {
-	return h.sendDaysWithOptions(c, days, universityID, markup, header, false, from, daysCount)
-}
-
 func (h *Handler) sendDaysWithOptions(
 	c tgbotapi.Context,
 	days []dto.DaySchedule,
@@ -149,7 +137,7 @@ func (h *Handler) sendDaysWithOptions(
 			return editOrSendHTML(c, text, markup)
 		}
 		if markup != nil {
-			return sendScheduleMessage(c, text, markup)
+			return h.sendScheduleMessage(c, text, markup)
 		}
 		return c.Send(text, markup, tgbotapi.ModeHTML)
 	}
@@ -172,7 +160,7 @@ func (h *Handler) sendDaysWithOptions(
 	for index, part := range parts {
 		var err error
 		if index == len(parts)-1 && markup != nil {
-			err = sendScheduleMessage(c, part, markup)
+			err = h.sendScheduleMessage(c, part, markup)
 		} else {
 			err = c.Send(part, tgbotapi.ModeHTML)
 		}
@@ -252,6 +240,8 @@ func (h *Handler) replaceTrackedScheduleMessages(
 	parts []string,
 	markup *tgbotapi.ReplyMarkup,
 ) error {
+	ctx, cancel := reqCtx()
+	defer cancel()
 	if c.Callback() != nil {
 		if err := h.deleteTrackedScheduleMessages(c); err != nil {
 			return err
@@ -260,7 +250,9 @@ func (h *Handler) replaceTrackedScheduleMessages(
 	var notice *tgbotapi.Message
 	var err error
 	if !isGroupChat(c) && c.Callback() == nil {
-		notice, err = c.Bot().Send(
+		notice, err = h.sendTelegram(
+			ctx,
+			c,
 			c.Recipient(),
 			"Открываю расписание…",
 			&tgbotapi.ReplyMarkup{RemoveKeyboard: true},
@@ -268,7 +260,7 @@ func (h *Handler) replaceTrackedScheduleMessages(
 		if err != nil {
 			return err
 		}
-		defer func() { _ = c.Bot().Delete(notice) }()
+		defer func() { _ = h.deleteTelegram(ctx, c, notice) }()
 	}
 	sent := make([]*tgbotapi.Message, 0, len(parts))
 	for index, part := range parts {
@@ -276,10 +268,10 @@ func (h *Handler) replaceTrackedScheduleMessages(
 		if index == len(parts)-1 {
 			options = append(options, markup)
 		}
-		message, sendErr := c.Bot().Send(c.Recipient(), part, options...)
+		message, sendErr := h.sendTelegram(ctx, c, c.Recipient(), part, options...)
 		if sendErr != nil {
 			for _, item := range sent {
-				_ = c.Bot().Delete(item)
+				_ = h.deleteTelegram(ctx, c, item)
 			}
 			return sendErr
 		}
@@ -290,6 +282,8 @@ func (h *Handler) replaceTrackedScheduleMessages(
 }
 
 func (h *Handler) deleteTrackedScheduleMessages(c tgbotapi.Context) error {
+	ctx, cancel := reqCtx()
+	defer cancel()
 	key := scheduleMessagesKey(c)
 	h.scheduleMessagesMu.Lock()
 	tracked, ok := h.scheduleMessages[key]
@@ -301,7 +295,7 @@ func (h *Handler) deleteTrackedScheduleMessages(c tgbotapi.Context) error {
 	for index := len(tracked.IDs) - 1; index >= 0; index-- {
 		messageID := tracked.IDs[index]
 		message := &tgbotapi.Message{ID: messageID, Chat: c.Chat()}
-		if err := c.Bot().Delete(message); err != nil {
+		if err := h.deleteTelegram(ctx, c, message); err != nil {
 			if !strings.Contains(strings.ToLower(err.Error()), "message to delete not found") {
 				deleteErrors = append(deleteErrors, fmt.Errorf("delete previous schedule message %d: %w", messageID, err))
 			}
@@ -402,7 +396,7 @@ func scheduleWeekNavigationForTarget(
 	return keyboards.ScheduleWeekNavigation(from, target.GroupName, groupChat, target.GroupID, daysCount, target.navigationReference())
 }
 
-func sendScheduleMessage(
+func (h *Handler) sendScheduleMessage(
 	c tgbotapi.Context,
 	text string,
 	markup *tgbotapi.ReplyMarkup,
@@ -411,7 +405,11 @@ func sendScheduleMessage(
 		return c.Send(text, markup, tgbotapi.ModeHTML)
 	}
 
-	keyboardNotice, err := c.Bot().Send(
+	ctx, cancel := reqCtx()
+	defer cancel()
+	keyboardNotice, err := h.sendTelegram(
+		ctx,
+		c,
 		c.Recipient(),
 		"Открываю расписание…",
 		&tgbotapi.ReplyMarkup{RemoveKeyboard: true},
@@ -420,12 +418,12 @@ func sendScheduleMessage(
 		return err
 	}
 	defer func() {
-		if err := c.Bot().Delete(keyboardNotice); err != nil {
+		if err := h.deleteTelegram(ctx, c, keyboardNotice); err != nil {
 			slog.Debug("delete keyboard notice failed", "err", err)
 		}
 	}()
 
-	if _, err = c.Bot().Send(c.Recipient(), text, markup, tgbotapi.ModeHTML); err != nil {
+	if _, err = h.sendTelegram(ctx, c, c.Recipient(), text, markup, tgbotapi.ModeHTML); err != nil {
 		return err
 	}
 	return nil
@@ -651,19 +649,21 @@ func (h *Handler) sendScheduleView(
 		}
 		return c.Send(photo, markup, tgbotapi.ModeHTML)
 	}
-	return sendScheduleMedia(c, photo, markup)
+	return h.sendScheduleMedia(c, photo, markup)
 }
 
-func sendScheduleMedia(c tgbotapi.Context, media tgbotapi.Sendable, markup *tgbotapi.ReplyMarkup) error {
+func (h *Handler) sendScheduleMedia(c tgbotapi.Context, media tgbotapi.Sendable, markup *tgbotapi.ReplyMarkup) error {
 	if isGroupChat(c) {
 		return c.Send(media, markup, tgbotapi.ModeHTML)
 	}
-	notice, err := c.Bot().Send(c.Recipient(), "Открываю расписание…", &tgbotapi.ReplyMarkup{RemoveKeyboard: true})
+	ctx, cancel := reqCtx()
+	defer cancel()
+	notice, err := h.sendTelegram(ctx, c, c.Recipient(), "Открываю расписание…", &tgbotapi.ReplyMarkup{RemoveKeyboard: true})
 	if err != nil {
 		return err
 	}
-	defer func() { _ = c.Bot().Delete(notice) }()
-	_, err = c.Bot().Send(c.Recipient(), media, markup, tgbotapi.ModeHTML)
+	defer func() { _ = h.deleteTelegram(ctx, c, notice) }()
+	_, err = h.sendTelegram(ctx, c, c.Recipient(), media, markup, tgbotapi.ModeHTML)
 	return err
 }
 
@@ -844,7 +844,9 @@ func (h *Handler) handleDownloadSchedule(c tgbotapi.Context, format string, args
 			formatSchedulePeriod(from, daysCount),
 		),
 	}
-	sent, err := c.Bot().Send(
+	sent, err := h.sendTelegram(
+		ctx,
+		c,
 		c.Recipient(),
 		document,
 		keyboards.ScheduleExportResultNavigation(args[0], args[1], daysCount),
@@ -854,7 +856,7 @@ func (h *Handler) handleDownloadSchedule(c tgbotapi.Context, format string, args
 	}
 	if c.Callback() != nil {
 		if retireErr := h.retireCurrentInlineFlow(c, "Файл подготовлен."); retireErr != nil {
-			_ = c.Bot().Delete(sent)
+			_ = h.deleteTelegram(ctx, c, sent)
 			return fmt.Errorf("retire export format menu: %w", retireErr)
 		}
 	}

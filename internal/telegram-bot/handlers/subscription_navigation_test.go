@@ -293,9 +293,13 @@ func TestCalendarExportLegacyButtonAndInactiveGroup(t *testing.T) {
 func TestGroupSearchUsesFullNavigationWithoutSubscribing(t *testing.T) {
 	subscriptions := &subscriptionScenarioService{}
 	schedules := &scheduleScenarioService{empty: true}
-	groups := &inputScenarioGroups{groups: []domain.Group{{ID: "found", Name: "4/147", UniversityID: "isuct", IsActive: true}}}
+	groups := &inputScenarioGroups{groups: []domain.Group{
+		{ID: "primary", Name: "3/42", UniversityID: "isuct", IsActive: true},
+		{ID: "found", Name: "4/147", UniversityID: "isuct", IsActive: true},
+	}}
 	h := &Handler{
 		StateManager: state.NewManager(), SubscriptionService: subscriptions, ScheduleService: schedules, GroupService: groups,
+		UserService:       &navigationUserService{user: domain.User{ID: "42", DefaultGroupID: "primary"}},
 		UniversityService: &navigationUniversityService{universities: map[string]domain.University{"isuct": {ID: "isuct", Name: "ИГХТУ", IsActive: true}}},
 	}
 	current := &dto.UserState{GroupID: "primary", UniversityID: "isuct", Step: "awaiting_search_query", SearchType: dto.SearchTypeGroup, SearchQuery: "ИГХТУ 4 курс 147 группа"}
@@ -326,7 +330,7 @@ func TestGroupSearchUsesFullNavigationWithoutSubscribing(t *testing.T) {
 			t.Errorf("search navigated to %s", query.group)
 		}
 	}
-	groups.groups[0].IsActive = false
+	groups.groups[1].IsActive = false
 	count := len(schedules.queries)
 	s.callback(t, h.HandleScheduleDateSelect, s.button(t, "→"), true)
 	if len(schedules.queries) != count {

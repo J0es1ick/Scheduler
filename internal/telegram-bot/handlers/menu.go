@@ -81,10 +81,10 @@ func (h *Handler) beginGroupChange(c tele.Context, destination string, page int)
 		_ = c.Respond()
 		return editOrSend(c, prompt, markup)
 	}
-	notice, err := c.Bot().Send(c.Recipient(), "Открываю выбор группы…", &tele.ReplyMarkup{RemoveKeyboard: true})
+	notice, err := h.sendTelegram(ctx, c, c.Recipient(), "Открываю выбор группы…", &tele.ReplyMarkup{RemoveKeyboard: true})
 	if err != nil {
 		return err
 	}
-	defer func() { _ = c.Bot().Delete(notice) }()
+	defer func() { _ = h.deleteTelegram(ctx, c, notice) }()
 	return c.Send(prompt, markup)
 }

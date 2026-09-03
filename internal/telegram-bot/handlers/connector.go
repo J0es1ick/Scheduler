@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log/slog"
 	"strings"
 
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
@@ -8,10 +9,18 @@ import (
 )
 
 func (h *Handler) HandleConnectorInfo(c tele.Context) error {
+	if err := h.finishTransientFlow(c); err != nil {
+		slog.Error("finish dialog before connector info failed", "err", err)
+		return c.Send("Не удалось восстановить профиль. Попробуйте ещё раз позже.")
+	}
 	return c.Send(h.connectorInfoText())
 }
 
 func (h *Handler) HandleShowConnector(c tele.Context) error {
+	if err := h.finishTransientFlow(c); err != nil {
+		slog.Error("finish dialog before connector page failed", "err", err)
+		return c.Send("Не удалось восстановить профиль. Попробуйте ещё раз позже.")
+	}
 	_ = c.Respond()
 	return editOrSend(c, h.connectorInfoText(), keyboards.BackToMoreMenu())
 }

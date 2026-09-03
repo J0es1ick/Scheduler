@@ -112,6 +112,22 @@ func (g *notificationClaimGuard) finish(id string, mark func(context.Context) er
 	return nil
 }
 
+func (g *notificationClaimGuard) discard(id string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if err := context.Cause(g.ctx); err != nil {
+		return err
+	}
+	if _, exists := g.pending[id]; !exists {
+		return repository.ErrNotificationClaimLost
+	}
+	delete(g.pending, id)
+	if g.heartbeat != nil {
+		g.heartbeat()
+	}
+	return nil
+}
+
 func (g *notificationClaimGuard) stop() {
 	g.cancel(context.Canceled)
 	<-g.done

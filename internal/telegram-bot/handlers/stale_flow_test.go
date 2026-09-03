@@ -88,25 +88,45 @@ func TestStaticPagesFinishPreviousInputFlow(t *testing.T) {
 	bot.Handle(&tele.Btn{Unique: "show_sources"}, h.HandleShowSources)
 	bot.Handle(&tele.Btn{Unique: "show_help"}, h.HandleShowHelp)
 	bot.Handle(&tele.Btn{Unique: "show_privacy"}, h.HandleShowPrivacy)
+	bot.Handle(&tele.Btn{Unique: "show_connector"}, h.HandleShowConnector)
+	bot.Handle("/sources", h.HandleSourcesInfo)
+	bot.Handle("/help", h.HandleHelp)
+	bot.Handle("/privacy", h.HandlePrivacy)
+	bot.Handle("/connect_source", h.HandleConnectorInfo)
 	bot.Handle(tele.OnText, h.HandleTextInput)
-	for _, page := range []string{"show_sources", "show_help", "show_privacy"} {
-		for _, withProfile := range []bool{true, false} {
-			users.user.DefaultGroupID = ""
-			if withProfile {
-				users.user.DefaultGroupID = "g"
-			}
-			manager.Set(42, &dto.UserState{Step: "awaiting_query", UniversityID: "u", FlowNonce: "pending"})
-			bot.ProcessUpdate(tele.Update{Callback: &tele.Callback{ID: "cb", Data: "\f" + page, Sender: &tele.User{ID: 42}, Message: &tele.Message{ID: 7, Chat: &tele.Chat{ID: 42, Type: tele.ChatPrivate}}}})
-			current := manager.Get(42)
-			if withProfile && (current == nil || current.Step != "done" || current.GroupID != "g") {
-				t.Fatalf("%s retained input: %+v", page, current)
-			}
-			if !withProfile && current != nil {
-				t.Fatalf("%s retained temporary profile: %+v", page, current)
-			}
-			bot.ProcessUpdate(tele.Update{Message: &tele.Message{Text: "random text", Sender: &tele.User{ID: 42}, Chat: &tele.Chat{ID: 42, Type: tele.ChatPrivate}}})
-			if groups.nameLookups != 0 {
-				t.Fatal("ordinary text changed group after static page")
+	pages := []struct {
+		callback string
+		command  string
+	}{
+		{callback: "show_sources", command: "/sources"},
+		{callback: "show_help", command: "/help"},
+		{callback: "show_privacy", command: "/privacy"},
+		{callback: "show_connector", command: "/connect_source"},
+	}
+	for _, page := range pages {
+		for _, direct := range []bool{false, true} {
+			for _, withProfile := range []bool{true, false} {
+				users.user.DefaultGroupID = ""
+				if withProfile {
+					users.user.DefaultGroupID = "g"
+				}
+				manager.Set(42, &dto.UserState{Step: "awaiting_query", UniversityID: "u", FlowNonce: "pending"})
+				if direct {
+					bot.ProcessUpdate(tele.Update{Message: &tele.Message{Text: page.command, Sender: &tele.User{ID: 42}, Chat: &tele.Chat{ID: 42, Type: tele.ChatPrivate}}})
+				} else {
+					bot.ProcessUpdate(tele.Update{Callback: &tele.Callback{ID: "cb", Data: "\f" + page.callback, Sender: &tele.User{ID: 42}, Message: &tele.Message{ID: 7, Chat: &tele.Chat{ID: 42, Type: tele.ChatPrivate}}}})
+				}
+				current := manager.Get(42)
+				if withProfile && (current == nil || current.Step != "done" || current.GroupID != "g") {
+					t.Fatalf("%s retained input: %+v", page.command, current)
+				}
+				if !withProfile && current != nil {
+					t.Fatalf("%s retained temporary profile: %+v", page.command, current)
+				}
+				bot.ProcessUpdate(tele.Update{Message: &tele.Message{Text: "random text", Sender: &tele.User{ID: 42}, Chat: &tele.Chat{ID: 42, Type: tele.ChatPrivate}}})
+				if groups.nameLookups != 0 {
+					t.Fatal("ordinary text changed group after static page")
+				}
 			}
 		}
 	}

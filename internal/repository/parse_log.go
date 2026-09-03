@@ -3,10 +3,10 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"time"
 
+	"github.com/J0es1ick/Scheduler/internal/database"
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/jmoiron/sqlx"
 )
@@ -212,44 +212,8 @@ func (r *ParseLogRepository) FailInterrupted(ctx context.Context, olderThan time
 	return count, nil
 }
 
-func (r *ParseLogRepository) RunOperationalRetention(ctx context.Context) (bool, error) {
-	conn, err := r.db.Connx(ctx)
-	if err != nil {
-		return false, fmt.Errorf("operational retention: acquire connection: %w", err)
-	}
-	defer conn.Close()
-	var locked bool
-	if err = conn.GetContext(ctx, &locked,
-		`SELECT pg_try_advisory_lock(hashtext('scheduler-operational-retention'))`); err != nil {
-		return false, fmt.Errorf("operational retention: acquire lock: %w", err)
-	}
-	if !locked {
-		return false, nil
-	}
-	defer func() {
-		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = conn.ExecContext(unlockCtx,
-			`SELECT pg_advisory_unlock(hashtext('scheduler-operational-retention'))`)
-	}()
-	if _, err = conn.ExecContext(ctx, `SET statement_timeout='5min'`); err != nil {
-		return false, fmt.Errorf("operational retention: configure timeout: %w", err)
-	}
-	defer func() {
-		resetCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = conn.ExecContext(resetCtx, `RESET statement_timeout`)
-	}()
-	var due bool
-	if err = conn.GetContext(ctx, &due, `
-		SELECT last_run_at<NOW()-INTERVAL '24 hours'
-		FROM operational_maintenance WHERE task_name='retention'`); err != nil {
-		return false, fmt.Errorf("operational retention: inspect schedule: %w", err)
-	}
-	if !due {
-		return false, nil
-	}
-	statements := []string{
+func (r *ParseLogRepository) RunParserRetention(ctx context.Context) (bool, error) {
+	return database.RunRetention(ctx, r.db, "parser_retention", []string{
 		`UPDATE connector_ingestion_runs
 		 SET payload='{}'::jsonb
 		 WHERE ctid IN (
@@ -281,15 +245,6 @@ func (r *ParseLogRepository) RunOperationalRetention(ctx context.Context) (bool,
 				SELECT 1 FROM parser_snapshots snapshot WHERE snapshot.parse_log_id=log.id
 			  ) LIMIT 1000
 		 )`,
-		`DELETE FROM admin_audit_logs WHERE ctid IN (
-			SELECT ctid FROM admin_audit_logs WHERE created_at<NOW()-INTERVAL '365 days' LIMIT 1000
-		 )`,
-		`DELETE FROM connector_request_nonces WHERE ctid IN (
-			SELECT ctid FROM connector_request_nonces WHERE expires_at<NOW() LIMIT 1000
-		 )`,
-		`DELETE FROM admin_sessions WHERE token_hash IN (
-			SELECT token_hash FROM admin_sessions WHERE expires_at<NOW() LIMIT 1000
-		 )`,
 		`DELETE FROM lesson_source_identities WHERE ctid IN (
 			SELECT identity.ctid FROM lesson_source_identities identity
 			WHERE identity.last_seen_at<NOW()-INTERVAL '730 days'
@@ -299,28 +254,5 @@ func (r *ParseLogRepository) RunOperationalRetention(ctx context.Context) (bool,
 				WHERE override.base_lesson_id=identity.lesson_id
 			  ) LIMIT 1000
 		 )`,
-	}
-	for _, statement := range statements {
-		for batch := 0; batch < 1000; batch++ {
-			result, cleanupErr := conn.ExecContext(ctx, statement)
-			if cleanupErr != nil {
-				return false, fmt.Errorf("operational retention: cleanup: %w", cleanupErr)
-			}
-			rows, rowsErr := result.RowsAffected()
-			if rowsErr != nil {
-				return false, fmt.Errorf("operational retention: count cleanup: %w", rowsErr)
-			}
-			if rows < 1000 {
-				break
-			}
-			if batch == 999 {
-				return false, errors.New("operational retention: batch safety limit reached")
-			}
-		}
-	}
-	if _, err = conn.ExecContext(ctx, `
-		UPDATE operational_maintenance SET last_run_at=NOW() WHERE task_name='retention'`); err != nil {
-		return false, fmt.Errorf("operational retention: record completion: %w", err)
-	}
-	return true, nil
+	})
 }

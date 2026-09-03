@@ -1,12 +1,13 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
+	"github.com/J0es1ick/Scheduler/internal/searchtext"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	tgbotapi "gopkg.in/telebot.v3"
@@ -22,6 +23,9 @@ func (h *Handler) HandleSearch(c tgbotapi.Context) error {
 	}
 	if state == nil || state.Step != "done" {
 		return c.Send("Сначала настройте профиль: /start")
+	}
+	if !state.GroupActive {
+		return c.Send("Основная группа временно недоступна. Выберите другую группу в «Мои группы» и запустите поиск снова.", keyboards.MainMenu())
 	}
 	state.Step = "choosing_search_type"
 	state.SearchQuery = ""
@@ -59,6 +63,17 @@ func (h *Handler) HandleCancelSearch(c tgbotapi.Context) error {
 func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) error {
 	ctx, cancel := reqCtx()
 	defer cancel()
+	if state == nil {
+		return c.Send("Поиск устарел. Откройте его снова.", keyboards.MainMenu())
+	}
+	available, err := h.ensureActiveSearchContext(ctx, c.Sender().ID, state)
+	if err != nil {
+		slog.Error("refresh profile before search execution failed", "user_id", c.Sender().ID, "err", err)
+		return c.Send("Не удалось проверить основную группу. Попробуйте позже.", keyboards.MainMenu())
+	}
+	if !available {
+		return c.Send("Основная группа изменилась или стала недоступна. Выберите актуальную группу и запустите поиск снова.", keyboards.MainMenu())
+	}
 
 	now := time.Now().In(h.universityLocation(ctx, state.UniversityID))
 	to := now.AddDate(0, 0, 6)
@@ -132,17 +147,20 @@ func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) e
 		if err != nil {
 			return c.Send("Ошибка получения расписания.")
 		}
-		for date, lessons := range data {
-			var matched []domain.Lesson
-			for _, l := range lessons {
-				if strings.Contains(strings.ToLower(l.Subject), strings.ToLower(state.SearchQuery)) {
-					matched = append(matched, l)
+		subgroup := 0
+		if h.SubscriptionService != nil {
+			subscriptions, subscriptionErr := h.SubscriptionService.GetGroupSubscriptions(ctx, fmt.Sprint(c.Sender().ID))
+			if subscriptionErr != nil {
+				return c.Send("Не удалось загрузить настройки расписания.")
+			}
+			for _, subscription := range subscriptions {
+				if subscription.GroupID == state.GroupID {
+					subgroup = subscription.Subgroup
+					break
 				}
 			}
-			if len(matched) > 0 {
-				days = append(days, dto.DaySchedule{Date: date, Lessons: matched})
-			}
 		}
+		days = disciplineSearchDays(data, state.SearchQuery, subgroup)
 	}
 
 	if len(days) == 0 {
@@ -167,4 +185,43 @@ func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) e
 		return h.sendDaysWithGroupNames(c, days, state.UniversityID)
 	}
 	return h.sendDays(c, days, state.UniversityID)
+}
+
+func disciplineSearchDays(
+	data map[time.Time][]domain.Lesson,
+	query string,
+	subgroup int,
+) []dto.DaySchedule {
+	filtered := make(map[time.Time][]domain.Lesson, len(data))
+	for date, lessons := range data {
+		for _, lesson := range lessons {
+			if subgroup > 0 && lesson.Subgroup != 0 && lesson.Subgroup != subgroup {
+				continue
+			}
+			if _, matches := searchtext.MatchDiscipline(lesson.Subject, query); matches {
+				filtered[date] = append(filtered[date], lesson)
+			}
+		}
+	}
+	return mapToDaySchedule(filtered)
+}
+
+func (h *Handler) ensureActiveSearchContext(
+	ctx context.Context,
+	userID int64,
+	current *dto.UserState,
+) (bool, error) {
+	fresh, _, err := h.restoreProfile(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	if fresh == nil {
+		h.StateManager.Delete(userID)
+		return false, nil
+	}
+	if !fresh.GroupActive || fresh.GroupID != current.GroupID || fresh.UniversityID != current.UniversityID {
+		return false, nil
+	}
+	h.StateManager.Set(userID, current)
+	return true, nil
 }

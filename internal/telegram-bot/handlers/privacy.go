@@ -9,13 +9,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/J0es1ick/Scheduler/internal/miniapp"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	tele "gopkg.in/telebot.v3"
 )
 
 func (h *Handler) HandlePrivacy(c tele.Context) error {
+	if err := h.finishTransientFlow(c); err != nil {
+		slog.Error("finish dialog before privacy failed", "err", err)
+		return c.Send("Не удалось восстановить профиль. Попробуйте ещё раз позже.")
+	}
 	return c.Send(privacyText())
 }
 
@@ -86,15 +89,15 @@ func (h *Handler) HandleConfirmDeleteProfile(c tele.Context) error {
 	ctx, cancel := reqCtx()
 	defer cancel()
 	userID := fmt.Sprint(c.Sender().ID)
-	if err := h.UserService.DeleteOwnData(ctx, userID); err != nil {
-		slog.Error("delete own profile failed", "user_id", userID, "err", err)
-		return c.Send("Не удалось удалить профиль. Если вы администратор, сначала снимите эту роль.")
+	if err := h.UserService.RequestOwnDataDeletion(ctx, userID); err != nil {
+		slog.Error("request own profile deletion failed", "user_id", userID, "err", err)
+		return c.Send("Не удалось принять запрос на удаление. Если вы администратор, сначала снимите эту роль.")
 	}
 	h.StateManager.Delete(c.Sender().ID)
-	if err := miniapp.ConfigureMenu(c.Bot(), c.Sender(), h.AdminPublicURL, false); err != nil {
+	if err := h.configureMiniAppMenu(ctx, c.Bot(), c.Sender(), false); err != nil {
 		slog.Debug("reset menu after profile deletion failed", "user_id", userID, "err", err)
 	}
-	return c.Send("Профиль и связанные с ним данные удалены. Чтобы начать заново, используйте /start.")
+	return c.Send("Запрос на удаление принят. Профиль и связанные данные будут удалены в ближайшее время.")
 }
 
 func (h *Handler) HandleCancelDeleteProfile(c tele.Context) error {
@@ -119,6 +122,10 @@ func consumeDeleteIntent(state *dto.UserState, token string, now time.Time) bool
 }
 
 func (h *Handler) HandleSourcesInfo(c tele.Context) error {
+	if err := h.finishTransientFlow(c); err != nil {
+		slog.Error("finish dialog before sources failed", "err", err)
+		return c.Send("Не удалось восстановить профиль. Попробуйте ещё раз позже.")
+	}
 	ctx, cancel := reqCtx()
 	defer cancel()
 	text, err := h.sourcesInfoText(ctx)

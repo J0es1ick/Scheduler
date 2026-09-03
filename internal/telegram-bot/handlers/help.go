@@ -11,6 +11,10 @@ func (h *Handler) HandleHelp(c tgbotapi.Context) error {
 	if isGroupChat(c) {
 		return c.Send(groupHelpText())
 	}
+	if err := h.finishTransientFlow(c); err != nil {
+		slog.Error("finish dialog before help failed", "user_id", c.Sender().ID, "err", err)
+		return c.Send("Не удалось восстановить профиль. Попробуйте ещё раз позже.")
+	}
 
 	isAdmin := false
 	if sender := c.Sender(); sender != nil {

@@ -16,13 +16,9 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/config"
 	"github.com/J0es1ick/Scheduler/internal/connectorapi"
 	"github.com/J0es1ick/Scheduler/internal/database"
-	"github.com/J0es1ick/Scheduler/internal/declarative"
 	"github.com/J0es1ick/Scheduler/internal/logging"
-	"github.com/J0es1ick/Scheduler/internal/managedparser"
+	"github.com/J0es1ick/Scheduler/internal/parserruntime"
 	"github.com/J0es1ick/Scheduler/internal/repository"
-	"github.com/J0es1ick/Scheduler/internal/scraper/ispu"
-	"github.com/J0es1ick/Scheduler/internal/scraper/isuct"
-	"github.com/J0es1ick/Scheduler/internal/service"
 	"github.com/J0es1ick/Scheduler/internal/worker"
 	managed "github.com/J0es1ick/Scheduler/parser/v1"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -62,9 +58,6 @@ func main() {
 	}
 	cancel()
 
-	groupRepo := repository.NewGroupRepository(db.DB)
-	lessonRepo := repository.NewLessonRepository(db.DB)
-	semesterRepo := repository.NewSemesterRepository(db.DB)
 	snapshotRepo := repository.NewParserSnapshotRepository(db.DB)
 	reconciliationCtx, reconciliationCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	if err = snapshotRepo.EnsureNoPendingPublicationReconciliations(reconciliationCtx); err != nil {
@@ -73,20 +66,7 @@ func main() {
 		os.Exit(1)
 	}
 	reconciliationCancel()
-	scheduleService := service.NewScheduleService(lessonRepo, semesterRepo, groupRepo)
-	parserService := service.NewParserService(
-		repository.NewDataSourceRepository(db.DB),
-		repository.NewParseLogRepository(db.DB),
-		groupRepo,
-		scheduleService,
-		snapshotRepo,
-		repository.NewNotificationRepository(db.DB),
-		repository.NewParserDiagnosticRepository(db.DB),
-	)
-	parserService.RegisterAdapter(isuct.UniversityID, isuct.New(""))
-	parserService.RegisterAdapter(ispu.UniversityID, ispu.New(""))
-	parserService.RegisterAdapterFactory("managed:"+ivgpu.ParserID, managedparser.Factory(ivgpu.New))
-	parserService.RegisterAdapterFactory(declarative.AdapterType, declarative.AdapterFactory)
+	parserService := parserruntime.New(db.DB)
 	connectorRepository := repository.NewConnectorRepository(db.DB)
 	connectorService := connectorapi.NewService(connectorRepository, parserService)
 	connectorServer := connectorapi.NewServer(connectorRepository)
@@ -136,6 +116,7 @@ func main() {
 	defer stop()
 	adminServer.UseBackgroundContext(rootCtx)
 	connectorDone := worker.NewConnectorWorker(connectorService, 2*time.Second).Start(rootCtx, workerMonitor)
+	retentionDone := startAdminRetention(rootCtx, store)
 	serverErrors := make(chan error, 1)
 	go func() {
 		logger.Info("admin server started", "address", httpServer.Addr, "public_url", cfg.Admin.PublicURL)
@@ -166,4 +147,32 @@ func main() {
 	case <-shutdownCtx.Done():
 		logger.Warn("connector worker did not stop before deadline", "err", shutdownCtx.Err())
 	}
+	select {
+	case <-retentionDone:
+	case <-shutdownCtx.Done():
+		logger.Warn("admin retention did not stop before deadline", "err", shutdownCtx.Err())
+	}
+}
+
+func startAdminRetention(ctx context.Context, store *admin.Store) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			retentionCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+			_, err := store.RunRetention(retentionCtx)
+			cancel()
+			if err != nil && ctx.Err() == nil {
+				slog.Error("admin retention failed", "err", err)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	return done
 }

@@ -89,7 +89,7 @@ func (s *ParserService) CleanupInterruptedRuns(ctx context.Context, olderThan ti
 	if count > 0 {
 		slog.Warn("parser: interrupted runs marked failed", "count", count)
 	}
-	retentionRan, err := s.parseLogRepo.RunOperationalRetention(ctx)
+	retentionRan, err := s.parseLogRepo.RunParserRetention(ctx)
 	if err != nil {
 		return err
 	}

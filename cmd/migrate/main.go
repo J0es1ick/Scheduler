@@ -41,7 +41,14 @@ func main() {
 		os.Exit(1)
 	}
 	if os.Getenv("DATABASE_APPLY_RUNTIME_GRANTS") == "true" {
-		if err = database.ApplyRuntimeGrants(ctx, db.DB, os.Getenv("DATABASE_BOT_USER"), os.Getenv("DATABASE_ADMIN_USER")); err != nil {
+		if err = database.ApplyRuntimeGrants(
+			ctx,
+			db.DB,
+			os.Getenv("DATABASE_BOT_USER"),
+			os.Getenv("DATABASE_ADMIN_USER"),
+			os.Getenv("DATABASE_PARSER_USER"),
+			os.Getenv("DATABASE_PRIVACY_USER"),
+		); err != nil {
 			logger.Error("runtime database permissions failed", "err", err)
 			os.Exit(1)
 		}

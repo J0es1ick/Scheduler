@@ -83,6 +83,11 @@ func (r *SubscriptionRepository) SubscribeAndSetDefault(
 	if err = lockUser(ctx, tx, userID); err != nil {
 		return err
 	}
+	var previousDefault sql.NullString
+	if err = tx.GetContext(ctx, &previousDefault, `
+		SELECT default_group_id FROM users WHERE id=$1`, userID); err != nil {
+		return fmt.Errorf("subscribe and set default: load current group: %w", err)
+	}
 	if _, err = tx.ExecContext(ctx, `
 		INSERT INTO subscriptions (id, user_id, object_id, object_type, created_at, updated_at)
 		VALUES ($1,$2,$3,'group',NOW(),NOW())
@@ -93,6 +98,14 @@ func (r *SubscriptionRepository) SubscribeAndSetDefault(
 	if _, err = tx.ExecContext(ctx, `
 		UPDATE users SET default_group_id=$2, updated_at=NOW() WHERE id=$1`, userID, groupID); err != nil {
 		return fmt.Errorf("subscribe and set default: update user: %w", err)
+	}
+	if previousDefault.Valid && previousDefault.String != groupID {
+		if _, err = tx.ExecContext(ctx, `
+			SELECT scheduler_request_outbox_cancellation(
+				$1, 'lesson_reminder', $2, 'default_group_changed'
+			)`, userID, previousDefault.String); err != nil {
+			return fmt.Errorf("subscribe and set default: cancel previous reminders: %w", err)
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("subscribe and set default: commit: %w", err)
@@ -118,6 +131,11 @@ func (r *SubscriptionRepository) SetDefaultSubscribedGroup(
 	if err = lockUser(ctx, tx, userID); err != nil {
 		return err
 	}
+	var previousDefault sql.NullString
+	if err = tx.GetContext(ctx, &previousDefault, `
+		SELECT default_group_id FROM users WHERE id=$1`, userID); err != nil {
+		return fmt.Errorf("set subscribed default: load current group: %w", err)
+	}
 	var subscribed bool
 	if err = tx.GetContext(ctx, &subscribed, `
 		SELECT EXISTS (
@@ -132,6 +150,14 @@ func (r *SubscriptionRepository) SetDefaultSubscribedGroup(
 	if _, err = tx.ExecContext(ctx, `
 		UPDATE users SET default_group_id=$2, updated_at=NOW() WHERE id=$1`, userID, groupID); err != nil {
 		return fmt.Errorf("set subscribed default: update user: %w", err)
+	}
+	if previousDefault.Valid && previousDefault.String != groupID {
+		if _, err = tx.ExecContext(ctx, `
+			SELECT scheduler_request_outbox_cancellation(
+				$1, 'lesson_reminder', $2, 'default_group_changed'
+			)`, userID, previousDefault.String); err != nil {
+			return fmt.Errorf("set subscribed default: cancel previous reminders: %w", err)
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("set subscribed default: commit: %w", err)
@@ -168,11 +194,8 @@ func (r *SubscriptionRepository) UnsubscribeAndSelectDefault(
 		return "", sql.ErrNoRows
 	}
 	if _, err = tx.ExecContext(ctx, `
-		UPDATE notification_deliveries d
-		SET status='cancelled', updated_at=NOW()
-		FROM schedule_change_events e
-		WHERE d.event_id=e.id AND d.user_id=$1 AND e.group_id=$2
-			AND d.status='pending'`, userID, groupID); err != nil {
+		SELECT scheduler_request_notification_cancellation($1, $2, 'subscription_removed')`,
+		userID, groupID); err != nil {
 		return "", fmt.Errorf("unsubscribe and select default: cancel notifications: %w", err)
 	}
 	newDefault := ""
@@ -199,6 +222,14 @@ func (r *SubscriptionRepository) UnsubscribeAndSelectDefault(
 		if _, err = tx.ExecContext(ctx, `
 			UPDATE users SET default_group_id=$2, updated_at=NOW() WHERE id=$1`, userID, value); err != nil {
 			return "", fmt.Errorf("unsubscribe and select default: update user: %w", err)
+		}
+		if currentDefault.Valid {
+			if _, err = tx.ExecContext(ctx, `
+				SELECT scheduler_request_outbox_cancellation(
+					$1, 'lesson_reminder', $2, 'default_group_changed'
+				)`, userID, currentDefault.String); err != nil {
+				return "", fmt.Errorf("unsubscribe and select default: cancel previous reminders: %w", err)
+			}
 		}
 	}
 	if err = tx.Commit(); err != nil {

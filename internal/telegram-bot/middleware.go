@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/J0es1ick/Scheduler/internal/telegramlimit"
 	tele "gopkg.in/telebot.v3"
 )
 
@@ -51,10 +52,18 @@ func RecoverPanics() tele.MiddlewareFunc {
 	}
 }
 
-func HandleError(err error, c tele.Context) {
+func HandleError(err error, c tele.Context, limiters ...*telegramlimit.Limiter) {
 	if errors.Is(err, ErrBotBusy) || errors.Is(err, ErrSenderBusy) {
 		if c == nil {
 			return
+		}
+		if len(limiters) > 0 && limiters[0] != nil {
+			waitContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			waitErr := limiters[0].Wait(waitContext, outboundRecipient(c))
+			cancel()
+			if waitErr != nil {
+				return
+			}
 		}
 		if c.Callback() != nil {
 			_ = c.Respond(&tele.CallbackResponse{

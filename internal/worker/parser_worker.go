@@ -11,8 +11,13 @@ import (
 
 // ParserWorker периодически запускает парсинг всех активных источников данных.
 type ParserWorker struct {
-	parserSvc    *service.ParserService
+	parserSvc    parserService
 	tickInterval time.Duration
+}
+
+type parserService interface {
+	CleanupInterruptedRuns(context.Context, time.Duration) error
+	RunAllActiveSources(context.Context) error
 }
 
 // NewParserWorker создаёт воркер.
@@ -20,7 +25,7 @@ type ParserWorker struct {
 // tickInterval — интервал между проверками активных источников.
 // Рекомендуется 1–5 минут; каждый источник всё равно не запустится чаще,
 // чем его собственный update_interval.
-func NewParserWorker(parserSvc *service.ParserService, tickInterval time.Duration) *ParserWorker {
+func NewParserWorker(parserSvc parserService, tickInterval time.Duration) *ParserWorker {
 	return &ParserWorker{
 		parserSvc:    parserSvc,
 		tickInterval: tickInterval,
@@ -84,25 +89,31 @@ func (w *ParserWorker) tick(ctx context.Context, monitor *Monitor) {
 	for {
 		select {
 		case err := <-runDone:
-			if err != nil {
-				slog.Error("parser worker: run active sources failed", "err", err)
-			}
-			switch {
-			case cleanupErr != nil || errors.Is(err, service.ErrParserInfrastructure):
-				monitor.Record(ParserWorkerName, errors.Join(cleanupErr, err))
-			case errors.Is(err, service.ErrSourceDegraded):
-				monitor.Degraded(ParserWorkerName, err)
-			case err != nil:
-				monitor.Record(ParserWorkerName, err)
-			default:
-				monitor.Succeeded(ParserWorkerName)
-			}
+			w.recordRunResult(monitor, cleanupErr, err)
 			return
 		case <-heartbeat.C:
 			monitor.Heartbeat(ParserWorkerName)
 		case <-ctx.Done():
 			monitor.Record(ParserWorkerName, ctx.Err())
+			err := <-runDone
+			w.recordRunResult(monitor, cleanupErr, err)
 			return
 		}
+	}
+}
+
+func (w *ParserWorker) recordRunResult(monitor *Monitor, cleanupErr, err error) {
+	if err != nil {
+		slog.Error("parser worker: run active sources failed", "err", err)
+	}
+	switch {
+	case cleanupErr != nil || errors.Is(err, service.ErrParserInfrastructure):
+		monitor.Record(ParserWorkerName, errors.Join(cleanupErr, err))
+	case errors.Is(err, service.ErrSourceDegraded):
+		monitor.Degraded(ParserWorkerName, err)
+	case err != nil:
+		monitor.Record(ParserWorkerName, err)
+	default:
+		monitor.Succeeded(ParserWorkerName)
 	}
 }

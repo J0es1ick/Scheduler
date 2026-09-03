@@ -234,12 +234,9 @@ func (s *Store) OperationalHealth(ctx context.Context) (*OperationalHealth, erro
 			pg_total_relation_size('connector_ingestion_runs'::regclass) AS connector_payload_bytes,
 			pg_total_relation_size('parser_snapshots'::regclass) AS snapshot_payload_bytes,
 			COALESCE((
-				SELECT EXTRACT(EPOCH FROM (NOW()-MIN(created_at)))::bigint
-				FROM (
-					SELECT created_at FROM notification_deliveries WHERE status='pending'
-					UNION ALL
-					SELECT created_at FROM bot_outbox WHERE status='pending'
-				) pending
+				SELECT EXTRACT(EPOCH FROM (clock_timestamp()-MIN(created_at)))::bigint
+				FROM notification_queue_eligibility
+				WHERE claimable
 			), 0) AS oldest_pending_seconds,
 			(SELECT MAX(finished_at) FROM parse_logs WHERE status='success') AS last_successful_parse_at`,
 	); err != nil {

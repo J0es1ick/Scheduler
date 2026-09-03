@@ -8,10 +8,8 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/config"
 	"github.com/J0es1ick/Scheduler/internal/database"
+	"github.com/J0es1ick/Scheduler/internal/parserruntime"
 	"github.com/J0es1ick/Scheduler/internal/repository"
-	"github.com/J0es1ick/Scheduler/internal/scraper/ispu"
-	"github.com/J0es1ick/Scheduler/internal/scraper/isuct"
-	"github.com/J0es1ick/Scheduler/internal/service"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -42,21 +40,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	groupRepo := repository.NewGroupRepository(db.DB)
-	lessonRepo := repository.NewLessonRepository(db.DB)
-	semesterRepo := repository.NewSemesterRepository(db.DB)
-	scheduleService := service.NewScheduleService(lessonRepo, semesterRepo, groupRepo)
-	parserService := service.NewParserService(
-		repository.NewDataSourceRepository(db.DB),
-		repository.NewParseLogRepository(db.DB),
-		groupRepo,
-		scheduleService,
-		repository.NewParserSnapshotRepository(db.DB),
-		repository.NewNotificationRepository(db.DB),
-		repository.NewParserDiagnosticRepository(db.DB),
-	)
-	parserService.RegisterAdapter(isuct.UniversityID, isuct.New(""))
-	parserService.RegisterAdapter(ispu.UniversityID, ispu.New(""))
+	parserService := parserruntime.New(db.DB)
 
 	sources := os.Args[1:]
 	if len(sources) == 0 {

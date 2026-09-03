@@ -93,7 +93,7 @@ func (s *UserService) ExportData(ctx context.Context, userID string) (*domain.Us
 	return s.userRepo.ExportUserData(ctx, userID)
 }
 
-func (s *UserService) DeleteOwnData(ctx context.Context, userID string) error {
+func (s *UserService) RequestOwnDataDeletion(ctx context.Context, userID string) error {
 	user, err := s.userRepo.GetUserByID(ctx, userID)
 	if err != nil {
 		return err
@@ -104,5 +104,6 @@ func (s *UserService) DeleteOwnData(ctx context.Context, userID string) error {
 	if user.IsAdmin {
 		return fmt.Errorf("remove administrator role before deleting the profile")
 	}
-	return s.userRepo.DeleteUser(ctx, userID)
+	_, err = s.userRepo.EnqueuePrivacyDeletion(ctx, userID)
+	return err
 }

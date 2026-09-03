@@ -29,6 +29,7 @@ type notificationLeaseQueue struct {
 	delivered func(context.Context, string, string) error
 	cancelled func(context.Context, string, string) error
 	failed    func(context.Context, string, string, int, time.Duration, error) error
+	limited   func(context.Context, string, string, time.Duration, error) error
 	permanent func(context.Context, string, string, error) error
 }
 
@@ -46,7 +47,8 @@ func notificationLeaseQueues(repo *repository.NotificationRepository) []notifica
 			},
 			renew: repo.RenewDeliveryClaims, active: repo.IsDeliveryActive,
 			delivered: repo.MarkDelivered, cancelled: repo.MarkCancelled,
-			failed: repo.MarkFailed, permanent: repo.MarkPermanentFailure,
+			failed: repo.MarkFailed, limited: repo.MarkRateLimited,
+			permanent: repo.MarkPermanentFailure,
 		},
 		{
 			table: "bot_outbox",
@@ -60,8 +62,49 @@ func notificationLeaseQueues(repo *repository.NotificationRepository) []notifica
 			},
 			renew: repo.RenewBotOutboxClaims, active: repo.IsBotOutboxActive,
 			delivered: repo.MarkBotOutboxDelivered, cancelled: repo.MarkBotOutboxCancelled,
-			failed: repo.MarkBotOutboxFailed, permanent: repo.MarkBotOutboxPermanentFailure,
+			failed: repo.MarkBotOutboxFailed, limited: repo.MarkBotOutboxRateLimited,
+			permanent: repo.MarkBotOutboxPermanentFailure,
 		},
+	}
+}
+
+func TestNotificationRateLimitDoesNotConsumeFinalAttempt(t *testing.T) {
+	for _, table := range []string{"notification_deliveries", "bot_outbox"} {
+		t.Run(table, func(t *testing.T) {
+			db, ctx := openOperationalIntegrationDB(t)
+			queues := notificationLeaseQueues(repository.NewNotificationRepository(db))
+			queue := queues[0]
+			if table == "bot_outbox" {
+				queue = queues[1]
+			}
+			createNotificationLeaseFixture(t, db, ctx, table, 1)
+			if _, err := db.ExecContext(ctx, `UPDATE `+table+` SET attempts=4`); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				claimed, err := queue.claim(ctx, 1)
+				if err != nil || len(claimed) != 1 || claimed[0].attempts != 5 {
+					t.Fatalf("claim=%v err=%v", claimed, err)
+				}
+				item := claimed[0]
+				if err = queue.limited(ctx, item.id, item.token, 0, errors.New("429")); err != nil {
+					t.Fatal(err)
+				}
+				var stored struct {
+					Status   string `db:"status"`
+					Attempts int    `db:"attempts"`
+					Token    string `db:"claim_token"`
+				}
+				if err = db.GetContext(ctx, &stored,
+					`SELECT status, attempts, claim_token FROM `+table+` WHERE id=$1`, item.id,
+				); err != nil {
+					t.Fatal(err)
+				}
+				if stored.Status != "pending" || stored.Attempts != 4 || stored.Token != "" {
+					t.Fatalf("stored=%+v", stored)
+				}
+			}
+		})
 	}
 }
 
@@ -150,6 +193,9 @@ func TestNotificationLeaseRejectsStaleWorkerWrites(t *testing.T) {
 					"cancel":  func() error { return queue.cancelled(ctx, old.id, old.token) },
 					"retry": func() error {
 						return queue.failed(ctx, old.id, old.token, old.attempts, time.Minute, errors.New("stale"))
+					},
+					"rate_limit": func() error {
+						return queue.limited(ctx, old.id, old.token, time.Minute, errors.New("stale"))
 					},
 					"fail": func() error { return queue.permanent(ctx, old.id, old.token, errors.New("stale")) },
 				} {

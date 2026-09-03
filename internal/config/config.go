@@ -24,6 +24,7 @@ type Config struct {
 	NotificationBatchSize    int            `mapstructure:"BOT_NOTIFICATION_BATCH_SIZE"`
 	NotificationMaxBatches   int            `mapstructure:"BOT_NOTIFICATION_MAX_BATCHES"`
 	NotificationPollSeconds  int            `mapstructure:"BOT_NOTIFICATION_POLL_SECONDS"`
+	WorkerHealthPort         string         `mapstructure:"WORKER_HEALTH_PORT"`
 	ProjectURL               string         `mapstructure:"PROJECT_URL"`
 	BotPublicURL             string         `mapstructure:"BOT_PUBLIC_URL"`
 	Database                 DatabaseConfig `mapstructure:",squash"`
@@ -106,6 +107,7 @@ func initConfig(requireBotToken bool) (*Config, error) {
 	reader.SetDefault("BOT_NOTIFICATION_BATCH_SIZE", 250)
 	reader.SetDefault("BOT_NOTIFICATION_MAX_BATCHES", 4)
 	reader.SetDefault("BOT_NOTIFICATION_POLL_SECONDS", 1)
+	reader.SetDefault("WORKER_HEALTH_PORT", "18083")
 	reader.SetDefault("BOT_TELEGRAM_API_ALLOW_INSECURE", false)
 	reader.SetDefault("ADMIN_ACCESS_LOGIN_ENABLED", false)
 	reader.SetDefault("ADMIN_COOKIE_SECURE", true)
@@ -126,6 +128,7 @@ func initConfig(requireBotToken bool) (*Config, error) {
 		"BOT_NOTIFICATION_BATCH_SIZE",
 		"BOT_NOTIFICATION_MAX_BATCHES",
 		"BOT_NOTIFICATION_POLL_SECONDS",
+		"WORKER_HEALTH_PORT",
 		"PROJECT_URL",
 		"BOT_PUBLIC_URL",
 		"DATABASE_HOST",
@@ -265,6 +268,9 @@ func (c *Config) validate(requireBotToken bool) error {
 		return err
 	}
 	if err := validatePort("SITE_PORT", c.Site.Port); err != nil {
+		return err
+	}
+	if err := validatePort("WORKER_HEALTH_PORT", c.WorkerHealthPort); err != nil {
 		return err
 	}
 	if c.Database.MaxOpenConnections < 1 || c.Database.MaxOpenConnections > 200 {

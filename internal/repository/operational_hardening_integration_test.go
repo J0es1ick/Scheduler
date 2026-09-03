@@ -257,7 +257,7 @@ func TestDegradedSourceRemainsVisibleDuringBackoff(t *testing.T) {
 	}
 }
 
-func TestOperationalRetentionBoundsPayloadsAndHistory(t *testing.T) {
+func TestParserRetentionBoundsParserPayloadsAndHistory(t *testing.T) {
 	db, ctx := openOperationalIntegrationDB(t)
 	suffix := uuid.NewString()
 	universityID := "retention-university-" + suffix
@@ -326,14 +326,14 @@ func TestOperationalRetentionBoundsPayloadsAndHistory(t *testing.T) {
 		  (id, actor_id, actor_name, action, object_type, created_at)
 		  VALUES ($1,'integration','Integration','retention','test',NOW()-INTERVAL '366 days')`,
 			[]any{auditID}},
-		{`UPDATE operational_maintenance SET last_run_at='-infinity' WHERE task_name='retention'`, nil},
+		{`UPDATE operational_maintenance SET last_run_at='-infinity' WHERE task_name='parser_retention'`, nil},
 	}
 	for _, statement := range statements {
 		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
 			t.Fatal(err)
 		}
 	}
-	ran, err := parseLogs.RunOperationalRetention(ctx)
+	ran, err := parseLogs.RunParserRetention(ctx)
 	if err != nil {
 		t.Fatalf("run retention: %v", err)
 	}
@@ -352,13 +352,11 @@ func TestOperationalRetentionBoundsPayloadsAndHistory(t *testing.T) {
 		"old connector run": `SELECT EXISTS (SELECT 1 FROM connector_ingestion_runs WHERE id=$1)`,
 		"rejected snapshot": `SELECT EXISTS (SELECT 1 FROM parser_snapshots WHERE id=$1)`,
 		"orphan parse log":  `SELECT EXISTS (SELECT 1 FROM parse_logs WHERE id=$1)`,
-		"old audit entry":   `SELECT EXISTS (SELECT 1 FROM admin_audit_logs WHERE id=$1)`,
 	} {
 		id := map[string]string{
 			"old connector run": oldRunID,
 			"rejected snapshot": snapshotID,
 			"orphan parse log":  logID,
-			"old audit entry":   auditID,
 		}[name]
 		var exists bool
 		if err := db.GetContext(ctx, &exists, query, id); err != nil {
@@ -368,7 +366,12 @@ func TestOperationalRetentionBoundsPayloadsAndHistory(t *testing.T) {
 			t.Fatalf("retention kept %s", name)
 		}
 	}
-	if ran, err = parseLogs.RunOperationalRetention(ctx); err != nil || ran {
+	var auditRetained bool
+	if err = db.GetContext(ctx, &auditRetained,
+		`SELECT EXISTS (SELECT 1 FROM admin_audit_logs WHERE id=$1)`, auditID); err != nil || !auditRetained {
+		t.Fatalf("parser retention crossed into admin data: retained=%t err=%v", auditRetained, err)
+	}
+	if ran, err = parseLogs.RunParserRetention(ctx); err != nil || ran {
 		t.Fatalf("retention ran twice inside 24 hours: ran=%t err=%v", ran, err)
 	}
 }

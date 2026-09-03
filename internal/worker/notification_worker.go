@@ -11,28 +11,33 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	"github.com/J0es1ick/Scheduler/internal/telegramlimit"
 	tele "gopkg.in/telebot.v3"
 )
 
 const notificationBatchSize = 250
 const notificationRetention = 90 * 24 * time.Hour
-const telegramGlobalInterval = 40 * time.Millisecond
-const telegramRecipientInterval = 1100 * time.Millisecond
+
+var errTelegramRateLimited = errors.New("telegram delivery rate limited")
 
 type notificationDeliveryRepository interface {
 	ClaimPending(context.Context, int) ([]domain.NotificationDelivery, error)
 	ClaimBotOutbox(context.Context, int) ([]domain.BotOutboxDelivery, error)
 	RenewDeliveryClaims(context.Context, string, []string) error
 	RenewBotOutboxClaims(context.Context, string, []string) error
-	IsDeliveryActive(context.Context, string, string) (bool, error)
-	IsBotOutboxActive(context.Context, string, string) (bool, error)
+	DeliveryDecision(context.Context, string, string) (repository.NotificationQueueDecision, error)
+	BotOutboxDecision(context.Context, string, string) (repository.NotificationQueueDecision, error)
 	MarkDelivered(context.Context, string, string) error
 	MarkCancelled(context.Context, string, string) error
+	MarkDeferred(context.Context, string, string) error
 	MarkFailed(context.Context, string, string, int, time.Duration, error) error
+	MarkRateLimited(context.Context, string, string, time.Duration, error) error
 	MarkPermanentFailure(context.Context, string, string, error) error
 	MarkBotOutboxDelivered(context.Context, string, string) error
 	MarkBotOutboxCancelled(context.Context, string, string) error
+	MarkBotOutboxDeferred(context.Context, string, string) error
 	MarkBotOutboxFailed(context.Context, string, string, int, time.Duration, error) error
+	MarkBotOutboxRateLimited(context.Context, string, string, time.Duration, error) error
 	MarkBotOutboxPermanentFailure(context.Context, string, string, error) error
 	PruneCompleted(context.Context, time.Duration) (int64, error)
 }
@@ -49,13 +54,13 @@ type NotificationWorker struct {
 	bot                notificationSender
 	interval           time.Duration
 	claimRenewInterval time.Duration
-	lastSend           time.Time
-	recipients         map[string]time.Time
+	limiter            *telegramlimit.Limiter
 }
 
 type NotificationOptions struct {
 	BatchSize  int
 	MaxBatches int
+	Limiter    *telegramlimit.Limiter
 }
 
 func NewNotificationWorker(
@@ -71,6 +76,13 @@ func NewNotificationWorker(
 	if interval <= 0 {
 		interval = time.Second
 	}
+	limiter := settings.Limiter
+	if limiter == nil {
+		limiter = telegramlimit.New(
+			telegramlimit.DefaultGlobalInterval,
+			telegramlimit.DefaultRecipientInterval,
+		)
+	}
 	return &NotificationWorker{
 		batchSize:          min(1000, max(1, settings.BatchSize)),
 		maxBatches:         min(20, max(1, settings.MaxBatches)),
@@ -78,7 +90,7 @@ func NewNotificationWorker(
 		bot:                bot,
 		interval:           interval,
 		claimRenewInterval: notificationClaimRenewInterval,
-		recipients:         make(map[string]time.Time),
+		limiter:            limiter,
 	}
 }
 
@@ -178,6 +190,9 @@ func (w *NotificationWorker) drainBatch(ctx context.Context, monitor *Monitor, b
 			monitor, func(guard *notificationClaimGuard) error {
 				return w.deliverScheduleBatch(guard.ctx, items, guard)
 			}); err != nil {
+			if errors.Is(err, errTelegramRateLimited) {
+				return false, nil
+			}
 			return false, err
 		}
 	}
@@ -196,13 +211,27 @@ func (w *NotificationWorker) drainBatch(ctx context.Context, monitor *Monitor, b
 	}
 	err = w.withClaims(ctx, outbox[0].ClaimToken, ids, w.repository.RenewBotOutboxClaims,
 		monitor, func(guard *notificationClaimGuard) error {
-			for _, item := range outbox {
-				if err := w.deliverBotOutbox(guard.ctx, item, guard); err != nil {
-					return err
+			for index, item := range outbox {
+				deliveryErr := w.deliverBotOutbox(guard.ctx, item, guard)
+				if _, limited := telegramlimit.FloodRetryAfter(deliveryErr); limited {
+					for _, pending := range outbox[index+1:] {
+						if markErr := guard.finish(pending.ID, func(markCtx context.Context) error {
+							return w.recordBotOutboxFailure(markCtx, pending, deliveryErr)
+						}); markErr != nil {
+							return markErr
+						}
+					}
+					return errTelegramRateLimited
+				}
+				if deliveryErr != nil {
+					return deliveryErr
 				}
 			}
 			return nil
 		})
+	if errors.Is(err, errTelegramRateLimited) {
+		return false, nil
+	}
 	return len(items) >= batchSize || len(outbox) >= batchSize, err
 }
 
@@ -244,7 +273,7 @@ func (w *NotificationWorker) deliverScheduleBatch(
 		byUser[item.UserID] = append(byUser[item.UserID], item)
 	}
 
-	for _, userID := range order {
+	for userIndex, userID := range order {
 		if err := context.Cause(ctx); err != nil {
 			return err
 		}
@@ -258,15 +287,28 @@ func (w *NotificationWorker) deliverScheduleBatch(
 				}
 				activeItems := make([]domain.NotificationDelivery, 0, len(batch.Items))
 				for _, item := range batch.Items {
-					active, checkErr := w.repository.IsDeliveryActive(ctx, item.ID, item.ClaimToken)
+					decision, checkErr := w.repository.DeliveryDecision(ctx, item.ID, item.ClaimToken)
 					if checkErr != nil {
 						return checkErr
 					}
-					if !active {
+					switch decision {
+					case repository.NotificationQueueGone:
+						if discardErr := guard.discard(item.ID); discardErr != nil {
+							return discardErr
+						}
+						continue
+					case repository.NotificationQueueCancel:
 						if cancelErr := guard.finish(item.ID, func(markCtx context.Context) error {
 							return w.repository.MarkCancelled(markCtx, item.ID, item.ClaimToken)
 						}); cancelErr != nil {
 							return cancelErr
+						}
+						continue
+					case repository.NotificationQueueDefer:
+						if deferErr := guard.finish(item.ID, func(markCtx context.Context) error {
+							return w.repository.MarkDeferred(markCtx, item.ID, item.ClaimToken)
+						}); deferErr != nil {
+							return deferErr
 						}
 						continue
 					}
@@ -280,6 +322,7 @@ func (w *NotificationWorker) deliverScheduleBatch(
 					return leaseErr
 				}
 				_, err = w.bot.Send(&tele.User{ID: telegramID}, notificationDigestBatches(activeItems)[0].Text)
+				w.limiter.Observe(err)
 			}
 			for _, item := range batch.Items {
 				if markErr := guard.finish(item.ID, func(markCtx context.Context) error {
@@ -292,6 +335,7 @@ func (w *NotificationWorker) deliverScheduleBatch(
 				}
 			}
 			if err != nil {
+				_, rateLimited := telegramlimit.FloodRetryAfter(err)
 				for _, unsent := range batches[batchIndex+1:] {
 					for _, item := range unsent.Items {
 						if markErr := guard.finish(item.ID, func(markCtx context.Context) error {
@@ -300,6 +344,18 @@ func (w *NotificationWorker) deliverScheduleBatch(
 							return markErr
 						}
 					}
+				}
+				if rateLimited {
+					for _, pendingUserID := range order[userIndex+1:] {
+						for _, pending := range byUser[pendingUserID] {
+							if markErr := guard.finish(pending.ID, func(markCtx context.Context) error {
+								return w.recordFailure(markCtx, pending, err)
+							}); markErr != nil {
+								return markErr
+							}
+						}
+					}
+					return errTelegramRateLimited
 				}
 				break
 			}
@@ -312,13 +368,20 @@ func (w *NotificationWorker) deliverBotOutbox(ctx context.Context, item domain.B
 	if err := w.waitForTelegram(ctx, item.UserID); err != nil {
 		return context.Cause(ctx)
 	}
-	active, err := w.repository.IsBotOutboxActive(ctx, item.ID, item.ClaimToken)
+	decision, err := w.repository.BotOutboxDecision(ctx, item.ID, item.ClaimToken)
 	if err != nil {
 		return err
 	}
-	if !active {
+	switch decision {
+	case repository.NotificationQueueGone:
+		return guard.discard(item.ID)
+	case repository.NotificationQueueCancel:
 		return guard.finish(item.ID, func(markCtx context.Context) error {
 			return w.repository.MarkBotOutboxCancelled(markCtx, item.ID, item.ClaimToken)
+		})
+	case repository.NotificationQueueDefer:
+		return guard.finish(item.ID, func(markCtx context.Context) error {
+			return w.repository.MarkBotOutboxDeferred(markCtx, item.ID, item.ClaimToken)
 		})
 	}
 	if err = context.Cause(ctx); err != nil {
@@ -327,13 +390,22 @@ func (w *NotificationWorker) deliverBotOutbox(ctx context.Context, item domain.B
 	telegramID, err := strconv.ParseInt(item.UserID, 10, 64)
 	if err == nil {
 		_, err = w.bot.Send(&tele.User{ID: telegramID}, item.Body)
+		w.limiter.Observe(err)
 	}
-	return guard.finish(item.ID, func(markCtx context.Context) error {
+	rateLimited := false
+	_, rateLimited = telegramlimit.FloodRetryAfter(err)
+	if finishErr := guard.finish(item.ID, func(markCtx context.Context) error {
 		if err == nil {
 			return w.repository.MarkBotOutboxDelivered(markCtx, item.ID, item.ClaimToken)
 		}
 		return w.recordBotOutboxFailure(markCtx, item, err)
-	})
+	}); finishErr != nil {
+		return finishErr
+	}
+	if rateLimited {
+		return err
+	}
+	return nil
 }
 
 func (w *NotificationWorker) recordBotOutboxFailure(
@@ -341,6 +413,21 @@ func (w *NotificationWorker) recordBotOutboxFailure(
 	item domain.BotOutboxDelivery,
 	deliveryErr error,
 ) error {
+	if retryAfter, limited := telegramlimit.FloodRetryAfter(deliveryErr); limited {
+		markErr := w.repository.MarkBotOutboxRateLimited(
+			ctx, item.ID, item.ClaimToken, retryAfter, deliveryErr,
+		)
+		if markErr != nil {
+			slog.Error("notification worker: record bot outbox rate limit failed", "delivery_id", item.ID, "err", markErr)
+			return markErr
+		}
+		slog.Warn("bot outbox delivery rate limited",
+			"delivery_id", item.ID,
+			"kind", item.Kind,
+			"retry_after", retryAfter,
+		)
+		return nil
+	}
 	retryAfter, permanent := telegramRetryPolicy(deliveryErr, item.Attempts)
 	var markErr error
 	if permanent {
@@ -364,6 +451,20 @@ func (w *NotificationWorker) recordBotOutboxFailure(
 }
 
 func (w *NotificationWorker) recordFailure(ctx context.Context, item domain.NotificationDelivery, deliveryErr error) error {
+	if retryAfter, limited := telegramlimit.FloodRetryAfter(deliveryErr); limited {
+		markErr := w.repository.MarkRateLimited(
+			ctx, item.ID, item.ClaimToken, retryAfter, deliveryErr,
+		)
+		if markErr != nil {
+			slog.Error("notification worker: record rate limit failed", "delivery_id", item.ID, "err", markErr)
+			return markErr
+		}
+		slog.Warn("notification delivery rate limited",
+			"delivery_id", item.ID,
+			"retry_after", retryAfter,
+		)
+		return nil
+	}
 	retryAfter, permanent := telegramRetryPolicy(deliveryErr, item.Attempts)
 	var markErr error
 	if permanent {
@@ -397,23 +498,22 @@ func notificationDigestBatches(items []domain.NotificationDelivery) []notificati
 		return nil
 	}
 	const header = "🔔 Изменение расписания\n"
-	const footer = "\nОткройте /week, чтобы посмотреть актуальное расписание."
 	batches := make([]notificationMessage, 0, 1)
 	currentSections := make([]string, 0, len(items))
 	currentItems := make([]domain.NotificationDelivery, 0, len(items))
-	currentLength := len([]rune(header)) + len([]rune(footer))
+	currentLength := len([]rune(header))
 
 	flush := func() {
 		if len(currentItems) == 0 {
 			return
 		}
 		batches = append(batches, notificationMessage{
-			Text:  header + strings.Join(currentSections, "") + footer,
+			Text:  header + strings.Join(currentSections, ""),
 			Items: append([]domain.NotificationDelivery(nil), currentItems...),
 		})
 		currentSections = currentSections[:0]
 		currentItems = currentItems[:0]
-		currentLength = len([]rune(header)) + len([]rune(footer))
+		currentLength = len([]rune(header))
 	}
 
 	for _, item := range items {
@@ -421,7 +521,11 @@ func notificationDigestBatches(items []domain.NotificationDelivery) []notificati
 		if len(summaryRunes) > 600 {
 			summaryRunes = append(summaryRunes[:600], '…')
 		}
-		section := fmt.Sprintf("\n%s · %s\n%s\n", item.UniversityName, item.GroupName, string(summaryRunes))
+		hint := "Откройте /settings и выберите эту группу, чтобы посмотреть актуальное расписание."
+		if item.IsDefault {
+			hint = "Откройте /week, чтобы посмотреть актуальное расписание."
+		}
+		section := fmt.Sprintf("\n%s · %s\n%s\n\n%s\n", item.UniversityName, item.GroupName, string(summaryRunes), hint)
 		sectionLength := len([]rune(section))
 		if len(currentItems) > 0 && currentLength+sectionLength > notificationTelegramLimit {
 			flush()
@@ -444,9 +548,8 @@ func notificationRetryDelay(attempt int) time.Duration {
 }
 
 func telegramRetryPolicy(deliveryErr error, attempt int) (time.Duration, bool) {
-	var flood tele.FloodError
-	if errors.As(deliveryErr, &flood) {
-		return time.Duration(flood.RetryAfter+1) * time.Second, false
+	if retryAfter, limited := telegramlimit.FloodRetryAfter(deliveryErr); limited {
+		return retryAfter, false
 	}
 	var apiErr *tele.Error
 	if errors.As(deliveryErr, &apiErr) &&
@@ -469,29 +572,5 @@ func (w *NotificationWorker) waitForTelegram(ctx context.Context, recipient stri
 	if w.waitSend != nil {
 		return w.waitSend(ctx, recipient)
 	}
-	next := w.lastSend.Add(telegramGlobalInterval)
-	if recipientNext := w.recipients[recipient].Add(telegramRecipientInterval); recipientNext.After(next) {
-		next = recipientNext
-	}
-	if delay := time.Until(next); delay > 0 {
-		timer := time.NewTimer(delay)
-		defer timer.Stop()
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timer.C:
-		}
-	}
-	sentAt := time.Now()
-	w.lastSend = sentAt
-	w.recipients[recipient] = sentAt
-	if len(w.recipients) > 10_000 {
-		cutoff := sentAt.Add(-time.Hour)
-		for id, at := range w.recipients {
-			if at.Before(cutoff) {
-				delete(w.recipients, id)
-			}
-		}
-	}
-	return nil
+	return w.limiter.Wait(ctx, recipient)
 }

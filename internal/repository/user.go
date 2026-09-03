@@ -142,7 +142,19 @@ func (r *UserRepository) SetDefaultGroup(ctx context.Context, userID, groupID st
 	if groupID != "" {
 		return NewSubscriptionRepository(r.db).SetDefaultSubscribedGroup(ctx, userID, groupID)
 	}
-	result, err := r.db.ExecContext(ctx,
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("set default group for user %s: begin: %w", userID, err)
+	}
+	defer tx.Rollback()
+	var previous sql.NullString
+	if err = tx.GetContext(ctx, &previous, `
+		SELECT default_group_id FROM users WHERE id=$1 FOR UPDATE`, userID); errors.Is(err, sql.ErrNoRows) {
+		return sql.ErrNoRows
+	} else if err != nil {
+		return fmt.Errorf("set default group for user %s: load current group: %w", userID, err)
+	}
+	result, err := tx.ExecContext(ctx,
 		`UPDATE users SET default_group_id = NULL, updated_at = NOW() WHERE id = $1`,
 		userID,
 	)
@@ -151,6 +163,17 @@ func (r *UserRepository) SetDefaultGroup(ctx context.Context, userID, groupID st
 	}
 	if rows, _ := result.RowsAffected(); rows == 0 {
 		return sql.ErrNoRows
+	}
+	if previous.Valid {
+		if _, err = tx.ExecContext(ctx, `
+			SELECT scheduler_request_outbox_cancellation(
+				$1, 'lesson_reminder', $2, 'default_group_changed'
+			)`, userID, previous.String); err != nil {
+			return fmt.Errorf("set default group for user %s: cancel reminders: %w", userID, err)
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("set default group for user %s: commit: %w", userID, err)
 	}
 	return nil
 }
@@ -176,9 +199,9 @@ func (r *UserRepository) SetNotificationsEnabled(ctx context.Context, userID str
 	}
 	if !enabled {
 		if _, err = tx.ExecContext(ctx, `
-			UPDATE notification_deliveries
-			SET status='cancelled', updated_at=NOW()
-			WHERE user_id=$1 AND status='pending'`, userID); err != nil {
+			SELECT scheduler_request_notification_cancellation(
+				$1, NULL, 'notifications_disabled'
+			)`, userID); err != nil {
 			return fmt.Errorf("cancel pending notifications for user %s: %w", userID, err)
 		}
 	}
@@ -216,9 +239,9 @@ func (r *UserRepository) SetLessonReminder(
 	}
 	if !enabled {
 		if _, err = tx.ExecContext(ctx, `
-			UPDATE bot_outbox
-			SET status='cancelled', updated_at=NOW()
-			WHERE user_id=$1 AND kind='lesson_reminder' AND status='pending'`,
+			SELECT scheduler_request_outbox_cancellation(
+				$1, 'lesson_reminder', NULL, 'reminder_disabled'
+			)`,
 			userID,
 		); err != nil {
 			return fmt.Errorf("cancel lesson reminders for user %s: %w", userID, err)
@@ -275,54 +298,18 @@ func (r *UserRepository) DeleteUser(ctx context.Context, id string) error {
 		return fmt.Errorf("delete user %s: generate anonymous marker: %w", id, err)
 	}
 	anonymizedID := "deleted:" + hex.EncodeToString(randomMarker)
-	tx, err := r.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("delete user %s: begin: %w", id, err)
-	}
-	defer tx.Rollback()
-	if err = database.LockGroupReferences(ctx, tx, false); err != nil {
-		return err
-	}
-	var role struct {
-		IsAdmin   bool   `db:"is_admin"`
-		AdminRole string `db:"admin_role"`
-	}
-	if err = tx.GetContext(ctx, &role, `
-		SELECT is_admin, admin_role FROM users WHERE id=$1 FOR UPDATE`, id); errors.Is(err, sql.ErrNoRows) {
-		return sql.ErrNoRows
-	} else if err != nil {
-		return fmt.Errorf("delete user %s: lock profile: %w", id, err)
-	}
-	if role.IsAdmin || role.AdminRole != "none" {
-		return fmt.Errorf("remove administrator role before deleting the profile")
-	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM admin_sessions WHERE admin_id=$1`, id); err != nil {
-		return fmt.Errorf("delete user %s: revoke admin sessions: %w", id, err)
-	}
-	statements := []string{
-		`UPDATE admin_audit_logs SET actor_id=$2, actor_name='Удалённый пользователь', ip_address='' WHERE actor_id=$1`,
-		`UPDATE chat_schedule_profiles SET configured_by=$2 WHERE configured_by=$1`,
-		`UPDATE lesson_overrides SET created_by=$2 WHERE created_by=$1`,
-		`UPDATE support_requests SET reviewed_by=$2 WHERE reviewed_by=$1`,
-		`UPDATE parser_snapshots SET reviewed_by=$2 WHERE reviewed_by=$1`,
-		`UPDATE connector_clients SET created_by=$2 WHERE created_by=$1`,
-	}
-	for _, statement := range statements {
-		if _, err = tx.ExecContext(ctx, statement, id, anonymizedID); err != nil {
-			return fmt.Errorf("delete user %s: anonymize references: %w", id, err)
-		}
-	}
-	result, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, id)
-	if err != nil {
+	var deleted bool
+	if err := r.db.GetContext(ctx, &deleted, `SELECT execute_privacy_deletion($1, $2)`, id, anonymizedID); err != nil {
 		return fmt.Errorf("delete user %s: %w", id, err)
 	}
-	if rows, _ := result.RowsAffected(); rows == 0 {
+	if !deleted {
 		return sql.ErrNoRows
 	}
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("delete user %s: commit: %w", id, err)
-	}
 	return nil
+}
+
+func (r *UserRepository) EnqueuePrivacyDeletion(ctx context.Context, id string) (string, error) {
+	return enqueuePrivacyDeletion(ctx, r.db, id)
 }
 
 func (r *UserRepository) ExportUserData(ctx context.Context, id string) (*domain.UserDataExport, error) {

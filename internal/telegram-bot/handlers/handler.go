@@ -8,6 +8,7 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/service"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/state"
+	"github.com/J0es1ick/Scheduler/internal/telegramlimit"
 )
 
 const handlerTimeout = 15 * time.Second
@@ -26,6 +27,7 @@ type Handler struct {
 	SupportRequestService *service.SupportRequestService
 	MetricsService        *service.MetricsService
 	ChatProfileService    chatProfileService
+	TelegramLimiter       *telegramlimit.Limiter
 	AdminPublicURL        string
 	ProjectURL            string
 	scheduleMessagesMu    sync.Mutex
@@ -61,7 +63,7 @@ type userService interface {
 	SetQuietHours(context.Context, string, bool, string, string) error
 	SetSearchScheduleView(context.Context, string, domain.ScheduleViewFormat) error
 	ExportData(context.Context, string) (*domain.UserDataExport, error)
-	DeleteOwnData(context.Context, string) error
+	RequestOwnDataDeletion(context.Context, string) error
 }
 
 type groupService interface {
@@ -98,6 +100,7 @@ func NewHandler(
 	supportRequestService *service.SupportRequestService,
 	metricsService *service.MetricsService,
 	chatProfileService *service.ChatProfileService,
+	telegramLimiter *telegramlimit.Limiter,
 	adminPublicURL string,
 	projectURL string,
 ) *Handler {
@@ -111,6 +114,7 @@ func NewHandler(
 		SupportRequestService: supportRequestService,
 		MetricsService:        metricsService,
 		ChatProfileService:    chatProfileService,
+		TelegramLimiter:       telegramLimiter,
 		AdminPublicURL:        adminPublicURL,
 		ProjectURL:            projectURL,
 	}
