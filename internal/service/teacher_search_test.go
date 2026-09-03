@@ -3,6 +3,8 @@ package service
 import (
 	"slices"
 	"testing"
+
+	"github.com/J0es1ick/Scheduler/internal/searchtext"
 )
 
 func TestTeacherMatchingSupportsPartialNamesAndInitials(t *testing.T) {
@@ -10,7 +12,7 @@ func TestTeacherMatchingSupportsPartialNamesAndInitials(t *testing.T) {
 		"Константинов Е.С.",
 		"Константинов А.В.",
 		"Сизова О.В.; Петров П.П.",
-		"Сизова О.В.",
+		"Сизова О В",
 	})
 	for _, test := range []struct {
 		query string
@@ -24,7 +26,7 @@ func TestTeacherMatchingSupportsPartialNamesAndInitials(t *testing.T) {
 	} {
 		matches := make([]teacherMatch, 0)
 		for _, name := range names {
-			if score, ok := teacherMatchScore(teacherTokens(name), teacherTokens(test.query)); ok {
+			if score, ok := searchtext.MatchTeacher(name, test.query); ok {
 				matches = append(matches, teacherMatch{name: name, score: score})
 			}
 		}

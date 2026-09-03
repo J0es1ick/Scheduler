@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
+	"github.com/J0es1ick/Scheduler/internal/searchtext"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -47,6 +48,24 @@ func (r *GroupRepository) GetGroupByID(ctx context.Context, id string) (*domain.
 	return &group, nil
 }
 
+func (r *GroupRepository) GetActiveGroupByID(ctx context.Context, id string) (*domain.Group, error) {
+	var group domain.Group
+	err := r.db.GetContext(ctx, &group, `
+		SELECT study_group.id, study_group.university_id, study_group.name,
+			study_group.is_active, study_group.source_active, study_group.manually_disabled,
+			study_group.created_at, study_group.updated_at
+		FROM groups study_group
+		JOIN universities university ON university.id=study_group.university_id
+		WHERE study_group.id=$1 AND study_group.is_active AND university.is_active`, id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get active group by id: %w", err)
+	}
+	return &group, nil
+}
+
 func (r *GroupRepository) GetGroupsByUniversityID(ctx context.Context, universityID string) ([]domain.Group, error) {
 	var groups []domain.Group
 	query := `SELECT id, university_id, name, is_active, source_active,
@@ -76,9 +95,10 @@ func (r *GroupRepository) GetGroupByName(ctx context.Context, universityID strin
 		manually_disabled, created_at, updated_at
 		FROM groups
 		WHERE university_id = $1
-		  AND LOWER(REGEXP_REPLACE(BTRIM(name), '[[:space:]]+', ' ', 'g')) = $2
-		  AND is_active = TRUE`
-	err := r.db.GetContext(ctx, &group, query, universityID, normalizedSearch(name))
+		  AND REPLACE(LOWER(REGEXP_REPLACE(BTRIM(name), '[[:space:]]+', ' ', 'g')), 'ё', 'е') = $2
+		  AND is_active = TRUE
+		  AND EXISTS (SELECT 1 FROM universities u WHERE u.id=groups.university_id AND u.is_active)`
+	err := r.db.GetContext(ctx, &group, query, universityID, searchtext.Normalize(name))
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -118,11 +138,11 @@ func (r *GroupRepository) FindActiveByName(
 	name string,
 ) ([]domain.Group, error) {
 	var groups []domain.Group
-	name = normalizedSearch(name)
+	name = searchtext.Normalize(name)
 	if name == "" {
 		return []domain.Group{}, nil
 	}
-	where := `STRPOS(LOWER(REGEXP_REPLACE(BTRIM(name), '[[:space:]]+', ' ', 'g')), $1)>0 AND is_active=TRUE
+	where := `STRPOS(REPLACE(LOWER(REGEXP_REPLACE(BTRIM(name), '[[:space:]]+', ' ', 'g')), 'ё', 'е'), $1)>0 AND is_active=TRUE
 		AND EXISTS (SELECT 1 FROM universities u WHERE u.id=groups.university_id AND u.is_active)`
 	args := []any{name}
 	if universityID != "" {
@@ -156,7 +176,7 @@ func (r *GroupRepository) FindActiveByName(
 			return nil, fmt.Errorf("suggest active groups: %w", err)
 		}
 		for _, candidate := range candidates {
-			if closeSearchMatch(candidate.Name, name) {
+			if searchtext.CloseIdentifier(candidate.Name, name) {
 				candidate.Suggested = true
 				groups = append(groups, candidate)
 				if len(groups) == 10 {

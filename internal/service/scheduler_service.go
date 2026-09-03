@@ -28,11 +28,11 @@ func NewScheduleService(
 }
 
 func (s *ScheduleService) GetScheduleForGroup(ctx context.Context, groupID string, date time.Time) ([]domain.Lesson, error) {
-	group, err := s.groupRepo.GetGroupByID(ctx, groupID)
+	group, err := s.groupRepo.GetActiveGroupByID(ctx, groupID)
 	if err != nil {
 		return nil, err
 	}
-	if group == nil || !group.IsActive {
+	if group == nil {
 		return nil, fmt.Errorf("group not found")
 	}
 	lessons, err := s.lessonRepo.GetLessonsByGroupID(ctx, groupID)
@@ -43,11 +43,11 @@ func (s *ScheduleService) GetScheduleForGroup(ctx context.Context, groupID strin
 }
 
 func (s *ScheduleService) GetScheduleForGroupRange(ctx context.Context, groupID string, from, to time.Time) (map[time.Time][]domain.Lesson, error) {
-	group, err := s.groupRepo.GetGroupByID(ctx, groupID)
+	group, err := s.groupRepo.GetActiveGroupByID(ctx, groupID)
 	if err != nil {
 		return nil, err
 	}
-	if group == nil || !group.IsActive {
+	if group == nil {
 		return nil, fmt.Errorf("group not found")
 	}
 	lessons, err := s.lessonRepo.GetLessonsByGroupID(ctx, groupID)

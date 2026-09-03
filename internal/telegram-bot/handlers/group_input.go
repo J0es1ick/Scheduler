@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
+	"github.com/J0es1ick/Scheduler/internal/searchtext"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	tele "gopkg.in/telebot.v3"
@@ -21,7 +22,7 @@ func qualifiedGroupPrompt() string {
 
 func resolveGroupInput(input, defaultUniversityID string, requireUniversity bool, universities []domain.University) (*domain.University, string, error) {
 	input = strings.Join(strings.Fields(input), " ")
-	lower := strings.ToLower(input)
+	lower := searchtext.Normalize(input)
 	bestLength := 0
 	var matches []domain.University
 	query := ""
@@ -30,7 +31,7 @@ func resolveGroupInput(input, defaultUniversityID string, requireUniversity bool
 			continue
 		}
 		for _, alias := range []string{university.ID, university.Name, university.FullName} {
-			alias = strings.ToLower(strings.Join(strings.Fields(alias), " "))
+			alias = searchtext.Normalize(alias)
 			if alias == "" || !strings.HasPrefix(lower, alias) {
 				continue
 			}
@@ -72,9 +73,9 @@ func resolveGroupInput(input, defaultUniversityID string, requireUniversity bool
 }
 
 func groupQueryVariants(query string) []string {
-	query = strings.Join(strings.Fields(query), " ")
+	query = searchtext.Normalize(query)
 	variants := []string{query}
-	parts := strings.FieldsFunc(strings.ToLower(query), func(r rune) bool {
+	parts := strings.FieldsFunc(query, func(r rune) bool {
 		return unicode.IsSpace(r) || r == '/' || r == '\\' || r == '-' || r == '–' || r == '—'
 	})
 	parts = slices.DeleteFunc(parts, func(part string) bool {

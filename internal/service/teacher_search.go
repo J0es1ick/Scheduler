@@ -4,8 +4,8 @@ import (
 	"context"
 	"sort"
 	"strings"
-	"unicode"
-	"unicode/utf8"
+
+	"github.com/J0es1ick/Scheduler/internal/searchtext"
 )
 
 type teacherMatch struct {
@@ -23,16 +23,15 @@ func (s *ScheduleService) FindTeachers(
 		return nil, err
 	}
 	names := uniqueTeacherNames(stored)
-	queryTokens := teacherTokens(query)
-	if len(queryTokens) == 0 {
+	if len(searchtext.Tokens(query)) == 0 {
 		sort.Slice(names, func(i, j int) bool {
-			return normalizedTeacherName(names[i]) < normalizedTeacherName(names[j])
+			return searchtext.TokenKey(names[i]) < searchtext.TokenKey(names[j])
 		})
 		return names, nil
 	}
 	matches := make([]teacherMatch, 0, len(names))
 	for _, name := range names {
-		score, ok := teacherMatchScore(teacherTokens(name), queryTokens)
+		score, ok := searchtext.MatchTeacher(name, query)
 		if ok {
 			matches = append(matches, teacherMatch{name: name, score: score})
 		}
@@ -41,7 +40,7 @@ func (s *ScheduleService) FindTeachers(
 		if matches[i].score != matches[j].score {
 			return matches[i].score < matches[j].score
 		}
-		return normalizedTeacherName(matches[i].name) < normalizedTeacherName(matches[j].name)
+		return searchtext.TokenKey(matches[i].name) < searchtext.TokenKey(matches[j].name)
 	})
 	if len(matches) > 12 {
 		matches = matches[:12]
@@ -62,7 +61,7 @@ func uniqueTeacherNames(stored []string) []string {
 		})
 		for _, part := range parts {
 			name := strings.TrimSpace(part)
-			normalized := normalizedTeacherName(name)
+			normalized := searchtext.TokenKey(name)
 			if normalized == "" {
 				continue
 			}
@@ -74,96 +73,4 @@ func uniqueTeacherNames(stored []string) []string {
 		}
 	}
 	return result
-}
-
-func teacherTokens(value string) []string {
-	value = strings.ToLower(strings.ReplaceAll(value, "ё", "е"))
-	value = strings.Map(func(character rune) rune {
-		if unicode.IsLetter(character) || unicode.IsDigit(character) {
-			return character
-		}
-		return ' '
-	}, value)
-	return strings.Fields(value)
-}
-
-func normalizedTeacherName(value string) string {
-	return strings.Join(teacherTokens(value), " ")
-}
-
-func teacherMatchScore(candidate, query []string) (int, bool) {
-	if len(candidate) == 0 || len(query) == 0 || len(query) > len(candidate) {
-		return 0, false
-	}
-	used := make([]bool, len(candidate))
-	total := 0
-	for _, queryToken := range query {
-		bestIndex := -1
-		bestScore := 1000
-		for index, candidateToken := range candidate {
-			if used[index] {
-				continue
-			}
-			score, ok := teacherTokenScore(candidateToken, queryToken)
-			if ok && score < bestScore {
-				bestIndex = index
-				bestScore = score
-			}
-		}
-		if bestIndex < 0 {
-			return 0, false
-		}
-		used[bestIndex] = true
-		total += bestScore
-	}
-	if strings.Join(candidate, " ") == strings.Join(query, " ") {
-		return 0, true
-	}
-	return total + len(candidate) - len(query), true
-}
-
-func teacherTokenScore(candidate, query string) (int, bool) {
-	if candidate == query {
-		return 0, true
-	}
-	queryLength := utf8.RuneCountInString(query)
-	if queryLength >= 2 && strings.HasPrefix(candidate, query) {
-		return 2, true
-	}
-	if queryLength >= 4 && oneEditApart(candidate, query) {
-		return 5, true
-	}
-	return 0, false
-}
-
-func oneEditApart(left, right string) bool {
-	a, b := []rune(left), []rune(right)
-	if len(a) > len(b)+1 || len(b) > len(a)+1 {
-		return false
-	}
-	i, j, edits := 0, 0, 0
-	for i < len(a) && j < len(b) {
-		if a[i] == b[j] {
-			i++
-			j++
-			continue
-		}
-		edits++
-		if edits > 1 {
-			return false
-		}
-		switch {
-		case len(a) > len(b):
-			i++
-		case len(b) > len(a):
-			j++
-		case i+1 < len(a) && j+1 < len(b) && a[i] == b[j+1] && a[i+1] == b[j]:
-			i += 2
-			j += 2
-		default:
-			i++
-			j++
-		}
-	}
-	return edits+len(a)-i+len(b)-j <= 1
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
+	"github.com/J0es1ick/Scheduler/internal/searchtext"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -152,10 +153,14 @@ func (r *LessonRepository) GetLessonsByTeacher(
 	var lessons []domain.Lesson
 	err := r.db.SelectContext(ctx, &lessons,
 		lessonWithGroupSelect+` WHERE lesson.university_id = $1
-			AND $2<>'' AND STRPOS(LOWER(REGEXP_REPLACE(BTRIM(lesson.teacher), '[[:space:]]+', ' ', 'g')), $2)>0
+			AND $2<>'' AND STRPOS(REPLACE(LOWER(REGEXP_REPLACE(BTRIM(lesson.teacher), '[[:space:]]+', ' ', 'g')), 'ё', 'е'), $2)>0
 			AND study_group.is_active
+			AND EXISTS (
+				SELECT 1 FROM universities study_university
+				WHERE study_university.id=lesson.university_id AND study_university.is_active
+			)
 			ORDER BY lesson.day_of_week, lesson.time_start, study_group.name`,
-		universityID, normalizedSearch(teacher))
+		universityID, searchtext.Normalize(teacher))
 	if err != nil {
 		return nil, fmt.Errorf("get lessons by university=%s teacher=%q: %w", universityID, teacher, err)
 	}
@@ -173,6 +178,10 @@ func (r *LessonRepository) GetTeacherNames(
 		JOIN groups study_group ON study_group.id=lesson.group_id
 		WHERE lesson.university_id=$1
 		  AND study_group.is_active
+		  AND EXISTS (
+			SELECT 1 FROM universities study_university
+			WHERE study_university.id=lesson.university_id AND study_university.is_active
+		  )
 		  AND BTRIM(lesson.teacher)<>''
 		ORDER BY BTRIM(lesson.teacher)`, universityID)
 	if err != nil {
@@ -189,13 +198,24 @@ func (r *LessonRepository) GetLessonsByRoom(
 	var lessons []domain.Lesson
 	err := r.db.SelectContext(ctx, &lessons,
 		lessonWithGroupSelect+` WHERE lesson.university_id = $1
-			AND $2<>'' AND STRPOS(LOWER(REGEXP_REPLACE(BTRIM(lesson.room), '[[:space:]]+', ' ', 'g')), $2)>0
+			AND $2<>'' AND STRPOS(REPLACE(LOWER(REGEXP_REPLACE(BTRIM(lesson.room), '[[:space:]]+', ' ', 'g')), 'ё', 'е'), $2)>0
+			AND study_group.is_active
+			AND EXISTS (
+				SELECT 1 FROM universities study_university
+				WHERE study_university.id=lesson.university_id AND study_university.is_active
+			)
 			ORDER BY lesson.day_of_week, lesson.time_start, study_group.name`,
-		universityID, normalizedSearch(room))
+		universityID, searchtext.Normalize(room))
 	if err != nil {
 		return nil, fmt.Errorf("get lessons by university=%s room=%q: %w", universityID, room, err)
 	}
-	return lessons, nil
+	filtered := lessons[:0]
+	for _, lesson := range lessons {
+		if searchtext.MatchRoom(lesson.Room, room) {
+			filtered = append(filtered, lesson)
+		}
+	}
+	return filtered, nil
 }
 
 func (r *LessonRepository) UpdateLesson(ctx context.Context, lesson domain.Lesson) error {

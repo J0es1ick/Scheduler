@@ -39,6 +39,8 @@ func TestTeacherAndRoomQueriesAreScopedByUniversity(t *testing.T) {
 	suffix := uuid.NewString()
 	firstUniversity := "lesson-scope-a-" + suffix
 	secondUniversity := "lesson-scope-b-" + suffix
+	inactiveUniversity := "lesson-scope-inactive-" + suffix
+	universityIDs := []string{firstUniversity, secondUniversity, inactiveUniversity}
 	universityRepo := repository.NewUniversityRepository(db)
 	groupRepo := repository.NewGroupRepository(db)
 	semesterRepo := repository.NewSemesterRepository(db)
@@ -46,7 +48,7 @@ func TestTeacherAndRoomQueriesAreScopedByUniversity(t *testing.T) {
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cleanupCancel()
-		for _, universityID := range []string{firstUniversity, secondUniversity} {
+		for _, universityID := range universityIDs {
 			if _, cleanupErr := db.ExecContext(cleanupCtx, `DELETE FROM universities WHERE id=$1`, universityID); cleanupErr != nil {
 				t.Errorf("cleanup lesson scope university %s: %v", universityID, cleanupErr)
 			}
@@ -75,6 +77,41 @@ func TestTeacherAndRoomQueriesAreScopedByUniversity(t *testing.T) {
 			t.Fatalf("create lesson %s: %v", universityID, err)
 		}
 	}
+	inactiveGroupID := firstUniversity + "-inactive-group"
+	if _, err = groupRepo.CreateGroup(ctx, inactiveGroupID, firstUniversity, "INACTIVE", false); err != nil {
+		t.Fatalf("create inactive group: %v", err)
+	}
+	from := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, time.December, 31, 0, 0, 0, 0, time.UTC)
+	if err = lessonRepo.UpsertLesson(ctx, domain.Lesson{
+		ID: firstUniversity + "-inactive-lesson", UniversityID: firstUniversity,
+		SemesterID: firstUniversity + "-semester", DayOfWeek: 1,
+		TimeStart: "09:50", TimeEnd: "11:25", WeekType: domain.WeekTypeEvery,
+		Subject: "inactive group", Type: domain.LessonTypeLecture, Teacher: "Общий преподаватель",
+		Room: "А-101", GroupID: inactiveGroupID, ValidFrom: &from, ValidTo: &to, UpdatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("create lesson for inactive group: %v", err)
+	}
+	if _, err = universityRepo.CreateUniversity(ctx, inactiveUniversity, inactiveUniversity, inactiveUniversity, "", false); err != nil {
+		t.Fatalf("create inactive university: %v", err)
+	}
+	inactiveUniversityGroupID := inactiveUniversity + "-group"
+	inactiveUniversitySemesterID := inactiveUniversity + "-semester"
+	if _, err = groupRepo.CreateGroup(ctx, inactiveUniversityGroupID, inactiveUniversity, "TEST", true); err != nil {
+		t.Fatalf("create group in inactive university: %v", err)
+	}
+	if _, err = semesterRepo.CreateSemester(ctx, inactiveUniversitySemesterID, inactiveUniversity, "2026", from, to); err != nil {
+		t.Fatalf("create semester in inactive university: %v", err)
+	}
+	if err = lessonRepo.UpsertLesson(ctx, domain.Lesson{
+		ID: inactiveUniversity + "-lesson", UniversityID: inactiveUniversity,
+		SemesterID: inactiveUniversitySemesterID, DayOfWeek: 1,
+		TimeStart: "08:00", TimeEnd: "09:35", WeekType: domain.WeekTypeEvery,
+		Subject: "inactive university", Type: domain.LessonTypeLecture, Teacher: "Общий преподаватель",
+		Room: "А-101", GroupID: inactiveUniversityGroupID, ValidFrom: &from, ValidTo: &to, UpdatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("create lesson for inactive university: %v", err)
+	}
 	for _, query := range []struct {
 		name string
 		load func(context.Context, string, string) ([]domain.Lesson, error)
@@ -95,5 +132,30 @@ func TestTeacherAndRoomQueriesAreScopedByUniversity(t *testing.T) {
 				t.Fatalf("group name = %q, want TEST", lessons[0].GroupName)
 			}
 		})
+	}
+	for _, query := range []struct {
+		name string
+		load func(context.Context, string, string) ([]domain.Lesson, error)
+		term string
+	}{
+		{name: "teacher", load: lessonRepo.GetLessonsByTeacher, term: "Общий преподаватель"},
+		{name: "room", load: lessonRepo.GetLessonsByRoom, term: "А-101"},
+	} {
+		t.Run("inactive university "+query.name, func(t *testing.T) {
+			inactiveLessons, loadErr := query.load(ctx, inactiveUniversity, query.term)
+			if loadErr != nil {
+				t.Fatalf("load lessons for inactive university: %v", loadErr)
+			}
+			if len(inactiveLessons) != 0 {
+				t.Fatalf("inactive university returned lessons: %+v", inactiveLessons)
+			}
+		})
+	}
+	inactiveTeachers, err := lessonRepo.GetTeacherNames(ctx, inactiveUniversity)
+	if err != nil {
+		t.Fatalf("load teacher names for inactive university: %v", err)
+	}
+	if len(inactiveTeachers) != 0 {
+		t.Fatalf("inactive university returned teacher names: %+v", inactiveTeachers)
 	}
 }

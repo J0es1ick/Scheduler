@@ -38,6 +38,9 @@ func TestPublicGroupReferenceOnlyResolvesActiveUniversityAndGroup(t *testing.T) 
 	if group, err := groups.GetActiveGroupByToken(ctx, token); err != nil || group == nil || group.ID != groupID {
 		t.Fatalf("UTF-8 group token did not round-trip: %v %v", group, err)
 	}
+	if group, err := groups.GetActiveGroupByID(ctx, groupID); err != nil || group == nil || group.ID != groupID {
+		t.Fatalf("active group ID did not resolve: %v %v", group, err)
+	}
 	for _, invalid := range []string{"", "not-a-group-token", strings.Repeat("0", 16), "' OR 1=1 --"} {
 		if group, err := groups.GetActiveGroupByToken(ctx, invalid); err != nil || group != nil {
 			t.Fatalf("invalid token %q resolved group: %v %v", invalid, group, err)
@@ -49,6 +52,9 @@ func TestPublicGroupReferenceOnlyResolvesActiveUniversityAndGroup(t *testing.T) 
 	if group, err := groups.GetActiveGroupByToken(ctx, token); err != nil || group != nil {
 		t.Fatalf("inactive group is visible: %v %v", group, err)
 	}
+	if group, err := groups.GetActiveGroupByID(ctx, groupID); err != nil || group != nil {
+		t.Fatalf("inactive group ID is visible: %v %v", group, err)
+	}
 	if _, err := db.ExecContext(ctx, `UPDATE groups SET is_active=TRUE WHERE id=$1`, groupID); err != nil {
 		t.Fatal(err)
 	}
@@ -57,6 +63,12 @@ func TestPublicGroupReferenceOnlyResolvesActiveUniversityAndGroup(t *testing.T) 
 	}
 	if group, err := groups.GetActiveGroupByToken(ctx, token); err != nil || group != nil {
 		t.Fatalf("disabled university is visible: %v %v", group, err)
+	}
+	if group, err := groups.GetActiveGroupByID(ctx, groupID); err != nil || group != nil {
+		t.Fatalf("group in disabled university is visible: %v %v", group, err)
+	}
+	if group, err := groups.GetGroupByName(ctx, universityID, "4/147"); err != nil || group != nil {
+		t.Fatalf("group name in disabled university is visible: %v %v", group, err)
 	}
 }
 
