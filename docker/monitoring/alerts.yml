@@ -2,12 +2,26 @@ groups:
   - name: scheduler
     rules:
       - alert: SchedulerUnavailable
-        expr: probe_success{job="scheduler-readiness"} == 0
+        expr: probe_success{job="scheduler-readiness",component!~"parser-worker|privacy-worker"} == 0
         for: 2m
         labels:
           severity: critical
         annotations:
           summary: "Сервис Scheduler не готов к работе: {{ $labels.instance }}"
+      - alert: SchedulerParserWorkerUnavailable
+        expr: probe_success{job="scheduler-readiness",component="parser-worker"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Воркер обновления расписаний не готов к работе"
+      - alert: SchedulerPrivacyWorkerUnavailable
+        expr: probe_success{job="scheduler-readiness",component="privacy-worker"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Воркер удаления пользовательских данных не готов к работе"
       - alert: SchedulerMetricsUnavailable
         expr: up{job=~"scheduler|scheduler-host|scheduler-readiness"} == 0
         for: 3m
@@ -15,6 +29,13 @@ groups:
           severity: critical
         annotations:
           summary: "Мониторинг не получает метрики: {{ $labels.job }}"
+      - alert: SchedulerHealthDegraded
+        expr: scheduler_health == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Scheduler сообщает о деградации общего состояния"
       - alert: SchedulerQueueDelayed
         expr: scheduler_oldest_pending_seconds > 300
         for: 5m
@@ -71,6 +92,20 @@ groups:
           severity: critical
         annotations:
           summary: "Нет данных об успешном внешнем резервном копировании"
+      - alert: SchedulerOffsiteGenerationsLow
+        expr: scheduler_backup_generations{kind="offsite"} < scheduler_backup_min_generations{kind="offsite"}
+        for: 30h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Во внешнем хранилище недостаточно поколений резервных копий"
+      - alert: SchedulerOffsiteQuotaHigh
+        expr: scheduler_backup_storage_limit_bytes{kind="offsite"} > 0 and scheduler_backup_storage_bytes{kind="offsite"} / scheduler_backup_storage_limit_bytes{kind="offsite"} > 0.9
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Внешнее хранилище резервных копий заполнено более чем на 90%"
       - alert: SchedulerAlertDeliveryFailed
         expr: increase(alertmanager_notifications_failed_total[10m]) > 0
         for: 5m

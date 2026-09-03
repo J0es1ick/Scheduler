@@ -1,4 +1,4 @@
-name: Release image
+name: Release images
 
 on:
   push:
@@ -21,6 +21,8 @@ jobs:
       POSTGRES_SUPERUSER_PASSWORD: release-superuser-password
       DATABASE_MIGRATOR_PASSWORD: release-migrator-password
       DATABASE_BOT_PASSWORD: release-bot-database-password
+      DATABASE_PARSER_PASSWORD: release-parser-database-password
+      DATABASE_PRIVACY_PASSWORD: release-privacy-database-password
       DATABASE_ADMIN_PASSWORD: release-admin-database-password
       DATABASE_SITE_PASSWORD: release-site-database-password
       DATABASE_BACKUP_PASSWORD: release-backup-database-password
@@ -65,6 +67,17 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/scheduler
           tags: type=ref,event=tag
+      - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051
+        id: backup-candidate-meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/scheduler-backup
+          tags: type=raw,value=candidate-${{ github.sha }}
+          flavor: latest=false
+      - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051
+        id: backup-release-meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/scheduler-backup
+          tags: type=ref,event=tag
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         id: build
         with:
@@ -79,13 +92,46 @@ jobs:
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
             BUILD_TIME=${{ github.event.head_commit.timestamp }}
-      - name: Smoke-test the exact candidate image
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        id: backup-build
+        with:
+          context: .
+          file: docker/postgres-backup/Dockerfile
+          push: true
+          tags: ${{ steps.backup-candidate-meta.outputs.tags }}
+          labels: ${{ steps.backup-release-meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          provenance: mode=max
+          sbom: true
+      - name: Smoke-test the exact candidate images
         id: smoke
         env:
           SCHEDULER_IMAGE: ${{ steps.candidate-meta.outputs.tags }}@${{ steps.build.outputs.digest }}
+          SCHEDULER_BACKUP_IMAGE: ${{ steps.backup-candidate-meta.outputs.tags }}@${{ steps.backup-build.outputs.digest }}
         run: |
           cp .env.example .env
-          docker compose --profile ci up -d --no-build telegram-mock postgres admin site
+          docker pull "$SCHEDULER_BACKUP_IMAGE"
+          docker image inspect "$SCHEDULER_BACKUP_IMAGE" >/dev/null
+          docker compose --profile ci up -d --no-build telegram-mock postgres
+          for attempt in $(seq 1 60); do
+            if docker compose exec -T postgres pg_isready -U "$POSTGRES_SUPERUSER" -d "$DATABASE_NAME" >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              docker compose --profile ci ps
+              exit 1
+            fi
+            sleep 2
+          done
+          docker compose run --rm --no-deps --pull never \
+            --entrypoint /usr/local/bin/scheduler-postgres-bootstrap \
+            -e POSTGRES_SUPERUSER -e POSTGRES_SUPERUSER_PASSWORD \
+            -e DATABASE_MIGRATOR_PASSWORD -e DATABASE_BOT_PASSWORD \
+            -e DATABASE_PARSER_PASSWORD -e DATABASE_PRIVACY_PASSWORD \
+            -e DATABASE_ADMIN_PASSWORD -e DATABASE_SITE_PASSWORD \
+            -e DATABASE_BACKUP_PASSWORD -e DATABASE_RESTORE_PASSWORD \
+            backup
+          docker compose --profile ci up -d --no-build admin site
           for attempt in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:18080/api/ready >/dev/null \
               && curl --fail --silent http://127.0.0.1:18081/api/ready >/dev/null; then
@@ -99,48 +145,74 @@ jobs:
           done
           docker compose exec -T postgres psql -U postgres -d scheduler \
             -c "UPDATE data_sources SET is_enabled=FALSE"
-          docker compose --profile ci up -d --no-build bot
+          docker compose --profile ci up -d --no-build bot parser-worker privacy-worker
+          bot_ready=false
           for attempt in $(seq 1 60); do
-            if docker compose exec -T bot wget -q -O - http://127.0.0.1:8082/ready >/dev/null; then
-              exit 0
+            if docker compose exec -T bot wget -q -O - http://127.0.0.1:8082/ready >/dev/null \
+              && docker compose exec -T parser-worker wget -q -O - http://127.0.0.1:8083/ready >/dev/null \
+              && docker compose exec -T privacy-worker wget -q -O - http://127.0.0.1:8084/ready >/dev/null; then
+              bot_ready=true
+              break
             fi
             sleep 2
           done
-          docker compose --profile ci ps
-          exit 1
+          if [ "$bot_ready" != true ]; then
+            docker compose --profile ci ps
+            exit 1
+          fi
+          docker run --rm --entrypoint /usr/local/bin/scheduler-backup-tests "$SCHEDULER_BACKUP_IMAGE"
+          docker run --rm --entrypoint test "$SCHEDULER_BACKUP_IMAGE" -r /app/migrations/001_init.up.sql
       - name: Compose diagnostics
         if: failure() && steps.smoke.outcome == 'failure'
         env:
           SCHEDULER_IMAGE: ${{ steps.candidate-meta.outputs.tags }}@${{ steps.build.outputs.digest }}
+          SCHEDULER_BACKUP_IMAGE: ${{ steps.backup-candidate-meta.outputs.tags }}@${{ steps.backup-build.outputs.digest }}
         run: docker compose --profile ci logs --no-color --tail=200
       - name: Stop candidate smoke stack
         if: always() && (steps.smoke.outcome == 'success' || steps.smoke.outcome == 'failure')
         env:
           SCHEDULER_IMAGE: ${{ steps.candidate-meta.outputs.tags }}@${{ steps.build.outputs.digest }}
+          SCHEDULER_BACKUP_IMAGE: ${{ steps.backup-candidate-meta.outputs.tags }}@${{ steps.backup-build.outputs.digest }}
         run: docker compose --profile ci down -v --remove-orphans
-      - name: Promote the tested digest to the release tags
+      - name: Promote the tested digests to the release tags
         id: promote
         env:
-          CANDIDATE_IMAGE: ${{ steps.candidate-meta.outputs.tags }}
-          RELEASE_TAGS: ${{ steps.release-meta.outputs.tags }}
-          DIGEST: ${{ steps.build.outputs.digest }}
+          APP_CANDIDATE_IMAGE: ${{ steps.candidate-meta.outputs.tags }}
+          APP_RELEASE_TAGS: ${{ steps.release-meta.outputs.tags }}
+          APP_DIGEST: ${{ steps.build.outputs.digest }}
+          BACKUP_CANDIDATE_IMAGE: ${{ steps.backup-candidate-meta.outputs.tags }}
+          BACKUP_RELEASE_TAGS: ${{ steps.backup-release-meta.outputs.tags }}
+          BACKUP_DIGEST: ${{ steps.backup-build.outputs.digest }}
         shell: bash
         run: |
-          image="${CANDIDATE_IMAGE%:*}"
-          tags=()
-          while IFS= read -r tag; do
-            if [ -n "$tag" ]; then
-              tags+=(--tag "$tag")
+          promote() {
+            candidate="$1"
+            release_tags="$2"
+            digest="$3"
+            output_name="$4"
+            image="${candidate%:*}"
+            tags=()
+            while IFS= read -r tag; do
+              if [ -n "$tag" ]; then
+                tags+=(--tag "$tag")
+              fi
+            done <<< "$release_tags"
+            if [ "${#tags[@]}" -eq 0 ]; then
+              echo "No release tags were generated for $image."
+              exit 1
             fi
-          done <<< "$RELEASE_TAGS"
-          if [ "${#tags[@]}" -eq 0 ]; then
-            echo "No release tags were generated."
-            exit 1
-          fi
-          docker buildx imagetools create "${tags[@]}" "$image@$DIGEST"
-          echo "image=$image" >> "$GITHUB_OUTPUT"
+            docker buildx imagetools create "${tags[@]}" "$image@$digest"
+            echo "$output_name=$image" >> "$GITHUB_OUTPUT"
+          }
+          promote "$BACKUP_CANDIDATE_IMAGE" "$BACKUP_RELEASE_TAGS" "$BACKUP_DIGEST" backup_image
+          promote "$APP_CANDIDATE_IMAGE" "$APP_RELEASE_TAGS" "$APP_DIGEST" app_image
       - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
         with:
-          subject-name: ${{ steps.promote.outputs.image }}
+          subject-name: ${{ steps.promote.outputs.app_image }}
           subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
+        with:
+          subject-name: ${{ steps.promote.outputs.backup_image }}
+          subject-digest: ${{ steps.backup-build.outputs.digest }}
           push-to-registry: true

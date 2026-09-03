@@ -37,6 +37,9 @@ jobs:
           cache: true
       - name: Check Go module metadata
         run: go mod tidy -diff
+      - name: Test local secret rotation
+        shell: pwsh
+        run: ./scripts/rotate-local-secrets.tests.ps1
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: "22"
@@ -119,9 +122,11 @@ jobs:
       BOT_TOKEN: 123456:ci-only-not-a-real-token
       DATABASE_NAME: scheduler
       POSTGRES_SUPERUSER: postgres
-      POSTGRES_SUPERUSER_PASSWORD: ci-superuser-password
-      DATABASE_MIGRATOR_PASSWORD: ci-migrator-password
+      POSTGRES_SUPERUSER_PASSWORD: ci-superuser-password-long
+      DATABASE_MIGRATOR_PASSWORD: ci-migrator-password-long
       DATABASE_BOT_PASSWORD: ci-bot-database-password
+      DATABASE_PARSER_PASSWORD: ci-parser-database-password
+      DATABASE_PRIVACY_PASSWORD: ci-privacy-database-password
       DATABASE_ADMIN_PASSWORD: ci-admin-database-password
       DATABASE_SITE_PASSWORD: ci-site-database-password
       DATABASE_BACKUP_PASSWORD: ci-backup-database-password
@@ -129,6 +134,7 @@ jobs:
       ADMIN_METRICS_TOKEN: ci-metrics-token-with-at-least-32-characters
       BOT_TELEGRAM_API_URL: http://telegram-mock:8080
       BOT_TELEGRAM_API_ALLOW_INSECURE: "true"
+      BACKUP_OFFSITE_RETENTION_MODE: filesystem
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
@@ -156,7 +162,17 @@ jobs:
           MONITORING_METRICS_TOKEN_FILE: /tmp/scheduler-metrics-token
           MONITORING_WEBHOOK_URL_FILE: /tmp/scheduler-webhook-url
         run: |
-          docker compose -f docker-compose.yml -f docker-compose.production.yml -f docker-compose.monitoring.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.production.yml -f docker-compose.monitoring.yml config --format json > /tmp/scheduler-production-compose.json
+          jq -e '.services["postgres-bootstrap"].image == "scheduler-postgres-backup:local"' /tmp/scheduler-production-compose.json
+          jq -e '[.services["postgres-bootstrap"].volumes[]? | select(.source | endswith("/docker/postgres-bootstrap/bootstrap.sh"))] | length == 0' /tmp/scheduler-production-compose.json
+          jq -e '[.services.backup.volumes[]? | select(.source | endswith("/migration"))] | length == 0' /tmp/scheduler-production-compose.json
+          jq -e '[.services.backup.volumes[]? | select(.target == "/offsite" and .type == "bind" and .bind.create_host_path != true)] | length == 1' /tmp/scheduler-production-compose.json
+          jq -e '.services["backup-preflight"].image == "scheduler-postgres-backup:local"' /tmp/scheduler-production-compose.json
+          jq -e '[.services["backup-preflight"].volumes[]? | select(.target == "/offsite" and .type == "bind" and .read_only != true and .bind.create_host_path != true)] | length == 1' /tmp/scheduler-production-compose.json
+          jq -e '[.services.preflight.volumes[]? | select(.target == "/offsite")] | length == 0' /tmp/scheduler-production-compose.json
+          jq -e '.services["parser-worker"].environment.DATABASE_USER == "scheduler_parser" and (.services["parser-worker"].environment | has("BOT_TOKEN") | not)' /tmp/scheduler-production-compose.json
+          jq -e '.services["privacy-worker"].environment.DATABASE_USER == "scheduler_privacy" and (.services["privacy-worker"].environment | has("BOT_TOKEN") | not)' /tmp/scheduler-production-compose.json
+          jq -e '.services.sync.environment.DATABASE_USER == "scheduler_parser" and (.services.sync.environment | has("BOT_TOKEN") | not)' /tmp/scheduler-production-compose.json
           docker run --rm --entrypoint promtool -v "$PWD/docker/monitoring:/config:ro" prom/prometheus:v3.5.0 check rules /config/alerts.yml
           docker run --rm --entrypoint amtool -v "$PWD/docker/monitoring:/config:ro" prom/alertmanager:v0.28.1 check-config /config/alertmanager.yml
       - name: Run the one-shot migrator and start HTTP services
@@ -172,17 +188,19 @@ jobs:
           done
           docker compose --profile ci ps
           exit 1
-      - name: Start bot with deterministic empty parser workload
+      - name: Start runtime workers with deterministic empty parser workload
         run: |
           docker compose exec -T postgres psql -U postgres -d scheduler \
             -c "UPDATE data_sources SET is_enabled=FALSE"
-          docker compose --profile ci up -d bot
+          docker compose --profile ci up -d bot parser-worker privacy-worker
       - name: Wait for application readiness
         run: |
           for attempt in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:18080/api/ready >/dev/null \
               && curl --fail --silent http://127.0.0.1:18081/api/ready >/dev/null \
-              && docker compose exec -T bot wget -q -O - http://127.0.0.1:8082/ready >/dev/null; then
+              && docker compose exec -T bot wget -q -O - http://127.0.0.1:8082/ready >/dev/null \
+              && docker compose exec -T parser-worker wget -q -O - http://127.0.0.1:8083/ready >/dev/null \
+              && docker compose exec -T privacy-worker wget -q -O - http://127.0.0.1:8084/ready >/dev/null; then
               exit 0
             fi
             sleep 2
@@ -216,22 +234,38 @@ jobs:
           for package in database repository admin connectorapi; do
             test_database="scheduler_ci_${package}"
             docker compose exec -T postgres createdb -U postgres "$test_database"
-            export TEST_DATABASE_URL="postgres://postgres:ci-superuser-password@127.0.0.1:55432/${test_database}?sslmode=disable"
+            export TEST_DATABASE_URL="postgres://postgres:ci-superuser-password-long@127.0.0.1:55432/${test_database}?sslmode=disable"
             go test -race -p 1 -tags=integration "./internal/${package}" -count=1
             cleanup_test_database
             test_database=""
           done
           unset TEST_DATABASE_URL
           go test -race -tags=integration ./internal/site -count=1
-      - name: Create and restore-verify a backup
+      - name: Create and restore-verify a backup larger than the restore tmpfs
         run: |
-          docker compose up -d --build backup
+          docker compose stop bot parser-worker privacy-worker admin site
+          docker compose exec -T -e PGPASSWORD=ci-migrator-password-long postgres \
+            psql -h 127.0.0.1 -U scheduler_migrator -d scheduler -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE dr_payload (id bigint PRIMARY KEY, payload bytea NOT NULL);
+          INSERT INTO dr_payload
+          SELECT g, decode(string_agg(md5((g::bigint * 100 + n)::text), '' ORDER BY n), 'hex')
+          FROM generate_series(1, 100000) AS g
+          CROSS JOIN generate_series(1, 16) AS n
+          GROUP BY g;
+          CREATE FUNCTION dr_future_migration_probe() RETURNS integer LANGUAGE sql AS 'SELECT 1';
+          SQL
+          printf '%s\n' 'CREATE TABLE dr_pending_migration_probe (id bigint PRIMARY KEY);' \
+            > migration/999_ci_pending_migration.up.sql
+          docker compose build app-image backup
+          docker compose up -d --no-deps backup
           docker compose run --rm --no-deps --entrypoint /usr/local/bin/scheduler-backup-tests backup
           for attempt in $(seq 1 30); do
             if docker compose exec -T backup /usr/local/bin/scheduler-backup-health; then
+              docker compose exec -T backup /bin/sh -ec '. /usr/local/lib/scheduler-backup-generation-lib.sh; dump=$(select_newest_valid_backup /backups "scheduler-*.dump"); test -n "$dump"; size=$(stat -c %s "$dump"); echo "restore test dump size: $size bytes"; test "$size" -gt 16777216'
               docker compose exec -T \
                 -e DATABASE_USER=scheduler_restore \
                 -e DATABASE_PASSWORD=ci-restore-database-password \
+                -e BACKUP_VERIFY_RECEIPT_FILE=/backups/ci-verified-backup.receipt \
                 backup /usr/local/bin/scheduler-verify-backup
               exit 0
             fi
@@ -244,6 +278,7 @@ jobs:
           key_dir="$RUNNER_TEMP/scheduler-backup-keys"
           offsite_dir="$RUNNER_TEMP/scheduler-backup-offsite"
           mkdir -p "$key_dir" "$offsite_dir"
+          printf '%s\n' scheduler-offsite > "$offsite_dir/.scheduler-offsite"
           backup_uid=$(docker compose run --rm --no-deps --entrypoint id backup -u)
           backup_gid=$(docker compose run --rm --no-deps --entrypoint id backup -g)
           sudo chown "$backup_uid:$backup_gid" "$key_dir" "$offsite_dir"
@@ -266,6 +301,131 @@ jobs:
             -e BACKUP_OFFSITE_DIRECTORY=/offsite \
             -e BACKUP_AGE_IDENTITY_FILE=/keys/identity \
             backup
+      - name: Exercise full disaster recovery and the next migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          dr_database=scheduler_dr_verify
+          cleanup_dr() {
+            docker compose exec -T postgres dropdb -U postgres --if-exists --force "$dr_database" >/dev/null 2>&1 || true
+            docker compose exec -T postgres psql -U postgres -d postgres \
+              -c 'DROP ROLE IF EXISTS ci_external_admin_member, ci_forbidden_member, ci_privileged_parent, ci_forbidden_createdb, ci_forbidden_superuser' >/dev/null 2>&1 || true
+          }
+          trap cleanup_dr EXIT
+          run_embedded_bootstrap() {
+            docker compose run --rm --no-deps \
+              --entrypoint /usr/local/bin/scheduler-postgres-bootstrap \
+              -e POSTGRES_SUPERUSER -e POSTGRES_SUPERUSER_PASSWORD \
+              -e DATABASE_MIGRATOR_PASSWORD -e DATABASE_BOT_PASSWORD \
+              -e DATABASE_PARSER_PASSWORD -e DATABASE_PRIVACY_PASSWORD \
+              -e DATABASE_ADMIN_PASSWORD -e DATABASE_SITE_PASSWORD \
+              -e DATABASE_BACKUP_PASSWORD -e DATABASE_RESTORE_PASSWORD \
+              "$@" backup
+          }
+          if run_embedded_bootstrap \
+            -e POSTGRES_SUPERUSER=scheduler_bot \
+            -e POSTGRES_SUPERUSER_PASSWORD=ci-bot-database-password \
+            -e DATABASE_NAME=scheduler; then
+            echo "Bootstrap accepted a runtime role as the configured superuser."
+            exit 1
+          fi
+          docker compose exec -T postgres psql -U postgres -d postgres \
+            -c "CREATE ROLE ci_forbidden_superuser SUPERUSER LOGIN PASSWORD 'ci-forbidden-superuser-password'"
+          if run_embedded_bootstrap \
+            -e DATABASE_BOT_USER=ci_forbidden_superuser \
+            -e DATABASE_NAME=scheduler; then
+            echo "Bootstrap accepted an existing superuser as a runtime role."
+            exit 1
+          fi
+          docker compose exec -T postgres psql -U postgres -d postgres \
+            -c "CREATE ROLE ci_forbidden_createdb CREATEDB LOGIN"
+          if run_embedded_bootstrap \
+            -e DATABASE_BACKUP_USER=ci_forbidden_createdb \
+            -e DATABASE_NAME=scheduler; then
+            echo "Bootstrap accepted an existing CREATEDB runtime role."
+            exit 1
+          fi
+          createdb_preserved=$(docker compose exec -T postgres psql -U postgres -d postgres -tAc \
+            "SELECT rolcreatedb FROM pg_roles WHERE rolname='ci_forbidden_createdb'")
+          test "$createdb_preserved" = t
+          docker compose exec -T postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE ci_privileged_parent NOLOGIN" \
+            -c "CREATE ROLE ci_forbidden_member LOGIN" \
+            -c "GRANT ci_privileged_parent TO ci_forbidden_member"
+          if run_embedded_bootstrap \
+            -e DATABASE_ADMIN_USER=ci_forbidden_member \
+            -e DATABASE_NAME=scheduler; then
+            echo "Bootstrap accepted a runtime role with unexpected memberships."
+            exit 1
+          fi
+          docker compose exec -T postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE ci_external_admin_member LOGIN" \
+            -c "GRANT scheduler_admin TO ci_external_admin_member"
+          if run_embedded_bootstrap -e DATABASE_NAME=scheduler; then
+            echo "Bootstrap accepted an unexpected member of an application role."
+            exit 1
+          fi
+          docker compose exec -T postgres psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -c "REVOKE scheduler_admin FROM ci_external_admin_member"
+          docker compose exec -T \
+            -e DATABASE_USER=scheduler_restore \
+            -e DATABASE_PASSWORD=ci-restore-database-password \
+            -e RESTORE_TARGET_DATABASE="$dr_database" \
+            -e BACKUP_RESTORE_OFFSITE=false \
+            -e BACKUP_RESTORE_RECEIPT_FILE=/backups/ci-verified-backup.receipt \
+            backup /usr/local/bin/scheduler-restore-backup
+          run_embedded_bootstrap -e DATABASE_NAME="$dr_database"
+          docker compose run --rm --no-deps -e DATABASE_NAME="$dr_database" migrator
+          pending_migration_check=$(docker compose exec -T postgres psql -U postgres -d "$dr_database" -tAc "
+            SELECT EXISTS (
+              SELECT 1 FROM schema_migrations WHERE name='999_ci_pending_migration.up.sql'
+            ) AND EXISTS (
+              SELECT 1 FROM information_schema.tables
+              WHERE table_schema='public' AND table_name='dr_pending_migration_probe'
+            )")
+          test "$pending_migration_check" = t
+          owner_check=$(docker compose exec -T postgres psql -U postgres -d "$dr_database" -tAc "
+            SELECT NOT EXISTS (
+              SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+              WHERE n.nspname='public' AND c.relkind IN ('r','p','S','v','m') AND pg_get_userbyid(c.relowner) <> 'scheduler_migrator'
+              UNION ALL
+              SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+              WHERE n.nspname='public' AND p.prokind IN ('f','p') AND pg_get_userbyid(p.proowner) <> 'scheduler_migrator'
+            )")
+          test "$owner_check" = t
+          role_check=$(docker compose exec -T postgres psql -U postgres -d "$dr_database" -tAc "
+            SELECT COUNT(*)=9 AND bool_and(
+              NOT rolsuper AND NOT rolcreaterole AND NOT rolreplication AND NOT rolbypassrls
+              AND (rolname='scheduler_restore' OR NOT rolcreatedb)
+            )
+            FROM pg_roles
+            WHERE rolname IN ('scheduler_migrator','scheduler_bot','scheduler_parser','scheduler_privacy','scheduler_admin','scheduler_site','scheduler_public_reader','scheduler_backup','scheduler_restore')")
+          test "$role_check" = t
+          docker compose exec -T -e PGPASSWORD=ci-site-database-password postgres \
+            psql -h 127.0.0.1 -U scheduler_site -d "$dr_database" -v ON_ERROR_STOP=1 \
+            -c 'SELECT * FROM public_site_statistics' \
+            -c 'SELECT * FROM public_site_universities LIMIT 1' \
+            -c 'SELECT * FROM public_site_sources LIMIT 1'
+          if docker compose exec -T -e PGPASSWORD=ci-site-database-password postgres \
+            psql -h 127.0.0.1 -U scheduler_site -d "$dr_database" -c 'SELECT * FROM users LIMIT 1'; then
+            echo "Site role retained access to a private table after restore."
+            exit 1
+          fi
+          docker compose exec -T -e PGPASSWORD=ci-bot-database-password postgres \
+            psql -h 127.0.0.1 -U scheduler_bot -d "$dr_database" -v ON_ERROR_STOP=1 -c 'SELECT COUNT(*) FROM users'
+          docker compose exec -T -e PGPASSWORD=ci-parser-database-password postgres \
+            psql -h 127.0.0.1 -U scheduler_parser -d "$dr_database" -v ON_ERROR_STOP=1 -c 'SELECT COUNT(*) FROM data_sources'
+          docker compose exec -T -e PGPASSWORD=ci-privacy-database-password postgres \
+            psql -h 127.0.0.1 -U scheduler_privacy -d "$dr_database" -v ON_ERROR_STOP=1 -c 'SELECT COUNT(*) FROM privacy_deletion_requests'
+          docker compose exec -T -e PGPASSWORD=ci-admin-database-password postgres \
+            psql -h 127.0.0.1 -U scheduler_admin -d "$dr_database" -v ON_ERROR_STOP=1 -c 'SELECT COUNT(*) FROM data_sources'
+          docker compose exec -T -e PGPASSWORD=ci-backup-database-password postgres \
+            psql -h 127.0.0.1 -U scheduler_backup -d "$dr_database" -v ON_ERROR_STOP=1 -c 'SELECT COUNT(*) FROM schema_migrations'
+          docker compose exec -T -e PGPASSWORD=ci-migrator-password-long postgres \
+            psql -h 127.0.0.1 -U scheduler_migrator -d "$dr_database" -v ON_ERROR_STOP=1 \
+            -c "CREATE OR REPLACE FUNCTION dr_future_migration_probe() RETURNS integer LANGUAGE sql AS 'SELECT 2'" \
+            -c 'CREATE TABLE dr_future_migration_table (id bigint PRIMARY KEY)' \
+            -c 'SELECT dr_future_migration_probe()'
       - name: Compose diagnostics
         if: failure()
         run: docker compose logs --no-color --tail=200
@@ -276,3 +436,163 @@ jobs:
         if: always()
         shell: bash
         run: sudo rm -rf -- "${RUNNER_TEMP:?}/scheduler-backup-keys" "${RUNNER_TEMP:?}/scheduler-backup-offsite"
+
+  postgres-tls:
+    name: Production PostgreSQL TLS
+    runs-on: ubuntu-latest
+    env:
+      COMPOSE_FILE: docker-compose.yml:docker-compose.tls-ci.yml
+      TLS_CERT_DIR: /tmp/scheduler-postgres-tls
+      BOT_TOKEN: 123456:ci-only-not-a-real-token
+      BOT_TELEGRAM_API_URL: http://telegram-mock:8080
+      BOT_TELEGRAM_API_ALLOW_INSECURE: "true"
+      DATABASE_NAME: scheduler
+      POSTGRES_SUPERUSER: postgres
+      POSTGRES_SUPERUSER_PASSWORD: ci-tls-superuser-password-unique
+      DATABASE_MIGRATOR_PASSWORD: ci-tls-migrator-password-unique
+      DATABASE_BOT_PASSWORD: ci-tls-bot-password-unique-value
+      DATABASE_PARSER_PASSWORD: ci-tls-parser-password-unique-value
+      DATABASE_PRIVACY_PASSWORD: ci-tls-privacy-password-unique-value
+      DATABASE_ADMIN_PASSWORD: ci-tls-admin-password-unique
+      DATABASE_SITE_PASSWORD: ci-tls-site-password-unique-value
+      DATABASE_BACKUP_PASSWORD: ci-tls-backup-password-unique
+      DATABASE_RESTORE_PASSWORD: ci-tls-restore-password-unique
+      ADMIN_METRICS_TOKEN: ci-tls-metrics-token-with-at-least-32-characters
+      BACKUP_OFFSITE_RETENTION_MODE: filesystem
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Create a private test CA and PostgreSQL certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$TLS_CERT_DIR"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -subj '/CN=Scheduler CI CA' \
+            -keyout "$TLS_CERT_DIR/ca.key" -out "$TLS_CERT_DIR/ca.crt"
+          openssl req -newkey rsa:2048 -nodes -subj '/CN=postgres' \
+            -keyout "$TLS_CERT_DIR/server.key" -out "$TLS_CERT_DIR/server.csr"
+          printf '%s\n' 'subjectAltName=DNS:postgres' 'extendedKeyUsage=serverAuth' > "$TLS_CERT_DIR/server.ext"
+          openssl x509 -req -days 1 -sha256 \
+            -in "$TLS_CERT_DIR/server.csr" \
+            -CA "$TLS_CERT_DIR/ca.crt" -CAkey "$TLS_CERT_DIR/ca.key" -CAcreateserial \
+            -extfile "$TLS_CERT_DIR/server.ext" -out "$TLS_CERT_DIR/server.crt"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -subj '/CN=Wrong Scheduler CI CA' \
+            -keyout "$TLS_CERT_DIR/wrong-ca.key" -out "$TLS_CERT_DIR/wrong-ca.crt"
+          chmod 0644 "$TLS_CERT_DIR"/*.crt
+          chmod 0600 "$TLS_CERT_DIR"/*.key
+      - run: cp .env.example .env
+      - name: Start the application through verify-full connections
+        run: docker compose --profile ci up -d --build telegram-mock postgres admin site
+      - name: Wait for TLS-backed services
+        shell: bash
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:18080/api/ready >/dev/null \
+              && curl --fail --silent http://127.0.0.1:18081/api/ready >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose ps
+          exit 1
+      - name: Start TLS-backed runtime workers
+        shell: bash
+        run: |
+          docker compose exec -T postgres psql -U postgres -d scheduler \
+            -c "UPDATE data_sources SET is_enabled=FALSE"
+          docker compose --profile ci up -d bot parser-worker privacy-worker
+          for attempt in $(seq 1 60); do
+            if docker compose exec -T bot wget -q -O - http://127.0.0.1:8082/ready >/dev/null \
+              && docker compose exec -T parser-worker wget -q -O - http://127.0.0.1:8083/ready >/dev/null \
+              && docker compose exec -T privacy-worker wget -q -O - http://127.0.0.1:8084/ready >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose ps
+          exit 1
+      - name: Run the production configuration preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          offsite="$RUNNER_TEMP/scheduler-tls-offsite"
+          recipient="$(docker compose run --rm --no-deps --entrypoint /bin/sh backup -c 'identity=/tmp/age-identity-$$; age-keygen --output "$identity" >/dev/null 2>&1; age-keygen -y "$identity"')"
+          mkdir -p "$offsite"
+          printf '%s\n' scheduler-offsite > "$offsite/.scheduler-offsite"
+          backup_uid="$(docker compose run --rm --no-deps --entrypoint id backup -u)"
+          backup_gid="$(docker compose run --rm --no-deps --entrypoint id backup -g)"
+          sudo chown -R "$backup_uid:$backup_gid" "$offsite"
+          sudo chmod 0700 "$offsite"
+          docker compose run --rm --no-deps \
+            -v "$TLS_CERT_DIR/ca.crt:/run/certs/ca.crt:ro" \
+            -e DEPLOYMENT_ENV=production \
+            -e DATABASE_HOST=postgres -e DATABASE_PORT=5432 -e DATABASE_NAME=scheduler \
+            -e DATABASE_SSLMODE=verify-full -e PGSSLROOTCERT=/run/certs/ca.crt \
+            -e POSTGRES_SUPERUSER=postgres \
+            -e DATABASE_MIGRATOR_USER=scheduler_migrator -e DATABASE_MIGRATOR_PASSWORD \
+            -e DATABASE_BOT_USER=scheduler_bot -e DATABASE_BOT_PASSWORD \
+            -e DATABASE_PARSER_USER=scheduler_parser -e DATABASE_PARSER_PASSWORD \
+            -e DATABASE_PRIVACY_USER=scheduler_privacy -e DATABASE_PRIVACY_PASSWORD \
+            -e DATABASE_ADMIN_USER=scheduler_admin -e DATABASE_ADMIN_PASSWORD \
+            -e DATABASE_SITE_USER=scheduler_site -e DATABASE_SITE_PASSWORD \
+            -e DATABASE_BACKUP_USER=scheduler_backup -e DATABASE_BACKUP_PASSWORD \
+            -e DATABASE_RESTORE_USER=scheduler_restore -e DATABASE_RESTORE_PASSWORD \
+            -e ADMIN_COOKIE_SECURE=true -e ADMIN_ACCESS_LOGIN_ENABLED=false \
+            -e ADMIN_PUBLIC_URL=https://admin.example.test -e SITE_PUBLIC_URL=https://scheduler.example.test \
+            -e ADMIN_METRICS_TOKEN -e BOT_TOKEN=123456:ci-production-preflight-token-long-enough \
+            -e BOT_TELEGRAM_API_ALLOW_INSECURE=false \
+            --entrypoint /app/scheduler-preflight app-image
+          docker compose run --rm --no-deps \
+            -v "$offsite:/offsite" \
+            -e DEPLOYMENT_ENV=production \
+            -e BACKUP_REQUIRE_OFFSITE=true -e BACKUP_OFFSITE_DIRECTORY=/offsite \
+            -e BACKUP_OFFSITE_SENTINEL_FILE=/offsite/.scheduler-offsite \
+            -e BACKUP_AGE_RECIPIENT="$recipient" \
+            -e BACKUP_INTERVAL_SECONDS=86400 -e BACKUP_MAX_AGE_SECONDS=90000 \
+            -e BACKUP_RETENTION_DAYS=14 -e BACKUP_RETRY_SECONDS=300 \
+            -e BACKUP_OFFSITE_MAX_AGE_SECONDS=90000 \
+            -e BACKUP_OFFSITE_RETENTION_MODE=filesystem \
+            -e BACKUP_OFFSITE_RETENTION_DAYS=90 -e BACKUP_OFFSITE_MIN_GENERATIONS=7 \
+            -e BACKUP_OFFSITE_MAX_BYTES=0 \
+            --entrypoint /usr/local/bin/scheduler-backup-preflight backup
+      - name: Verify TLS identity and reject plaintext
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose exec -T postgres sh -ec \
+            'PGPASSWORD="$POSTGRES_PASSWORD" PGSSLMODE=verify-full PGSSLROOTCERT=/tls-source/ca.crt psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "SELECT 1"'
+          if docker compose exec -T postgres sh -ec \
+            'PGPASSWORD="$POSTGRES_PASSWORD" PGSSLMODE=disable psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT 1"'; then
+            echo 'PostgreSQL accepted an unencrypted network connection.'
+            exit 1
+          fi
+          if docker compose exec -T postgres sh -ec \
+            'PGPASSWORD="$POSTGRES_PASSWORD" PGSSLMODE=verify-full PGSSLROOTCERT=/tls-source/wrong-ca.crt psql -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT 1"'; then
+            echo 'PostgreSQL accepted a certificate signed by an unknown CA.'
+            exit 1
+          fi
+          if docker compose exec -T postgres sh -ec \
+            'PGPASSWORD="$POSTGRES_PASSWORD" PGSSLMODE=verify-full PGSSLROOTCERT=/tls-source/ca.crt psql -h postgres-wrong-host -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT 1"'; then
+            echo 'PostgreSQL accepted a certificate for the wrong hostname.'
+            exit 1
+          fi
+      - name: Verify backup and restore clients over TLS
+        shell: bash
+        run: |
+          docker compose run --rm --no-deps --entrypoint /bin/sh backup -ec \
+            'export PGPASSWORD="$DATABASE_PASSWORD" PGSSLMODE="$DATABASE_SSLMODE" PGSSLROOTCERT; . /usr/local/lib/scheduler-backup-lib.sh; create_local_backup'
+          docker compose run --rm --no-deps \
+            -e DATABASE_USER=scheduler_restore \
+            -e DATABASE_PASSWORD="$DATABASE_RESTORE_PASSWORD" \
+            --entrypoint /usr/local/bin/scheduler-verify-backup backup
+      - name: TLS diagnostics
+        if: failure()
+        run: docker compose logs --no-color --tail=200
+      - name: Stop TLS Compose
+        if: always()
+        run: docker compose --profile ci down -v --remove-orphans
+      - name: Remove TLS material
+        if: always()
+        shell: bash
+        run: sudo rm -rf -- "$TLS_CERT_DIR" "$RUNNER_TEMP/scheduler-tls-offsite"

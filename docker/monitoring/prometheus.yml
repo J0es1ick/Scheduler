@@ -25,7 +25,21 @@ scrape_configs:
     params:
       module: [http_ready]
     static_configs:
-      - targets: [http://admin:8080/api/ready, http://site:8080/api/ready, http://bot:8082/ready]
+      - targets: [http://admin:8080/api/ready]
+        labels:
+          component: admin
+      - targets: [http://site:8080/api/ready]
+        labels:
+          component: site
+      - targets: [http://bot:8082/ready]
+        labels:
+          component: bot
+      - targets: [http://parser-worker:8083/ready]
+        labels:
+          component: parser-worker
+      - targets: [http://privacy-worker:8084/ready]
+        labels:
+          component: privacy-worker
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target

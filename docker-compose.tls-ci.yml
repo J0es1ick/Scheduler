@@ -1,0 +1,76 @@
+services:
+  postgres:
+    entrypoint: ["/bin/sh", "/tls-config/start.sh"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ${TLS_CERT_DIR:?TLS_CERT_DIR is required}:/tls-source:ro
+      - ./docker/postgres-tls-ci:/tls-config:ro
+    networks:
+      default:
+        aliases:
+          - postgres-wrong-host
+
+  postgres-bootstrap:
+    environment:
+      DATABASE_SSLMODE: verify-full
+      PGSSLROOTCERT: /run/certs/ca.crt
+    volumes:
+      - ${TLS_CERT_DIR:?TLS_CERT_DIR is required}/ca.crt:/run/certs/ca.crt:ro
+
+  migrator:
+    environment:
+      DATABASE_SSLMODE: verify-full
+      PGSSLROOTCERT: /run/certs/ca.crt
+    volumes:
+      - ${TLS_CERT_DIR:?TLS_CERT_DIR is required}/ca.crt:/run/certs/ca.crt:ro
+
+  bot:
+    environment:
+      DATABASE_SSLMODE: verify-full
+      PGSSLROOTCERT: /run/certs/ca.crt
+    volumes:
+      - ${TLS_CERT_DIR:?TLS_CERT_DIR is required}/ca.crt:/run/certs/ca.crt:ro
+
+  parser-worker:
+    environment:
+      DATABASE_SSLMODE: verify-full
+      PGSSLROOTCERT: /run/certs/ca.crt
+    volumes:
+      - ${TLS_CERT_DIR:?TLS_CERT_DIR is required}/ca.crt:/run/certs/ca.crt:ro
+
+  privacy-worker:
+    environment:
+      DATABASE_SSLMODE: verify-full
+      PGSSLROOTCERT: /run/certs/ca.crt
+    volumes:
+      - ${TLS_CERT_DIR:?TLS_CERT_DIR is required}/ca.crt:/run/certs/ca.crt:ro
+
+  sync:
+    environment:
+      DATABASE_SSLMODE: verify-full
+      PGSSLROOTCERT: /run/certs/ca.crt
+    volumes:
+      - ${TLS_CERT_DIR:?TLS_CERT_DIR is required}/ca.crt:/run/certs/ca.crt:ro
+
+  admin:
+    environment:
+      DATABASE_SSLMODE: verify-full
+      PGSSLROOTCERT: /run/certs/ca.crt
+    volumes:
+      - ${TLS_CERT_DIR:?TLS_CERT_DIR is required}/ca.crt:/run/certs/ca.crt:ro
+
+  site:
+    environment:
+      DATABASE_SSLMODE: verify-full
+      PGSSLROOTCERT: /run/certs/ca.crt
+    volumes:
+      - ${TLS_CERT_DIR:?TLS_CERT_DIR is required}/ca.crt:/run/certs/ca.crt:ro
+
+  backup:
+    environment:
+      DATABASE_SSLMODE: verify-full
+      PGSSLROOTCERT: /run/certs/ca.crt
+    volumes:
+      - pgbackups:/backups
+      - ./migration:/app/migrations:ro
+      - ${TLS_CERT_DIR:?TLS_CERT_DIR is required}/ca.crt:/run/certs/ca.crt:ro

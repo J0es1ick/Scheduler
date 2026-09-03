@@ -79,6 +79,10 @@ services:
       DATABASE_MIGRATOR_PASSWORD: ${DATABASE_MIGRATOR_PASSWORD:?DATABASE_MIGRATOR_PASSWORD is required}
       DATABASE_BOT_USER: ${DATABASE_BOT_USER:-scheduler_bot}
       DATABASE_BOT_PASSWORD: ${DATABASE_BOT_PASSWORD:?DATABASE_BOT_PASSWORD is required}
+      DATABASE_PARSER_USER: ${DATABASE_PARSER_USER:-scheduler_parser}
+      DATABASE_PARSER_PASSWORD: ${DATABASE_PARSER_PASSWORD:?DATABASE_PARSER_PASSWORD is required}
+      DATABASE_PRIVACY_USER: ${DATABASE_PRIVACY_USER:-scheduler_privacy}
+      DATABASE_PRIVACY_PASSWORD: ${DATABASE_PRIVACY_PASSWORD:?DATABASE_PRIVACY_PASSWORD is required}
       DATABASE_ADMIN_USER: ${DATABASE_ADMIN_USER:-scheduler_admin}
       DATABASE_ADMIN_PASSWORD: ${DATABASE_ADMIN_PASSWORD:?DATABASE_ADMIN_PASSWORD is required}
       DATABASE_SITE_USER: ${DATABASE_SITE_USER:-scheduler_site}
@@ -109,6 +113,8 @@ services:
       DATABASE_APPLY_RUNTIME_GRANTS: "true"
       DATABASE_BOT_USER: ${DATABASE_BOT_USER:-scheduler_bot}
       DATABASE_ADMIN_USER: ${DATABASE_ADMIN_USER:-scheduler_admin}
+      DATABASE_PARSER_USER: ${DATABASE_PARSER_USER:-scheduler_parser}
+      DATABASE_PRIVACY_USER: ${DATABASE_PRIVACY_USER:-scheduler_privacy}
     command: ["/app/scheduler-migrate"]
     depends_on:
       app-image:
@@ -157,6 +163,77 @@ services:
       timeout: 3s
       retries: 3
       start_period: 20s
+    logging: *default-logging
+
+  parser-worker:
+    <<: *app-runtime
+    container_name: scheduler-parser-worker
+    restart: unless-stopped
+    init: true
+    environment:
+      <<: *database-environment
+      DATABASE_USER: ${DATABASE_PARSER_USER:-scheduler_parser}
+      DATABASE_PASSWORD: ${DATABASE_PARSER_PASSWORD:?DATABASE_PARSER_PASSWORD is required}
+      WORKER_HEALTH_PORT: 8083
+    command: ["/app/scheduler-parser-worker"]
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    stop_grace_period: 45s
+    mem_limit: 768m
+    cpus: 2.0
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8083/ready >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    logging: *default-logging
+
+  privacy-worker:
+    <<: *app-runtime
+    container_name: scheduler-privacy-worker
+    restart: unless-stopped
+    init: true
+    environment:
+      <<: *database-environment
+      DATABASE_USER: ${DATABASE_PRIVACY_USER:-scheduler_privacy}
+      DATABASE_PASSWORD: ${DATABASE_PRIVACY_PASSWORD:?DATABASE_PRIVACY_PASSWORD is required}
+      WORKER_HEALTH_PORT: 8084
+    command: ["/app/scheduler-privacy-worker"]
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    stop_grace_period: 45s
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8084/ready >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    logging: *default-logging
+
+  sync:
+    <<: *app-runtime
+    profiles: ["tools"]
+    container_name: scheduler-sync
+    restart: "no"
+    environment:
+      <<: *database-environment
+      DATABASE_USER: ${DATABASE_PARSER_USER:-scheduler_parser}
+      DATABASE_PASSWORD: ${DATABASE_PARSER_PASSWORD:?DATABASE_PARSER_PASSWORD is required}
+    entrypoint: ["/app/scheduler-sync"]
+    command: []
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    mem_limit: 768m
+    cpus: 2.0
+    pids_limit: 256
     logging: *default-logging
 
   admin:
@@ -223,8 +300,10 @@ services:
     logging: *default-logging
 
   backup:
-    build: ./docker/postgres-backup
-    image: scheduler-postgres-backup:local
+    build:
+      context: .
+      dockerfile: docker/postgres-backup/Dockerfile
+    image: ${SCHEDULER_BACKUP_IMAGE:-scheduler-postgres-backup:local}
     container_name: scheduler-backup
     restart: unless-stopped
     read_only: true
@@ -242,8 +321,13 @@ services:
       BACKUP_MAX_AGE_SECONDS: ${BACKUP_MAX_AGE_SECONDS:-90000}
       BACKUP_OFFSITE_MAX_AGE_SECONDS: ${BACKUP_OFFSITE_MAX_AGE_SECONDS:-90000}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_OFFSITE_RETENTION_MODE: ${BACKUP_OFFSITE_RETENTION_MODE:-filesystem}
+      BACKUP_OFFSITE_RETENTION_DAYS: ${BACKUP_OFFSITE_RETENTION_DAYS:-90}
+      BACKUP_OFFSITE_MIN_GENERATIONS: ${BACKUP_OFFSITE_MIN_GENERATIONS:-7}
+      BACKUP_OFFSITE_MAX_BYTES: ${BACKUP_OFFSITE_MAX_BYTES:-0}
       BACKUP_RETRY_SECONDS: ${BACKUP_RETRY_SECONDS:-300}
       BACKUP_OFFSITE_DIRECTORY: ${BACKUP_OFFSITE_DIRECTORY:-}
+      BACKUP_OFFSITE_SENTINEL_FILE: ${BACKUP_OFFSITE_SENTINEL_FILE:-}
       BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-}
       BACKUP_REQUIRE_OFFSITE: ${BACKUP_REQUIRE_OFFSITE:-false}
       MIGRATIONS_PATH: /app/migrations
