@@ -16,18 +16,22 @@ PostgreSQL, HTTP-адресом альтернативного Telegram API, о�
 Обязательные настройки production-файла:
 
 - `SCHEDULER_IMAGE` — проверенный образ приложения; для выпуска используйте ссылку с `@sha256:...`.
-- `SCHEDULER_BACKUP_IMAGE` — предварительно собранный и проверенный образ из `docker/postgres-backup`.
+- `SCHEDULER_BACKUP_IMAGE` — опубликованный вместе с приложением образ backup/restore; закрепляйте его
+  отдельным `@sha256:...`. Он содержит bootstrap и неизменяемый набор миграций того же выпуска.
 - `PRODUCTION_DATABASE_HOST`, `PRODUCTION_DATABASE_PORT`, `DATABASE_NAME` — существующая внешняя БД.
 - `PRODUCTION_DB_CA_FILE` — абсолютный путь к PEM-сертификату CA PostgreSQL на хосте.
-- Все шесть пар `DATABASE_<ROLE>_USER` / `DATABASE_<ROLE>_PASSWORD`: разные роли и разные пароли
-  длиной от 24 символов. Роли: `MIGRATOR`, `BOT`, `ADMIN`, `SITE`, `BACKUP`, `RESTORE`.
+- Все восемь пар `DATABASE_<ROLE>_USER` / `DATABASE_<ROLE>_PASSWORD`: разные роли и разные пароли
+  длиной от 24 символов. Роли: `MIGRATOR`, `BOT`, `ADMIN`, `PARSER`, `PRIVACY`, `SITE`, `BACKUP`, `RESTORE`.
 - `POSTGRES_SUPERUSER` / `POSTGRES_SUPERUSER_PASSWORD` используются только одноразовым bootstrap
   для создания ролей и передачи владения БД. Runtime-контейнеры их не получают.
 - `BOT_TOKEN`, `ADMIN_METRICS_TOKEN`, `ADMIN_PUBLIC_URL`, `SITE_PUBLIC_URL` — реальные секреты
   и публичные HTTPS-адреса. Метрики используют отдельный токен от 32 символов.
 - `PRODUCTION_OFFSITE_PATH` — существующее подключённое внешнее хранилище, доступное backup-процессу
   на запись. Обычная папка на том же диске не является offsite-копией: проверка видит доступность
-  каталога, но не может доказать независимость сервера хранения.
+  каталога, но не может доказать независимость сервера хранения. Compose использует bind mount с
+  `create_host_path=false`: отсутствующий или отключившийся путь останавливает развёртывание вместо
+  создания пустой локальной папки. На самом внешнем хранилище должен существовать marker-файл
+  `.scheduler-offsite`; без него preflight, backup и healthcheck завершаются ошибкой.
 - `BACKUP_AGE_RECIPIENT` — публичный получатель `age`. Закрытый ключ хранится отдельно и нужен
   только при восстановлении. Интервал backup — от 60 секунд до суток, допустимый возраст —
   больше интервала, но не больше двух суток.
@@ -35,12 +39,16 @@ PostgreSQL, HTTP-адресом альтернативного Telegram API, о�
 ```powershell
 docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml config --quiet
 docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml run --rm --no-deps preflight
-docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml up -d bot admin site backup
+docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml run --rm --no-deps backup-preflight
+docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml up -d bot parser-worker privacy-worker admin site backup
 docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml run --rm --no-deps preflight --database
 ```
 
-Следующий шаг выполняется только после успешного предыдущего. Preflight автоматически включён и в
-цепочку запуска перед bootstrap. Он проверяет параметры, CA, отдельные роли и настройки backup;
+Следующий шаг выполняется только после успешного предыдущего. Оба preflight автоматически включены
+в цепочку запуска перед bootstrap. Приложение проверяет параметры, CA, заданное имя superuser,
+отдельные роли и политику backup. Отдельный `backup-preflight` запускается из backup-образа под тем же
+UID, что и постоянный backup-процесс, и проверяет marker, запись, flush, переименование, чтение и
+удаление служебного пробного файла во внешнем хранилище. Bootstrap до любых изменений сверяет роль с фактической PostgreSQL-сессией;
 режим `--database` после миграций проверяет реальные TLS-соединения runtime-ролей и целостность
 подписок. Встроенный контейнер PostgreSQL не запускается. Сервисы получают сертификат только для
 чтения, Secure-cookie включены, вход по аварийному ключу выключен. HTTPS-терминацию и доверенные
@@ -49,14 +57,15 @@ HTTPS снаружи, вход через Telegram и восстановлени
 
 ## Права БД и обновление исторических данных
 
-Bootstrap создаёт роли, но не выдаёт bot/admin право изменения всех будущих таблиц. После каждой
-миграции migrator транзакционно устанавливает явный список разрешений. Bot обслуживает подписки,
-парсинг и очереди, но не назначает административные роли, не создаёт сессии админки,
-не читает CSRF-секреты и не редактирует содержимое
-ручных исправлений. Admin управляет источниками и ручными изменениями, но не переписывает журнал
-миграций и состояние воркеров. Сайт читает только публичные представления, backup — данные для
-дампа. `DATABASE_APPLY_RUNTIME_GRANTS=true` и имена bot/admin-ролей автоматически передаются
-контейнеру migrator. При ручном запуске migrator эти переменные нужно передать явно.
+Bootstrap создаёт роли, но не выдаёт runtime-процессам право изменения всех будущих таблиц. После
+каждой миграции migrator транзакционно устанавливает явный список разрешений. Bot обслуживает
+Telegram, профили, подписки и очереди доставки; parser-worker получает и публикует расписания;
+privacy-worker исполняет только очередь удаления профилей через ограниченную серверную функцию.
+Bot не назначает административные роли, не создаёт сессии админки, не читает CSRF-секреты и не
+редактирует содержимое ручных исправлений. Admin управляет источниками и ручными изменениями, но не
+переписывает журнал миграций и состояние воркеров. Сайт читает только публичные представления,
+backup — данные для дампа. `DATABASE_APPLY_RUNTIME_GRANTS=true` и имена runtime-ролей автоматически
+передаются контейнеру migrator. При ручном запуске migrator эти переменные нужно передать явно.
 
 Миграция 038 добавляет недостающие подписки для сохранённых основных групп и удаляет только
 подписки на уже отсутствующие группы. Существующие настройки формата и подгруппы сохраняются,
@@ -214,7 +223,8 @@ Compose smoke в CI обращается именно к `/ready`. Для нез
 ## Восстановление публикаций при обновлении
 
 В Compose роли создаёт одноразовый `postgres-bootstrap`, а миграции и восстановление публикаций
-выполняет отдельный одноразовый сервис `migrator`. `bot`, `admin`, `site` и `backup` запускаются
+выполняет отдельный одноразовый сервис `migrator`. `bot`, `parser-worker`, `privacy-worker`,
+`admin`, `site` и `backup` запускаются
 только после их успешного завершения. Обычные процессы выполняют только read-only-проверку:
 убеждаются, что применены все встроенные миграции, совпадают SHA-256 и очередь восстановления пуста.
 Они не имеют DDL-прав и не пытаются конкурировать за длительное восстановление. Каждая применённая миграция хранит SHA-256; изменение уже применённого SQL
@@ -252,8 +262,10 @@ Compose-сервис `backup` создаёт резервные копии Postg
 внешнее хранилище имеют отдельные маркеры здоровья. После локальной ошибки новая попытка выполняется
 через `BACKUP_RETRY_SECONDS` (по умолчанию пять минут), а не через полный суточный интервал.
 
-Проверка выполняет настоящее восстановление последней копии во временную базу и сверяет точный
-список и SHA-256 всех миграций с текущим release image:
+Проверка выполняет настоящее восстановление последней копии во временную базу и сверяет журнал
+миграций с текущим release image. Все записанные в копии миграции должны образовывать начальный
+непрерывный набор миграций образа и иметь те же SHA-256; более новые миграции образа могут отсутствовать
+в старой копии и будут применены migrator после восстановления:
 
 ```powershell
 .\scripts\verify-backup.ps1
@@ -277,7 +289,15 @@ recipient:
 BACKUP_OFFSITE_DIRECTORY=/offsite
 BACKUP_AGE_RECIPIENT=age1...
 BACKUP_REQUIRE_OFFSITE=true
+BACKUP_OFFSITE_RETENTION_MODE=filesystem
+BACKUP_OFFSITE_RETENTION_DAYS=90
+BACKUP_OFFSITE_MIN_GENERATIONS=7
+BACKUP_OFFSITE_MAX_BYTES=0
 ```
+
+Перед первым запуском создайте `PRODUCTION_OFFSITE_PATH/.scheduler-offsite` непосредственно на
+подключённом внешнем хранилище. Не создавайте такой файл в нижележащем локальном каталоге точки
+монтирования: его задача — отличать доступный NAS от отключившегося mount point.
 
 Identity создаётся один раз командой `age-keygen -o backup_age_identity`; выведенный публичный
 recipient задаётся через `BACKUP_AGE_RECIPIENT`. Сам identity-файл должен находиться в отдельном
@@ -301,24 +321,52 @@ backup-контейнер и его healthcheck не считаются рабо
 При `DEPLOYMENT_ENV=production` значение `false` теперь отклоняется ещё до первого дампа и самим
 healthcheck, поэтому production-развёртывание не сможет незаметно остаться без внешней копии.
 
+Lifecycle внешнего хранилища задаётся явно. В режиме `filesystem` Scheduler удаляет полностью
+записанные пары `scheduler-*.dump.age` и `.sha256`, которые старше
+`BACKUP_OFFSITE_RETENTION_DAYS`; последние `BACKUP_OFFSITE_MIN_GENERATIONS` сохраняются независимо
+от возраста. Если `BACKUP_OFFSITE_MAX_BYTES` больше нуля, после возрастной очистки удаляются самые
+старые незавершённые служебные файлы, затем завершённые поколения до достижения квоты, но минимальное
+число поколений всё равно не нарушается. Незавершённые файлы Scheduler старше retention удаляются и
+учитываются в объёме хранилища; посторонние файлы и `.scheduler-offsite` не затрагиваются. Если
+защищённые поколения сами превышают квоту или очистка завершается ошибкой, маркер успешной внешней
+копии не обновляется, а ошибка становится видна healthcheck и мониторингу.
+
+Для S3/Object Storage с собственным lifecycle укажите `BACKUP_OFFSITE_RETENTION_MODE=external`.
+Тогда Scheduler ничего не удаляет, а оператор обязан настроить у провайдера versioning, квоту,
+retention не меньше 90 дней, минимум семь доступных поколений и Object Lock/immutable-период не
+меньше семи дней. Удаление завершённых поколений должно выполняться отдельной ролью хранилища,
+которой нет у постоянно работающего backup-контейнера; его учётной записи оставляют только операции,
+необходимые для создания поколения и удаления собственных пробных/незавершённых файлов. Метрики `scheduler_backup_generations` и
+`scheduler_backup_storage_bytes` позволяют контролировать число копий и объём файлового режима;
+для provider-managed режима дополнительно используйте метрики и оповещения самого провайдера.
+
 Настоящая проверка именно зашифрованной внешней копии выполняется так:
 
 ```powershell
 $env:DATABASE_USER = '<DATABASE_RESTORE_USER>'
 $env:DATABASE_PASSWORD = '<DATABASE_RESTORE_PASSWORD>'
-$identity = (Resolve-Path '.\secrets\backup_age_identity').Path
-docker compose run --rm --no-deps `
+$identity = (Resolve-Path '.\.secrets\backup_age_identity').Path
+$receipts = (Resolve-Path '.\.secrets').Path
+docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml run --rm --no-deps `
   --volume "${identity}:/run/secrets/backup_age_identity:ro" `
+  --volume "${receipts}:/run/receipts" `
   -e BACKUP_VERIFY_OFFSITE=true `
   -e BACKUP_AGE_IDENTITY_FILE=/run/secrets/backup_age_identity `
+  -e BACKUP_VERIFY_RECEIPT_FILE=/run/receipts/scheduler-verified-backup.receipt `
   -e DATABASE_USER `
   -e DATABASE_PASSWORD `
   --entrypoint /usr/local/bin/scheduler-verify-backup `
   backup
 ```
 
-Команда проверяет SHA-256 и аутентичность зашифрованного файла, расшифровывает его только во
-временный файл, восстанавливает отдельную временную БД и сверяет все миграции с текущим образом. Учётная запись,
+Команда перебирает поколения от новых к старым, проверяет SHA-256 и аутентичность зашифрованного
+файла, потоково передаёт расшифрованный архив в `pg_restore`, восстанавливает отдельную временную БД
+и проверяет порядок, известность и SHA-256 уже записанных миграций относительно текущего образа.
+Повреждённое новое поколение не скрывает более старую рабочую копию. После полной проверки создаётся
+атомарная квитанция `scheduler-verified-backup.receipt` с точным именем и digest поколения. При
+аварийном восстановлении нужно передать именно эту квитанцию: повторный автоматический выбор «самой
+новой» копии между проверкой и восстановлением запрещён.
+Размер архива не ограничен 16 MiB временного файлового хранилища контейнера. Учётная запись,
 используемая только для такой проверки, должна иметь право `CREATEDB`; рабочим процессам приложения
 это право не требуется. Команда создаёт одноразовый контейнер и подключает закрытый identity-файл
 только на время проверки; постоянный backup-процесс его не получает.
@@ -331,9 +379,79 @@ AES-256-CBC/PBKDF2, не имеют криптографической пров�
 Обе legacy-переменные передавайте только одноразовой команде проверки, а не постоянному backup-сервису.
 Постоянно включать совместимость с legacy-форматом нельзя.
 
-`postgres-bootstrap` создаёт эту роль вместе с отдельными ролями migrator, bot, admin, site и backup.
+`postgres-bootstrap` создаёт эту роль вместе с отдельными ролями migrator, bot, parser, privacy,
+admin, site и backup.
 Постоянный контейнер `backup` получает только read-only-учётные данные. Скрипт
 `scripts/verify-backup.ps1` передаёт более сильную restore-пару из `.env` лишь на время проверки.
+
+## Runbook аварийного восстановления и переключения
+
+Восстановление выполняется в новую базу. Рабочую базу нельзя очищать или перезаписывать: она остаётся
+точкой быстрого отката. Перед началом зафиксируйте digest обоих образов, время последней успешной
+offsite-копии, ожидаемый RPO и имя старой базы.
+
+1. Остановите `bot`, `parser-worker`, `privacy-worker`, `admin`, `site` и `backup`, запретите внешние записи и сохраните диагностику:
+
+   ```powershell
+   docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml stop bot parser-worker privacy-worker admin site backup
+   docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml ps
+   ```
+
+2. Убедитесь, что `PRODUCTION_OFFSITE_PATH` действительно является подключённым независимым
+   хранилищем. Проверьте последнюю зашифрованную копию командой из предыдущего раздела. Не продолжайте,
+   если checksum, `age` или сверка миграций завершились ошибкой.
+3. Создайте новую базу ролью `DATABASE_RESTORE_USER` и восстановите в неё последнюю проверенную копию
+   с `--no-owner --no-privileges`. Расшифрованный архив передавайте в `pg_restore` потоком; не сохраняйте
+   его в `/tmp`. Имя новой базы должно отличаться и от рабочей, и от базы предыдущего DR-теста:
+
+   ```powershell
+   $env:DATABASE_USER = '<DATABASE_RESTORE_USER>'
+   $env:DATABASE_PASSWORD = '<DATABASE_RESTORE_PASSWORD>'
+   $env:RESTORE_TARGET_DATABASE = 'scheduler_restore_20260831'
+   $identity = (Resolve-Path '.\.secrets\backup_age_identity').Path
+   $receipt = (Resolve-Path '.\.secrets\scheduler-verified-backup.receipt').Path
+   docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml run --rm --no-deps `
+     --volume "${identity}:/run/secrets/backup_age_identity:ro" `
+     --volume "${receipt}:/run/secrets/scheduler-verified-backup.receipt:ro" `
+     -e DATABASE_USER -e DATABASE_PASSWORD -e RESTORE_TARGET_DATABASE `
+     -e BACKUP_RESTORE_OFFSITE=true `
+     -e BACKUP_AGE_IDENTITY_FILE=/run/secrets/backup_age_identity `
+     -e BACKUP_RESTORE_RECEIPT_FILE=/run/secrets/scheduler-verified-backup.receipt `
+     --entrypoint /usr/local/bin/scheduler-restore-backup backup
+   ```
+
+   Команда отказывается восстанавливать поверх текущей или уже существующей базы. При ошибке
+   расшифрования, `pg_restore`, неизвестной, переставленной или изменённой миграции незавершённая целевая база
+   удаляется автоматически.
+4. Укажите новую базу в копии `.env.production`, затем последовательно выполните только для неё:
+
+   ```powershell
+   docker compose --env-file .env.restore -f docker-compose.yml -f docker-compose.production.yml run --rm --no-deps preflight
+   docker compose --env-file .env.restore -f docker-compose.yml -f docker-compose.production.yml run --rm --no-deps backup-preflight
+   docker compose --env-file .env.restore -f docker-compose.yml -f docker-compose.production.yml run --rm --no-deps postgres-bootstrap
+   docker compose --env-file .env.restore -f docker-compose.yml -f docker-compose.production.yml run --rm --no-deps migrator
+   docker compose --env-file .env.restore -f docker-compose.yml -f docker-compose.production.yml run --rm --no-deps preflight --database
+   ```
+
+   Bootstrap сначала сверяет, что `POSTGRES_SUPERUSER` — реальный superuser и не совпадает ни с одной
+   runtime-ролью. Изменения ролей, владельцев, функций и grants выполняются одной транзакцией. После
+   восстановления владельцем прикладных функций и объектов должен быть migrator, сайт должен читать
+   только три публичных представления, а bot/parser/privacy/admin/backup — подключаться своими
+   отдельными ролями.
+5. До переключения сравните количество пользователей, групп, занятий и записей `schema_migrations`,
+   выполните `SELECT * FROM subscription_integrity`, проверьте `public_site_statistics`, затем запустите
+   сервисы с `.env.restore` без внешнего трафика и дождитесь `ready` у
+   bot/parser-worker/privacy-worker/admin/site.
+6. Переключите `DATABASE_NAME` рабочего окружения на новую базу, запустите сервисы, включая `backup`, и проверьте вход в
+   админку, выдачу расписания, публичный сайт, метрики и создание новой резервной копии. Запишите время
+   cutover, имя копии и фактические RPO/RTO.
+7. При ошибке остановите сервисы, верните прежний `DATABASE_NAME` и прежние digest образов, снова
+   выполните `preflight --database` и запустите старое окружение. Старую базу удаляйте только после
+   согласованного периода наблюдения и отдельной проверенной копии новой базы.
+
+CI выполняет тот же минимальный DR-контур на архиве больше 16 MiB: восстанавливает базу без ACL,
+восстанавливает копию без последней миграции текущего образа, повторно применяет bootstrap и migrator,
+проверяет применение отложенной миграции, владельцев функций, все runtime-роли и изоляцию публичного сайта.
 
 Публичный сайт не получает `SELECT` на прикладные таблицы. Его login-роль входит в NOLOGIN-роль
 `scheduler_public_reader`, которой доступны только представления `public_site_statistics`,
@@ -356,7 +474,19 @@ AES-256-CBC/PBKDF2, не имеют криптографической пров�
 
 ```powershell
 .\scripts\rotate-local-secrets.ps1 -RotateDatabasePassword
+docker compose up -d --force-recreate bot parser-worker privacy-worker admin site backup
+docker compose ps
 ```
+
+Изменение паролей всех существующих ролей выполняется одной транзакцией PostgreSQL: при ошибке ни
+один новый пароль не применяется. Файл с новыми реквизитами заранее записывается и принудительно
+синхронизируется на диск, а после commit атомарно заменяет `.env`. Если замена не удалась, скрипт
+выводит путь к recovery-файлу с уже применёнными реквизитами — повторно запускать ротацию до его
+восстановления нельзя. После успешной команды сразу пересоздайте все runtime-контейнеры,
+чтобы они перечитали `.env`, дождитесь состояния `healthy` и проверьте `/ready` у bot,
+parser-worker, privacy-worker, admin и site. До этой проверки не закрывайте терминал с результатом
+ротации. Если контейнер не вышел в ready, сохраните журналы, не возвращайте старый `.env` поверх уже
+применённых паролей и повторите controlled rotation из актуального файла.
 
 Удаление файла из последнего коммита не отзывает секрет и не очищает историю. После ротации,
 согласовав переписывание с участниками репозитория, запустите
