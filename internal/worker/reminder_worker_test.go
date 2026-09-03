@@ -14,6 +14,12 @@ type fakeReminderRepository struct {
 	recipients []domain.ReminderRecipient
 	calls      []string
 	blockOnce  bool
+	enqueued   []enqueuedReminder
+}
+
+type enqueuedReminder struct {
+	userID string
+	body   string
 }
 
 func (r *fakeReminderRepository) ActiveRecipientsPage(
@@ -40,12 +46,13 @@ func (r *fakeReminderRepository) ActiveRecipientsPage(
 }
 
 func (r *fakeReminderRepository) Enqueue(
-	context.Context,
-	string,
-	string,
-	string,
-	string,
+	_ context.Context,
+	_ string,
+	userID string,
+	_ string,
+	body string,
 ) error {
+	r.enqueued = append(r.enqueued, enqueuedReminder{userID: userID, body: body})
 	return nil
 }
 
@@ -94,6 +101,18 @@ func (p *recordingScheduleProvider) GetScheduleForGroup(
 	return []domain.Lesson{}, nil
 }
 
+type staticScheduleProvider struct {
+	lessons []domain.Lesson
+}
+
+func (p staticScheduleProvider) GetScheduleForGroup(
+	context.Context,
+	string,
+	time.Time,
+) ([]domain.Lesson, error) {
+	return p.lessons, nil
+}
+
 func TestReminderSlotsCombineConcurrentSubgroups(t *testing.T) {
 	lessons := []domain.Lesson{
 		{TimeStart: "09:50", TimeEnd: "11:25", Subject: "Математика", Subgroup: 1},
@@ -138,6 +157,47 @@ func TestReminderWorkerUsesUniversityTimezone(t *testing.T) {
 	}
 	if provider.dates[0].Location().String() != "Asia/Yekaterinburg" {
 		t.Fatalf("location = %s", provider.dates[0].Location())
+	}
+}
+
+func TestReminderWorkerDoesNotMutateCachedScheduleBetweenSubgroups(t *testing.T) {
+	location, err := time.LoadLocation("Europe/Moscow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &fakeReminderRepository{}
+	worker := &ReminderWorker{
+		repository: repository,
+		scheduleService: staticScheduleProvider{lessons: []domain.Lesson{
+			{TimeStart: "09:50", TimeEnd: "11:25", Subject: "Подгруппа 2", Subgroup: 2},
+			{TimeStart: "09:50", TimeEnd: "11:25", Subject: "Общая пара"},
+			{TimeStart: "09:50", TimeEnd: "11:25", Subject: "Подгруппа 1", Subgroup: 1},
+		}},
+	}
+	now := time.Date(2026, time.September, 1, 9, 40, 0, 0, location)
+	schedules := make(reminderScheduleCache)
+	for _, recipient := range []domain.ReminderRecipient{
+		{UserID: "subgroup-1", GroupID: "group", GroupName: "G", UniversityName: "U", Subgroup: 1, ReminderMinutes: 20, Timezone: "Europe/Moscow"},
+		{UserID: "subgroup-2", GroupID: "group", GroupName: "G", UniversityName: "U", Subgroup: 2, ReminderMinutes: 20, Timezone: "Europe/Moscow"},
+	} {
+		if err := worker.enqueueRecipientReminders(context.Background(), recipient, now, schedules); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(repository.enqueued) != 2 {
+		t.Fatalf("enqueued reminders=%d, want 2", len(repository.enqueued))
+	}
+	for _, reminder := range repository.enqueued {
+		if !strings.Contains(reminder.body, "Общая пара") {
+			t.Fatalf("common lesson missing for %s: %s", reminder.userID, reminder.body)
+		}
+		if reminder.userID == "subgroup-1" {
+			if !strings.Contains(reminder.body, "Подгруппа 1") || strings.Contains(reminder.body, "Подгруппа 2") {
+				t.Fatalf("wrong subgroup 1 reminder: %s", reminder.body)
+			}
+		} else if !strings.Contains(reminder.body, "Подгруппа 2") || strings.Contains(reminder.body, "Подгруппа 1") {
+			t.Fatalf("wrong subgroup 2 reminder: %s", reminder.body)
+		}
 	}
 }
 

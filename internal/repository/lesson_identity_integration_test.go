@@ -148,6 +148,129 @@ func TestLessonIdentityKeepsOverrideAcrossSourceEditsAndTemporaryAbsence(t *test
 	}
 }
 
+func TestLessonIdentityPublishesWhenSyntheticSlotOrderChanges(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("TEST_DATABASE_URL is required for integration tests")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	db, err := sqlx.ConnectContext(ctx, "pgx", databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if closeErr := db.Close(); closeErr != nil {
+			t.Errorf("close integration database: %v", closeErr)
+		}
+	})
+	if err = database.ApplyMigrations(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+
+	suffix := uuid.NewString()
+	universityID := "slot-university-" + suffix
+	sourceID := "slot-source-" + suffix
+	semesterID := "slot-semester-" + suffix
+	groupID := "slot-group-" + suffix
+	lessonAID := "slot-lesson-a-" + suffix
+	lessonBID := "slot-lesson-b-" + suffix
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		if _, cleanupErr := db.ExecContext(cleanupCtx, `DELETE FROM universities WHERE id=$1`, universityID); cleanupErr != nil {
+			t.Errorf("cleanup slot university: %v", cleanupErr)
+		}
+	})
+	if _, err = repository.NewUniversityRepository(db).CreateUniversity(
+		ctx, universityID, "Slot test", "Slot test", "https://example.test", true,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repository.NewDataSourceRepository(db).CreateDataSource(
+		ctx, sourceID, universityID, "integration", "{}", 3600,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, time.December, 31, 0, 0, 0, 0, time.UTC)
+	lesson := func(id, externalID, subject string) domain.Lesson {
+		return domain.Lesson{
+			ID: id, ExternalID: externalID, SourceID: sourceID,
+			UniversityID: universityID, SemesterID: semesterID, GroupID: groupID,
+			DayOfWeek: 2, TimeStart: "09:50", TimeEnd: "11:25",
+			WeekType: domain.WeekTypeOdd, Subject: subject, Type: domain.LessonTypeLecture,
+			ValidFrom: &start, ValidTo: &end,
+		}
+	}
+	snapshots := repository.NewParserSnapshotRepository(db)
+	publish := func(snapshotID string, lessons []domain.Lesson) {
+		t.Helper()
+		logID := snapshotID + "-log"
+		if _, createErr := repository.NewParseLogRepository(db).CreateParseLog(
+			ctx, logID, sourceID, "running", len(lessons), "",
+		); createErr != nil {
+			t.Fatal(createErr)
+		}
+		candidate := &domain.ParserSnapshot{
+			ID: snapshotID, DataSourceID: sourceID, ParseLogID: logID,
+			Status: domain.SnapshotStatusStaged, Publishable: true,
+			GroupCount: 1, LessonCount: len(lessons),
+			Payload: domain.ScheduleSnapshot{
+				UniversityID: universityID, SemesterID: semesterID,
+				StartDate: start, EndDate: end,
+				Groups: []domain.SnapshotGroup{{
+					ID: groupID, UniversityID: universityID, Name: "SLOT-" + suffix,
+					Lessons: lessons,
+				}},
+			},
+		}
+		if createErr := snapshots.Create(ctx, candidate); createErr != nil {
+			t.Fatal(createErr)
+		}
+		if _, publishErr := snapshots.Publish(ctx, snapshotID, "integration", "slot order test"); publishErr != nil {
+			t.Fatal(publishErr)
+		}
+	}
+
+	publish("slot-snapshot-1-"+suffix, []domain.Lesson{
+		lesson(lessonAID, "slot:0", "Existing lesson"),
+	})
+	publish("slot-snapshot-2-"+suffix, []domain.Lesson{
+		lesson(lessonBID, "slot:0", "New lesson"),
+		lesson(lessonAID, "slot:1", "Existing lesson"),
+	})
+	publish("slot-snapshot-3-"+suffix, []domain.Lesson{
+		lesson(lessonAID, "slot:0", "Existing lesson"),
+	})
+
+	var state struct {
+		Lessons  int    `db:"lessons"`
+		A        int    `db:"a"`
+		B        int    `db:"b"`
+		Slot0    int    `db:"slot0"`
+		ASlot0   int    `db:"a_slot0"`
+		ASubject string `db:"a_subject"`
+	}
+	if err = db.GetContext(ctx, &state, `
+		SELECT
+			(SELECT COUNT(*)::int FROM lessons WHERE group_id=$1) AS lessons,
+			(SELECT COUNT(*)::int FROM lessons WHERE id=$2) AS a,
+			(SELECT COUNT(*)::int FROM lessons WHERE id=$3) AS b,
+			(SELECT COUNT(*)::int FROM lesson_source_identities
+			 WHERE source_id=$4 AND semester_id=$5 AND external_id='slot:0' AND lesson_id=$3) AS slot0,
+			(SELECT COUNT(*)::int FROM lesson_source_identities
+			 WHERE source_id=$4 AND semester_id=$5 AND external_id='slot:0' AND lesson_id=$2) AS a_slot0,
+			COALESCE((SELECT subject FROM lessons WHERE id=$2), '') AS a_subject`,
+		groupID, lessonAID, lessonBID, sourceID, semesterID); err != nil {
+		t.Fatal(err)
+	}
+	if state.Lessons != 1 || state.A != 1 || state.B != 0 || state.Slot0 != 0 || state.ASlot0 != 1 || state.ASubject != "Existing lesson" {
+		t.Fatalf("synthetic slot reconciliation mismatch: %+v", state)
+	}
+}
+
 func assertEffectiveOverride(
 	t *testing.T,
 	ctx context.Context,

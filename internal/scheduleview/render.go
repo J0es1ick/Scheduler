@@ -422,10 +422,6 @@ func drawLegend(canvas *image.RGBA, faces *faces, x, y int) {
 	}
 }
 
-func lessonDetails(lesson domain.Lesson) string {
-	return lessonDetailsWithOptions(lesson, false)
-}
-
 func lessonDetailsWithOptions(lesson domain.Lesson, showGroupNames bool) string {
 	parts := make([]string, 0, 4)
 	if showGroupNames && strings.TrimSpace(lesson.GroupName) != "" {
@@ -548,7 +544,7 @@ func breakWord(face font.Face, word string, width int) []string {
 	}
 	result := make([]string, 0, 2)
 	current := make([]rune, 0, len([]rune(word)))
-	for _, character := range []rune(word) {
+	for _, character := range word {
 		candidate := string(append(current, character))
 		if len(current) > 0 && textWidth(face, candidate) > width {
 			result = append(result, string(current))

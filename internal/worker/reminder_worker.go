@@ -255,7 +255,7 @@ func (w *ReminderWorker) enqueueRecipientReminders(
 		}
 
 		if recipient.Subgroup > 0 {
-			filtered := lessons[:0]
+			filtered := make([]domain.Lesson, 0, len(lessons))
 			for _, lesson := range lessons {
 				if lesson.Subgroup == 0 || lesson.Subgroup == recipient.Subgroup {
 					filtered = append(filtered, lesson)

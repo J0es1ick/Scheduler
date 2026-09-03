@@ -27,6 +27,10 @@ type lessonSourceIdentity struct {
 	IdentityKey  string     `db:"identity_key"`
 }
 
+type lessonIdentityRecord struct {
+	lessonID, universityID, semesterID, sourceID, externalID, identityKey string
+}
+
 func reconcileLessonIdentities(
 	ctx context.Context,
 	tx *sqlx.Tx,
@@ -75,21 +79,28 @@ func reconcileLessonIdentities(
 	}
 
 	used := make(map[string]bool)
+	incoming := make(map[string]int)
+	for _, group := range payload.Groups {
+		for _, lesson := range group.Lessons {
+			incoming[lesson.ID]++
+		}
+	}
 	for groupIndex := range payload.Groups {
 		group := &payload.Groups[groupIndex]
 		for lessonIndex := range group.Lessons {
 			lesson := &group.Lessons[lessonIndex]
+			originalID := lesson.ID
 			if lesson.SourceID == "" {
 				lesson.SourceID = defaultSourceID
 			}
 			candidate := ""
-			if lesson.ExternalID != "" {
+			if lesson.ExternalID != "" && !strings.HasPrefix(lesson.ExternalID, "slot:") {
 				candidate = byExternal[lesson.SourceID+"\x00"+lesson.ExternalID]
 			}
 			if candidate == "" {
 				candidate = bySchedule[lessonIdentityKey(*lesson)]
 			}
-			if candidate != "" && !used[candidate] {
+			if canAdoptReconciledLessonID(candidate, originalID, used, incoming) {
 				lesson.ID = candidate
 			}
 			if used[lesson.ID] {
@@ -101,14 +112,18 @@ func reconcileLessonIdentities(
 	return payload, nil
 }
 
-func storeLessonIdentities(ctx context.Context, tx *sqlx.Tx, payload domain.ScheduleSnapshot) error {
-	type identityRecord struct {
-		lessonID, universityID, semesterID, sourceID, externalID, identityKey string
+func canAdoptReconciledLessonID(candidate, originalID string, used map[string]bool, incoming map[string]int) bool {
+	if candidate == "" || used[candidate] {
+		return false
 	}
-	records := make([]identityRecord, 0)
+	return candidate == originalID || incoming[candidate] == 0
+}
+
+func storeLessonIdentities(ctx context.Context, tx *sqlx.Tx, payload domain.ScheduleSnapshot) error {
+	records := make([]lessonIdentityRecord, 0)
 	for _, group := range payload.Groups {
 		for _, lesson := range group.Lessons {
-			records = append(records, identityRecord{
+			records = append(records, lessonIdentityRecord{
 				lesson.ID, lesson.UniversityID, payload.SemesterID,
 				lesson.SourceID, lesson.ExternalID, lessonIdentityKey(lesson),
 			})
@@ -117,6 +132,9 @@ func storeLessonIdentities(ctx context.Context, tx *sqlx.Tx, payload domain.Sche
 	const batchSize = 1000
 	for start := 0; start < len(records); start += batchSize {
 		end := min(start+batchSize, len(records))
+		if err := releaseSyntheticExternalIdentities(ctx, tx, records[start:end]); err != nil {
+			return fmt.Errorf("publish snapshot: release synthetic lesson identity batch %d-%d: %w", start, end, err)
+		}
 		var query strings.Builder
 		query.WriteString(`INSERT INTO lesson_source_identities (
 			lesson_id, university_id, semester_id, source_id,
@@ -145,6 +163,39 @@ func storeLessonIdentities(ctx context.Context, tx *sqlx.Tx, payload domain.Sche
 		}
 	}
 	return nil
+}
+
+func releaseSyntheticExternalIdentities(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	records []lessonIdentityRecord,
+) error {
+	var query strings.Builder
+	args := make([]any, 0, len(records)*4)
+	for _, record := range records {
+		if !strings.HasPrefix(record.externalID, "slot:") || record.sourceID == "" {
+			continue
+		}
+		if len(args) > 0 {
+			query.WriteByte(',')
+		}
+		base := len(args)
+		fmt.Fprintf(&query, "($%d,$%d,$%d,$%d)", base+1, base+2, base+3, base+4)
+		args = append(args, record.sourceID, record.semesterID, record.externalID, record.lessonID)
+	}
+	if len(args) == 0 {
+		return nil
+	}
+	statement := `WITH incoming(source_id, semester_id, external_id, lesson_id) AS (VALUES ` + query.String() + `)
+		UPDATE lesson_source_identities existing
+		SET external_id=''
+		FROM incoming
+		WHERE existing.source_id=incoming.source_id
+		  AND existing.semester_id=incoming.semester_id
+		  AND existing.external_id=incoming.external_id
+		  AND existing.lesson_id<>incoming.lesson_id`
+	_, err := tx.ExecContext(ctx, statement, args...)
+	return err
 }
 
 func lessonIdentityKey(lesson domain.Lesson) string {
