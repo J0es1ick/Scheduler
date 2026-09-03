@@ -25,7 +25,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Не удалось загрузить настройки подключения.")
 			os.Exit(1)
 		}
-		for _, role := range []string{"BOT", "ADMIN", "SITE", "BACKUP"} {
+		for _, role := range databaseRoles() {
 			cfg.Database.User, cfg.Database.Password = os.Getenv("DATABASE_"+role+"_USER"), os.Getenv("DATABASE_"+role+"_PASSWORD")
 			db, err := database.NewDatabase(cfg)
 			if err != nil {
@@ -33,18 +33,23 @@ func main() {
 				os.Exit(1)
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			var currentUser string
 			var ssl, superuser bool
-			err = db.DB.QueryRowContext(ctx, `SELECT s.ssl, r.rolsuper FROM pg_stat_ssl s JOIN pg_roles r ON r.rolname=current_user WHERE s.pid=pg_backend_pid()`).Scan(&ssl, &superuser)
-			if err == nil && role != "SITE" {
+			err = db.DB.QueryRowContext(ctx, `SELECT current_user, s.ssl, r.rolsuper FROM pg_stat_ssl s JOIN pg_roles r ON r.rolname=current_user WHERE s.pid=pg_backend_pid()`).Scan(&currentUser, &ssl, &superuser)
+			if err == nil && role == "ADMIN" {
 				err = database.CheckSubscriptionIntegrity(ctx, db.DB.DB)
 			}
 			cancel()
 			db.Close()
-			if err != nil || !ssl || superuser {
+			if err != nil || !ssl || superuser || currentUser != cfg.Database.User {
 				fmt.Fprintln(os.Stderr, "TLS, права или целостность данных не прошли проверку для", role)
 				os.Exit(1)
 			}
 		}
 	}
 	fmt.Println("Production preflight пройден. Доступность внешнего HTTPS и восстановление offsite-копии проверяются отдельно.")
+}
+
+func databaseRoles() []string {
+	return []string{"MIGRATOR", "BOT", "PARSER", "PRIVACY", "ADMIN", "SITE", "BACKUP", "RESTORE"}
 }

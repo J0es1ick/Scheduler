@@ -1,6 +1,8 @@
 .env
 .env.production
 .env.production.local
+.scheduler-env-rotation-*.tmp
+.scheduler-env-rotation-*.bak
 .secrets/
 *.zip
 /migrations

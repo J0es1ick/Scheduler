@@ -31,12 +31,11 @@ func TestProductionPreflight(t *testing.T) {
 	}
 	values := map[string]string{
 		"DEPLOYMENT_ENV": "production", "DATABASE_HOST": "db.example.test", "DATABASE_PORT": "5432", "DATABASE_NAME": "scheduler",
+		"POSTGRES_SUPERUSER": "cluster_admin", "POSTGRES_SUPERUSER_PASSWORD": "cluster-admin-password-123456",
 		"DATABASE_SSLMODE": "verify-full", "PGSSLROOTCERT": caFile, "ADMIN_COOKIE_SECURE": "true", "ADMIN_ACCESS_LOGIN_ENABLED": "false",
 		"ADMIN_PUBLIC_URL": "https://admin.example.test", "SITE_PUBLIC_URL": "https://example.test", "ADMIN_METRICS_TOKEN": strings.Repeat("m", 32), "BOT_TOKEN": strings.Repeat("b", 40),
-		"BACKUP_REQUIRE_OFFSITE": "true", "BACKUP_OFFSITE_DIRECTORY": dir, "BACKUP_AGE_RECIPIENT": "age1" + strings.Repeat("q", 58),
-		"BACKUP_INTERVAL_SECONDS": "86400", "BACKUP_MAX_AGE_SECONDS": "90000", "BACKUP_OFFSITE_MAX_AGE_SECONDS": "90000",
 	}
-	for _, role := range []string{"MIGRATOR", "BOT", "ADMIN", "SITE", "BACKUP", "RESTORE"} {
+	for _, role := range []string{"MIGRATOR", "BOT", "PARSER", "PRIVACY", "ADMIN", "SITE", "BACKUP", "RESTORE"} {
 		values["DATABASE_"+role+"_USER"] = "scheduler_" + strings.ToLower(role)
 		values["DATABASE_"+role+"_PASSWORD"] = role + strings.Repeat("x", 30)
 	}
@@ -45,10 +44,14 @@ func TestProductionPreflight(t *testing.T) {
 		t.Fatal(err)
 	}
 	for field, invalid := range map[string]string{
-		"DATABASE_SSLMODE": "require", "ADMIN_COOKIE_SECURE": "false", "ADMIN_ACCESS_LOGIN_ENABLED": "true",
+		"POSTGRES_SUPERUSER":          "",
+		"POSTGRES_SUPERUSER_PASSWORD": "CHANGE_ME",
+		"DATABASE_SSLMODE":            "require", "ADMIN_COOKIE_SECURE": "false", "ADMIN_ACCESS_LOGIN_ENABLED": "true",
 		"ADMIN_PUBLIC_URL": "http://admin.example.test", "PGSSLROOTCERT": filepath.Join(dir, "missing"),
-		"BACKUP_REQUIRE_OFFSITE": "false", "BACKUP_AGE_RECIPIENT": "private-key", "BACKUP_OFFSITE_DIRECTORY": filepath.Join(dir, "missing"),
-		"DATABASE_BOT_USER": "scheduler_admin", "DATABASE_BOT_PASSWORD": values["DATABASE_ADMIN_PASSWORD"], "BACKUP_MAX_AGE_SECONDS": "10",
+		"DATABASE_BOT_USER": "scheduler_admin", "DATABASE_BOT_PASSWORD": values["DATABASE_ADMIN_PASSWORD"],
+		"DATABASE_MIGRATOR_PASSWORD": values["POSTGRES_SUPERUSER_PASSWORD"],
+		"DATABASE_RESTORE_USER":      "cluster_admin", "DATABASE_SITE_USER": "scheduler_public_reader",
+		"DATABASE_ADMIN_USER": "invalid-role-name",
 	} {
 		t.Run(field, func(t *testing.T) {
 			previous := values[field]
