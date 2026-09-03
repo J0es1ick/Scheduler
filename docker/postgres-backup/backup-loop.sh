@@ -15,7 +15,9 @@ export PGSSLMODE="$DATABASE_SSLMODE"
 
 . /usr/local/lib/scheduler-backup-lib.sh
 
+validate_backup_settings || exit 1
 validate_offsite || exit 1
+run_offsite_retention || exit 1
 
 until pg_isready -h "$DATABASE_HOST" -p "$DATABASE_PORT" -U "$DATABASE_USER" -d "$DATABASE_NAME" >/dev/null 2>&1; do
   sleep 2
@@ -31,19 +33,17 @@ while true; do
       pending_offsite="$last_local_backup"
       next_local_at=$((now + BACKUP_INTERVAL_SECONDS))
     else
-      run_local_retention || true
+      run_local_retention || exit 1
       echo "local backup retry scheduled in ${BACKUP_RETRY_SECONDS}s" >&2
       sleep "$BACKUP_RETRY_SECONDS"
       continue
     fi
-    run_local_retention || true
   fi
 
   if offsite_requested && [ -n "$pending_offsite" ]; then
     if upload_offsite_backup "$pending_offsite"; then
       pending_offsite=""
     else
-      run_local_retention || true
       now="$(date -u +%s)"
       wait_seconds="$BACKUP_RETRY_SECONDS"
       until_local=$((next_local_at - now))

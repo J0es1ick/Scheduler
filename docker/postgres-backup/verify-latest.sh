@@ -9,35 +9,56 @@ set -eu
 : "${MIGRATIONS_PATH:=/app/migrations}"
 : "${BACKUP_VERIFY_OFFSITE:=false}"
 : "${BACKUP_OFFSITE_DIRECTORY:=}"
+: "${BACKUP_OFFSITE_SENTINEL_FILE:=${BACKUP_OFFSITE_DIRECTORY}/.scheduler-offsite}"
 : "${BACKUP_AGE_IDENTITY_FILE:=}"
 : "${BACKUP_ENCRYPTION_PASSPHRASE_FILE:=}"
 : "${BACKUP_ALLOW_LEGACY_AES_CBC:=false}"
+: "${BACKUP_VERIFY_RECEIPT_FILE:=}"
+
 export PGPASSWORD="${DATABASE_PASSWORD:?DATABASE_PASSWORD is required}"
 export PGSSLMODE="$DATABASE_SSLMODE"
+. /usr/local/lib/scheduler-restore-lib.sh
 
-decrypted_backup=""
+verify_candidates="${TMPDIR:-/tmp}/scheduler-verify-candidates-$$"
+verify_db=
+verify_created=false
+backup_selection_fatal=false
+: > "$verify_candidates"
+
 cleanup() {
-  if [ -n "${verify_db:-}" ]; then
-    dropdb --if-exists --force -h "$DATABASE_HOST" -p "$DATABASE_PORT" -U "$DATABASE_USER" "$verify_db" >/dev/null 2>&1 || true
+  if [ "$verify_created" = true ] && [ -n "$verify_db" ]; then
+    dropdb --if-exists --force --host "$DATABASE_HOST" --port "$DATABASE_PORT" --username "$DATABASE_USER" "$verify_db" >/dev/null 2>&1 || true
   fi
-  if [ -n "$decrypted_backup" ]; then
-    rm -f "$decrypted_backup"
-  fi
+  rm -f "$verify_candidates"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-if [ "$BACKUP_VERIFY_OFFSITE" = "true" ]; then
-  if [ ! -d "$BACKUP_OFFSITE_DIRECTORY" ]; then
-    echo "off-host backup destination is unavailable" >&2
-    exit 1
-  fi
-  encrypted="$(find "$BACKUP_OFFSITE_DIRECTORY" -maxdepth 1 -type f -name 'scheduler-*.dump.age' -print | sort | tail -n 1)"
-  legacy=false
-  if [ -z "$encrypted" ]; then
+append_candidates() {
+  append_kind="$1"
+  append_directory="$2"
+  append_pattern="$3"
+  while IFS= read -r append_archive; do
+    [ -n "$append_archive" ] || continue
+    printf '%s|%s\n' "$append_kind" "$append_archive" >> "$verify_candidates"
+  done <<EOF
+$(valid_backup_candidates "$append_directory" "$append_pattern" newest)
+EOF
+}
+
+case "$BACKUP_VERIFY_OFFSITE" in
+  true)
+    if [ ! -d "$BACKUP_OFFSITE_DIRECTORY" ] || [ ! -f "$BACKUP_OFFSITE_SENTINEL_FILE" ] || [ ! -s "$BACKUP_AGE_IDENTITY_FILE" ]; then
+      echo "off-host backup destination or age identity is unavailable" >&2
+      exit 1
+    fi
+    append_candidates age "$BACKUP_OFFSITE_DIRECTORY" 'scheduler-*.dump.age'
     case "$BACKUP_ALLOW_LEGACY_AES_CBC" in
       true)
-        encrypted="$(find "$BACKUP_OFFSITE_DIRECTORY" -maxdepth 1 -type f -name 'scheduler-*.dump.enc' -print | sort | tail -n 1)"
-        legacy=true
+        if [ -s "$BACKUP_ENCRYPTION_PASSPHRASE_FILE" ]; then
+          append_candidates legacy "$BACKUP_OFFSITE_DIRECTORY" 'scheduler-*.dump.enc'
+        fi
         ;;
       false) ;;
       *)
@@ -45,94 +66,69 @@ if [ "$BACKUP_VERIFY_OFFSITE" = "true" ]; then
         exit 1
         ;;
     esac
-  fi
-  if [ -z "$encrypted" ] || [ ! -f "${encrypted}.sha256" ]; then
-    echo "no complete encrypted off-host backup found" >&2
+    ;;
+  false)
+    append_candidates plain /backups 'scheduler-*.dump'
+    ;;
+  *)
+    echo "BACKUP_VERIFY_OFFSITE must be true or false" >&2
     exit 1
+    ;;
+esac
+
+if [ ! -s "$verify_candidates" ]; then
+  echo "no checksum-valid backup generation found" >&2
+  exit 1
+fi
+
+verify_candidate() {
+  verify_kind="$1"
+  verify_archive="$2"
+  verify_random="$(od -An -N4 -tu4 /dev/urandom | tr -d ' ')"
+  verify_db="scheduler_verify_$(date -u +%s)_$$_${verify_random}"
+  if ! createdb --host "$DATABASE_HOST" --port "$DATABASE_PORT" --username "$DATABASE_USER" "$verify_db"; then
+    backup_selection_fatal=true
+    return 1
   fi
-  (cd "$BACKUP_OFFSITE_DIRECTORY" && sha256sum -c "$(basename "${encrypted}.sha256")") || exit 1
-  decrypted_backup="/tmp/offsite-restore-verify-$$.dump"
-  if [ "$legacy" = "true" ]; then
-    if [ ! -s "$BACKUP_ENCRYPTION_PASSPHRASE_FILE" ]; then
-      echo "legacy backup passphrase is unavailable" >&2
-      exit 1
-    fi
-    echo "warning: decrypting a legacy unauthenticated AES-CBC backup" >&2
-    openssl enc -d -aes-256-cbc -pbkdf2 \
-      -pass "file:${BACKUP_ENCRYPTION_PASSPHRASE_FILE}" \
-      -in "$encrypted" -out "$decrypted_backup" || exit 1
+  verify_created=true
+  if restore_backup_into_database "$verify_kind" "$verify_archive" "$verify_db" &&
+    validate_restored_scheduler_database "$verify_db" "$MIGRATIONS_PATH"; then
+    verify_result=0
   else
-    if [ ! -s "$BACKUP_AGE_IDENTITY_FILE" ]; then
-      echo "age identity is unavailable" >&2
-      exit 1
-    fi
-    age --decrypt --identity "$BACKUP_AGE_IDENTITY_FILE" --output "$decrypted_backup" "$encrypted" || exit 1
+    verify_result=1
   fi
-  backup="$decrypted_backup"
+  if ! dropdb --if-exists --force --host "$DATABASE_HOST" --port "$DATABASE_PORT" --username "$DATABASE_USER" "$verify_db"; then
+    backup_selection_fatal=true
+    return 1
+  fi
+  verify_created=false
+  verify_db=
+  return "$verify_result"
+}
+
+if select_first_usable_backup "$verify_candidates" verify_candidate; then
+  :
 else
-  backup="$(find /backups -maxdepth 1 -type f -name 'scheduler-*.dump' -print | sort | tail -n 1)"
-  if [ -z "$backup" ]; then
-    echo "no backup found" >&2
-    exit 1
+  selection_status=$?
+  if [ "$selection_status" -eq 2 ]; then
+    echo "backup verification could not safely continue" >&2
+  else
+    echo "no restorable backup generation found" >&2
   fi
-  checksum="${backup}.sha256"
-  if [ ! -f "$checksum" ]; then
-    echo "checksum is missing for $(basename "$backup")" >&2
-    exit 1
-  fi
-  (cd /backups && sha256sum -c "$(basename "$checksum")") || exit 1
-fi
-
-verify_db="${DATABASE_NAME}_restore_verify_$(date -u +%s)"
-
-createdb -h "$DATABASE_HOST" -p "$DATABASE_PORT" -U "$DATABASE_USER" "$verify_db"
-pg_restore \
-  --exit-on-error \
-  --no-owner \
-  --no-privileges \
-  --host "$DATABASE_HOST" \
-  --port "$DATABASE_PORT" \
-  --username "$DATABASE_USER" \
-  --dbname "$verify_db" \
-  "$backup"
-
-migrations="$(psql -h "$DATABASE_HOST" -p "$DATABASE_PORT" -U "$DATABASE_USER" -d "$verify_db" -tAc 'SELECT COUNT(*) FROM schema_migrations')"
-users_table="$(psql -h "$DATABASE_HOST" -p "$DATABASE_PORT" -U "$DATABASE_USER" -d "$verify_db" -tAc "SELECT to_regclass('public.users') IS NOT NULL")"
-if [ "${migrations:-0}" -lt 1 ] || [ "$users_table" != "t" ]; then
-  echo "restored database failed validation" >&2
   exit 1
 fi
 
-expected=/tmp/expected-migrations
-restored=/tmp/restored-migrations
-: > "$expected"
-for migration in "$MIGRATIONS_PATH"/*.up.sql; do
-  name="$(basename "$migration")"
-  digest="$(sha256sum "$migration" | awk '{print $1}')"
-  printf '%s|%s\n' "$name" "$digest" >> "$expected"
-done
-has_migration_checksums="$(psql -h "$DATABASE_HOST" -p "$DATABASE_PORT" -U "$DATABASE_USER" -d "$verify_db" -tAc \
-  "SELECT EXISTS (
-     SELECT 1
-     FROM information_schema.columns
-     WHERE table_schema=current_schema()
-       AND table_name='schema_migrations'
-       AND column_name='checksum'
-   )")"
-if [ "$has_migration_checksums" = "t" ]; then
-  psql -h "$DATABASE_HOST" -p "$DATABASE_PORT" -U "$DATABASE_USER" -d "$verify_db" -tA \
-    -F '|' -c 'SELECT name, checksum FROM schema_migrations ORDER BY name' > "$restored"
-else
-  expected_names=/tmp/expected-migration-names
-  cut -d '|' -f 1 "$expected" > "$expected_names"
-  psql -h "$DATABASE_HOST" -p "$DATABASE_PORT" -U "$DATABASE_USER" -d "$verify_db" -tA \
-    -c 'SELECT name FROM schema_migrations ORDER BY name' > "$restored"
-  expected="$expected_names"
-fi
-if ! cmp -s "$expected" "$restored"; then
-  echo "restored schema does not match the migrations shipped with this release" >&2
-  diff -u "$expected" "$restored" >&2 || true
-  exit 1
+if [ -n "$BACKUP_VERIFY_RECEIPT_FILE" ]; then
+  if ! write_backup_receipt "$BACKUP_VERIFY_RECEIPT_FILE" "$selected_backup_archive"; then
+    echo "could not write backup verification receipt" >&2
+    exit 1
+  fi
 fi
 
-echo "restore verification completed: $(basename "$backup"), migrations=$migrations"
+selected_digest="$(backup_archive_digest "$selected_backup_archive")"
+printf 'verified backup generation: %s\n' "$(basename "$selected_backup_archive")"
+printf 'verified backup sha256: %s\n' "$selected_digest"
+if [ -n "$BACKUP_VERIFY_RECEIPT_FILE" ]; then
+  printf 'verification receipt written: %s\n' "$BACKUP_VERIFY_RECEIPT_FILE"
+fi
+printf 'restore verification completed: migrations=%s\n' "$validated_migration_count"
