@@ -206,12 +206,12 @@ jobs:
           }
           promote "$BACKUP_CANDIDATE_IMAGE" "$BACKUP_RELEASE_TAGS" "$BACKUP_DIGEST" backup_image
           promote "$APP_CANDIDATE_IMAGE" "$APP_RELEASE_TAGS" "$APP_DIGEST" app_image
-      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
         with:
           subject-name: ${{ steps.promote.outputs.app_image }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
-      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
         with:
           subject-name: ${{ steps.promote.outputs.backup_image }}
           subject-digest: ${{ steps.backup-build.outputs.digest }}
