@@ -162,7 +162,7 @@ jobs:
           MONITORING_METRICS_TOKEN_FILE: /tmp/scheduler-metrics-token
           MONITORING_WEBHOOK_URL_FILE: /tmp/scheduler-webhook-url
         run: |
-          docker compose -f docker-compose.yml -f docker-compose.production.yml -f docker-compose.monitoring.yml config --format json > /tmp/scheduler-production-compose.json
+          docker compose --profile tools -f docker-compose.yml -f docker-compose.production.yml -f docker-compose.monitoring.yml config --format json > /tmp/scheduler-production-compose.json
           jq -e '.services["postgres-bootstrap"].image == "scheduler-postgres-backup:local"' /tmp/scheduler-production-compose.json
           jq -e '[.services["postgres-bootstrap"].volumes[]? | select(.source | endswith("/docker/postgres-bootstrap/bootstrap.sh"))] | length == 0' /tmp/scheduler-production-compose.json
           jq -e '[.services.backup.volumes[]? | select(.source | endswith("/migration"))] | length == 0' /tmp/scheduler-production-compose.json
@@ -529,7 +529,7 @@ jobs:
             -e DEPLOYMENT_ENV=production \
             -e DATABASE_HOST=postgres -e DATABASE_PORT=5432 -e DATABASE_NAME=scheduler \
             -e DATABASE_SSLMODE=verify-full -e PGSSLROOTCERT=/run/certs/ca.crt \
-            -e POSTGRES_SUPERUSER=postgres \
+            -e POSTGRES_SUPERUSER=postgres -e POSTGRES_SUPERUSER_PASSWORD \
             -e DATABASE_MIGRATOR_USER=scheduler_migrator -e DATABASE_MIGRATOR_PASSWORD \
             -e DATABASE_BOT_USER=scheduler_bot -e DATABASE_BOT_PASSWORD \
             -e DATABASE_PARSER_USER=scheduler_parser -e DATABASE_PARSER_PASSWORD \
