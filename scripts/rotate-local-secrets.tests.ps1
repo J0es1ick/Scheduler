@@ -115,6 +115,70 @@ function Invoke-RejectedCase(
     }
 }
 
+function Invoke-RotationOutcomeCase([string]$Mode) {
+    $caseDirectory = Join-Path $tempRoot $Mode
+    New-Item -ItemType Directory -Path $caseDirectory | Out-Null
+    $path = Join-Path $caseDirectory '.env'
+    Write-TestEnvironment $path "superuser-password-123456789" "runtime-password-123456789"
+    $before = [IO.File]::ReadAllText($path)
+    $mock = @{ Probes = 0; Committed = $false; Mode = $Mode }
+    function docker {
+        $global:LASTEXITCODE = 0
+        if ($args[0] -eq 'ps') { return 'scheduler-postgres' }
+        if ($args -contains '-i') {
+            $sql = $input | Out-String
+            if ($sql -notmatch 'COMMIT;') { throw 'Rotation did not send COMMIT' }
+            $mock.Committed = $true
+            if ($mock.Mode -eq 'exception-after-commit') { throw 'Connection lost after COMMIT' }
+            $global:LASTEXITCODE = 1
+            return
+        }
+        if ($args -contains 'SELECT 1') {
+            $mock.Probes++
+            if ($args -notcontains '-h' -or $args -notcontains '127.0.0.1') {
+                throw 'Verification must use TCP password authentication'
+            }
+            if ($mock.Mode -eq 'unknown-outcome') {
+                $global:LASTEXITCODE = 1
+                return
+            }
+            return '1'
+        }
+        return 't'
+    }
+    $failure = $null
+    try {
+        & $scriptPath -EnvironmentPath $path -RotateDatabasePassword
+    } catch {
+        $failure = $_
+    }
+    $pending = @(Get-ChildItem -LiteralPath $caseDirectory -Force -Filter '.scheduler-env-rotation-*.tmp')
+    if (-not $mock.Committed -or $mock.Probes -eq 0) {
+        throw "$Mode did not exercise post-COMMIT verification"
+    }
+    if ($Mode -eq 'unknown-outcome') {
+        if ($null -eq $failure -or $failure.Exception.Message -notmatch 'outcome is unknown') {
+            throw 'Uncertain rotation was not reported correctly'
+        }
+        if ([IO.File]::ReadAllText($path) -ne $before -or $pending.Count -ne 1) {
+            throw 'Uncertain rotation changed the old environment or deleted recovery credentials'
+        }
+        $recovery = Read-TestEnvironment $pending[0].FullName
+        Assert-InitializedDatabaseCredentials $Mode $recovery
+        if ($failure.Exception.Message -notlike "*$($pending[0].FullName)*") {
+            throw 'Uncertain rotation did not report the recovery path'
+        }
+    } else {
+        if ($null -ne $failure -or $mock.Probes -ne 9 -or $pending.Count -ne 0) {
+            throw "$Mode did not verify and install all credentials: $failure"
+        }
+        Assert-InitializedDatabaseCredentials $Mode (Read-TestEnvironment $path)
+        if ([IO.File]::ReadAllText($path) -eq $before) {
+            throw 'Confirmed post-COMMIT rotation did not install the new environment'
+        }
+    }
+}
+
 function Invoke-DefaultPreservationCase {
     $path = Join-Path $tempRoot "default-preserves-database.env"
     Write-TestEnvironment $path "superuser-password-123456789" "runtime-password-123456789"
@@ -156,11 +220,17 @@ try {
     Invoke-RejectedCase "runtime-equals-superuser" @{ DATABASE_BOT_USER = "postgres" }
     Invoke-RejectedCase "placeholder-runtime-default" @{ DATABASE_PARSER_PASSWORD = "CHANGE_ME_TO_A_PARSER_PASSWORD" }
     Invoke-RejectedCase "conflicting-modes" @{} -Initialize -Rotate
+    Invoke-RotationOutcomeCase 'unknown-outcome'
+    Invoke-RotationOutcomeCase 'lost-commit-response'
+    Invoke-RotationOutcomeCase 'exception-after-commit'
     if ((Get-ChildItem -LiteralPath $tempRoot -Force -Filter ".scheduler-env-rotation-*").Count -ne 0) {
         throw "atomic environment replacement left temporary secret files"
     }
 } finally {
     if (Test-Path -LiteralPath $tempRoot) {
+        if (-not ([IO.Path]::GetFullPath($tempRoot)).StartsWith([IO.Path]::GetTempPath(), [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Refusing to remove a directory outside the test temporary root'
+        }
         Remove-Item -LiteralPath $tempRoot -Recurse -Force
     }
 }

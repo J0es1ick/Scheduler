@@ -256,10 +256,34 @@ if ($RotateDatabasePassword) {
     $escapedSuperuserPassword = $newSuperuserPassword.Replace("'", "''")
     $sqlStatements.Add("ALTER ROLE `"$escapedSuperuser`" WITH PASSWORD '$escapedSuperuserPassword';")
     $sqlStatements.Add("COMMIT;")
-    ($sqlStatements -join [Environment]::NewLine) | docker exec -i -e "PGPASSWORD=$oldSuperuserPassword" scheduler-postgres psql -v ON_ERROR_STOP=1 -U $superuser -d $databaseName
-    if ($LASTEXITCODE -ne 0) {
-        Remove-Item -LiteralPath $pendingEnvironmentPath -Force -ErrorAction SilentlyContinue
-        throw "PostgreSQL rejected password rotation; the transaction was rolled back"
+    $commitConfirmed = $false
+    try {
+        ($sqlStatements -join [Environment]::NewLine) | docker exec -i -e "PGPASSWORD=$oldSuperuserPassword" scheduler-postgres psql -v ON_ERROR_STOP=1 -U $superuser -d $databaseName
+        $commitConfirmed = $LASTEXITCODE -eq 0
+    } catch {
+        $commitConfirmed = $false
+    }
+    if (-not $commitConfirmed) {
+        $credentialsToVerify = @(@{ User = $superuser; NewPassword = $newSuperuserPassword })
+        $credentialsToVerify += @($rotations | Where-Object Exists)
+        $verified = $true
+        foreach ($credential in $credentialsToVerify) {
+            try {
+                $probe = docker exec -e "PGPASSWORD=$($credential.NewPassword)" -e PGCONNECT_TIMEOUT=5 scheduler-postgres `
+                    psql -h 127.0.0.1 -v ON_ERROR_STOP=1 -U $credential.User -d $databaseName -tAc "SELECT 1" 2>$null
+                if ($LASTEXITCODE -ne 0 -or "$probe".Trim() -ne "1") {
+                    $verified = $false
+                    break
+                }
+            } catch {
+                $verified = $false
+                break
+            }
+        }
+        if (-not $verified) {
+            throw "PostgreSQL rotation outcome is unknown; rollback is NOT confirmed. The current environment is unchanged. New credentials are preserved in $pendingEnvironmentPath. Restore connectivity and verify the credentials before replacing the environment or retrying rotation."
+        }
+        Write-Warning "PostgreSQL did not acknowledge COMMIT, but authentication with all new credentials succeeded. Installing the recovery environment."
     }
     Install-PendingEnvironment $pendingEnvironmentPath $envPath
 } else {
