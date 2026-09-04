@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"log/slog"
 	"time"
@@ -19,13 +18,8 @@ type privacyDeletionQueue interface {
 	Retry(context.Context, string, string, error) error
 }
 
-type privacyUserDeleter interface {
-	DeleteUser(context.Context, string) error
-}
-
 type PrivacyDeletionWorker struct {
 	queue        privacyDeletionQueue
-	users        privacyUserDeleter
 	pollInterval time.Duration
 	batchSize    int
 	failed       map[string]error
@@ -33,7 +27,6 @@ type PrivacyDeletionWorker struct {
 
 func NewPrivacyDeletionWorker(
 	queue privacyDeletionQueue,
-	users privacyUserDeleter,
 	pollInterval time.Duration,
 	batchSize int,
 ) *PrivacyDeletionWorker {
@@ -45,7 +38,6 @@ func NewPrivacyDeletionWorker(
 	}
 	return &PrivacyDeletionWorker{
 		queue:        queue,
-		users:        users,
 		pollInterval: pollInterval,
 		batchSize:    batchSize,
 		failed:       make(map[string]error),
@@ -98,10 +90,7 @@ func (w *PrivacyDeletionWorker) tick(ctx context.Context, monitor *Monitor) {
 			cycleErrors = append(cycleErrors, err)
 			continue
 		}
-		err = w.users.DeleteUser(ctx, request.UserID)
-		if errors.Is(err, sql.ErrNoRows) {
-			err = nil
-		}
+		err = w.queue.Complete(ctx, request.ID, request.ClaimToken)
 		if err != nil {
 			if retryErr := w.queue.Retry(ctx, request.ID, request.ClaimToken, err); retryErr != nil {
 				slog.Error("privacy deletion retry failed", "request_id", request.ID, "err", retryErr)
@@ -109,12 +98,6 @@ func (w *PrivacyDeletionWorker) tick(ctx context.Context, monitor *Monitor) {
 			}
 			w.failed[request.ID] = err
 			cycleErrors = append(cycleErrors, err)
-			continue
-		}
-		if err = w.queue.Complete(ctx, request.ID, request.ClaimToken); err != nil {
-			w.failed[request.ID] = err
-			cycleErrors = append(cycleErrors, err)
-			slog.Error("privacy deletion completion failed", "request_id", request.ID, "err", err)
 			continue
 		}
 		delete(w.failed, request.ID)

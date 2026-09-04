@@ -49,7 +49,6 @@ func main() {
 	monitor.Register(worker.PrivacyDeletionWorkerName, 30*time.Second)
 	privacyDone := worker.NewPrivacyDeletionWorker(
 		repository.NewPrivacyDeletionRepository(db.DB),
-		repository.NewUserRepository(db.DB),
 		time.Second,
 		25,
 	).Start(ctx, monitor)

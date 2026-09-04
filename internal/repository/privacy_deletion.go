@@ -70,14 +70,41 @@ func (r *PrivacyDeletionRepository) ClaimPending(ctx context.Context, limit int)
 }
 
 func (r *PrivacyDeletionRepository) Complete(ctx context.Context, id, claimToken string) error {
-	result, err := r.db.ExecContext(ctx, `
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("complete privacy deletion %s: begin: %w", id, err)
+	}
+	defer tx.Rollback()
+	var userID string
+	err = tx.GetContext(ctx, &userID, `
+		SELECT user_id FROM privacy_deletion_requests
+		WHERE id=$1 AND status='processing' AND claim_token=$2
+		  AND lease_expires_at>clock_timestamp()
+		FOR UPDATE`, id, claimToken)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrPrivacyDeletionClaimLost
+	}
+	if err != nil {
+		return fmt.Errorf("complete privacy deletion %s: lock request: %w", id, err)
+	}
+	var deleted bool
+	if err = tx.GetContext(ctx, &deleted, `SELECT execute_privacy_deletion($1, $2)`, userID, "deleted:"+uuid.NewString()); err != nil {
+		return fmt.Errorf("complete privacy deletion %s: delete profile: %w", id, err)
+	}
+	result, err := tx.ExecContext(ctx, `
 		DELETE FROM privacy_deletion_requests
 		WHERE id=$1 AND status='processing' AND claim_token=$2
 		  AND lease_expires_at>clock_timestamp()`, id, claimToken)
 	if err != nil {
 		return fmt.Errorf("complete privacy deletion %s: %w", id, err)
 	}
-	return requirePrivacyDeletionClaim(result)
+	if err = requirePrivacyDeletionClaim(result); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("complete privacy deletion %s: commit: %w", id, err)
+	}
+	return nil
 }
 
 func (r *PrivacyDeletionRepository) Renew(ctx context.Context, id, claimToken string) error {

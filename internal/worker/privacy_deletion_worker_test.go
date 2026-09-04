@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -61,52 +60,32 @@ func (s *privacyQueueStub) Retry(context.Context, string, string, error) error {
 	return nil
 }
 
-type privacyUserDeleterStub struct {
-	errs  []error
-	calls int
-}
-
-func (s *privacyUserDeleterStub) DeleteUser(context.Context, string) error {
-	s.calls++
-	if len(s.errs) == 0 {
-		return nil
-	}
-	err := s.errs[0]
-	s.errs = s.errs[1:]
-	return err
-}
-
 func TestPrivacyDeletionWorkerCompletesAfterCrashBoundaryRetry(t *testing.T) {
 	request := domain.PrivacyDeletionRequest{ID: "request", UserID: "user", ClaimToken: "claim"}
 	queue := &privacyQueueStub{
 		batches:      [][]domain.PrivacyDeletionRequest{{request}, {request}},
 		completeErrs: []error{errors.New("connection lost"), nil},
 	}
-	users := &privacyUserDeleterStub{errs: []error{nil, sql.ErrNoRows}}
-	worker := NewPrivacyDeletionWorker(queue, users, 0, 1)
+	worker := NewPrivacyDeletionWorker(queue, 0, 1)
 	monitor := NewMonitor()
 	monitor.Register(PrivacyDeletionWorkerName, 0)
 
 	worker.tick(context.Background(), monitor)
 	worker.tick(context.Background(), monitor)
 
-	if users.calls != 2 {
-		t.Fatalf("delete calls = %d, want 2", users.calls)
-	}
-	if queue.completed != 2 || queue.retried != 0 {
+	if queue.completed != 2 || queue.retried != 1 {
 		t.Fatalf("completed=%d retried=%d", queue.completed, queue.retried)
 	}
 }
 
 func TestPrivacyDeletionWorkerRetriesDeletionFailure(t *testing.T) {
 	request := domain.PrivacyDeletionRequest{ID: "request", UserID: "user", ClaimToken: "claim"}
-	queue := &privacyQueueStub{batches: [][]domain.PrivacyDeletionRequest{{request}}}
-	users := &privacyUserDeleterStub{errs: []error{errors.New("database unavailable")}}
-	worker := NewPrivacyDeletionWorker(queue, users, 0, 1)
+	queue := &privacyQueueStub{batches: [][]domain.PrivacyDeletionRequest{{request}}, completeErrs: []error{errors.New("database unavailable")}}
+	worker := NewPrivacyDeletionWorker(queue, 0, 1)
 
 	worker.tick(context.Background(), nil)
 
-	if queue.retried != 1 || queue.completed != 0 {
+	if queue.retried != 1 || queue.completed != 1 {
 		t.Fatalf("completed=%d retried=%d", queue.completed, queue.retried)
 	}
 }
@@ -120,10 +99,10 @@ func TestPrivacyDeletionWorkerKeepsFailedHealthUntilSameRequestSucceeds(t *testi
 		{successfulRequest},
 		{failedRequest},
 	}}
-	users := &privacyUserDeleterStub{errs: []error{
+	queue.completeErrs = []error{
 		errors.New("database unavailable"), nil, nil, nil,
-	}}
-	worker := NewPrivacyDeletionWorker(queue, users, 0, 2)
+	}
+	worker := NewPrivacyDeletionWorker(queue, 0, 2)
 	monitor := NewMonitor()
 	monitor.Register(PrivacyDeletionWorkerName, time.Minute)
 	monitor.Started(PrivacyDeletionWorkerName)
@@ -143,7 +122,7 @@ func TestPrivacyDeletionWorkerRecoversFromClaimFailureAfterCleanClaim(t *testing
 		batches:   [][]domain.PrivacyDeletionRequest{{}},
 		claimErrs: []error{errors.New("database unavailable"), nil},
 	}
-	worker := NewPrivacyDeletionWorker(queue, &privacyUserDeleterStub{}, 0, 1)
+	worker := NewPrivacyDeletionWorker(queue, 0, 1)
 	monitor := NewMonitor()
 	monitor.Register(PrivacyDeletionWorkerName, time.Minute)
 	monitor.Started(PrivacyDeletionWorkerName)
