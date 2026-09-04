@@ -240,13 +240,8 @@ func (h *Handler) replaceTrackedScheduleMessages(
 	parts []string,
 	markup *tgbotapi.ReplyMarkup,
 ) error {
-	ctx, cancel := reqCtx()
+	ctx, cancel := scheduleDeliveryContext(len(parts) + 1)
 	defer cancel()
-	if c.Callback() != nil {
-		if err := h.deleteTrackedScheduleMessages(c); err != nil {
-			return err
-		}
-	}
 	var notice *tgbotapi.Message
 	var err error
 	if !isGroupChat(c) && c.Callback() == nil {
@@ -260,7 +255,7 @@ func (h *Handler) replaceTrackedScheduleMessages(
 		if err != nil {
 			return err
 		}
-		defer func() { _ = h.deleteTelegram(ctx, c, notice) }()
+		defer func() { _, _ = h.deleteScheduleMessages(c, []*tgbotapi.Message{notice}) }()
 	}
 	sent := make([]*tgbotapi.Message, 0, len(parts))
 	for index, part := range parts {
@@ -270,20 +265,59 @@ func (h *Handler) replaceTrackedScheduleMessages(
 		}
 		message, sendErr := h.sendTelegram(ctx, c, c.Recipient(), part, options...)
 		if sendErr != nil {
-			for _, item := range sent {
-				_ = h.deleteTelegram(ctx, c, item)
+			remaining, cleanupErr := h.deleteScheduleMessages(c, sent)
+			h.rememberTrackedScheduleMessages(c, remaining)
+			if len(remaining) > 0 {
+				recoveryCtx, recoveryCancel := reqCtx()
+				cleanupErr = errors.Join(cleanupErr, h.editTelegramMarkup(recoveryCtx, c, remaining[len(remaining)-1], markup))
+				recoveryCancel()
 			}
-			return sendErr
+			return errors.Join(sendErr, cleanupErr)
 		}
 		sent = append(sent, message)
+	}
+	if c.Callback() != nil {
+		if cleanupErr := h.deleteTrackedScheduleMessages(c); cleanupErr != nil {
+			slog.Warn("previous schedule cleanup incomplete", "err", cleanupErr)
+			h.scheduleMessagesMu.Lock()
+			remaining := h.scheduleMessages[scheduleMessagesKey(c)]
+			delete(h.scheduleMessages, scheduleMessagesKey(c))
+			h.scheduleMessagesMu.Unlock()
+			retained := make([]*tgbotapi.Message, 0, len(remaining.IDs)+len(sent))
+			for _, id := range remaining.IDs {
+				retained = append(retained, &tgbotapi.Message{ID: id, Chat: c.Chat()})
+			}
+			sent = append(retained, sent...)
+		}
 	}
 	h.rememberTrackedScheduleMessages(c, sent)
 	return nil
 }
 
-func (h *Handler) deleteTrackedScheduleMessages(c tgbotapi.Context) error {
-	ctx, cancel := reqCtx()
+func scheduleDeliveryContext(operations int) (context.Context, context.CancelFunc) {
+	budget := min(2*time.Minute, time.Duration(max(1, operations))*handlerTimeout)
+	return context.WithTimeout(context.Background(), budget)
+}
+
+func (h *Handler) deleteScheduleMessages(c tgbotapi.Context, messages []*tgbotapi.Message) ([]*tgbotapi.Message, error) {
+	ctx, cancel := scheduleDeliveryContext(len(messages))
 	defer cancel()
+	remaining := make([]*tgbotapi.Message, 0)
+	var deleteErrors []error
+	for index := len(messages) - 1; index >= 0; index-- {
+		message := messages[index]
+		operationCtx, operationCancel := context.WithTimeout(ctx, handlerTimeout)
+		err := h.deleteTelegram(operationCtx, c, message)
+		operationCancel()
+		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "message to delete not found") {
+			remaining = append(remaining, message)
+			deleteErrors = append(deleteErrors, fmt.Errorf("delete schedule message %d: %w", message.ID, err))
+		}
+	}
+	return remaining, errors.Join(deleteErrors...)
+}
+
+func (h *Handler) deleteTrackedScheduleMessages(c tgbotapi.Context) error {
 	key := scheduleMessagesKey(c)
 	h.scheduleMessagesMu.Lock()
 	tracked, ok := h.scheduleMessages[key]
@@ -291,20 +325,24 @@ func (h *Handler) deleteTrackedScheduleMessages(c tgbotapi.Context) error {
 	if !ok {
 		return retireInlineMessage(c, "Обновляю расписание…")
 	}
-	var deleteErrors []error
-	for index := len(tracked.IDs) - 1; index >= 0; index-- {
-		messageID := tracked.IDs[index]
-		message := &tgbotapi.Message{ID: messageID, Chat: c.Chat()}
-		if err := h.deleteTelegram(ctx, c, message); err != nil {
-			if !strings.Contains(strings.ToLower(err.Error()), "message to delete not found") {
-				deleteErrors = append(deleteErrors, fmt.Errorf("delete previous schedule message %d: %w", messageID, err))
-			}
-		}
+	messages := make([]*tgbotapi.Message, 0, len(tracked.IDs))
+	for _, id := range tracked.IDs {
+		messages = append(messages, &tgbotapi.Message{ID: id, Chat: c.Chat()})
 	}
+	remaining, err := h.deleteScheduleMessages(c, messages)
 	h.scheduleMessagesMu.Lock()
-	delete(h.scheduleMessages, key)
+	for _, id := range tracked.IDs {
+		delete(h.scheduleMessages, fmt.Sprintf("%d:%d", c.Chat().ID, id))
+	}
+	if len(remaining) > 0 {
+		ids := make([]int, 0, len(remaining))
+		for _, message := range remaining {
+			ids = append(ids, message.ID)
+		}
+		h.scheduleMessages[key] = trackedScheduleMessages{IDs: ids, CreatedAt: tracked.CreatedAt}
+	}
 	h.scheduleMessagesMu.Unlock()
-	return errors.Join(deleteErrors...)
+	return err
 }
 
 func (h *Handler) rememberTrackedScheduleMessages(c tgbotapi.Context, messages []*tgbotapi.Message) {
@@ -315,7 +353,6 @@ func (h *Handler) rememberTrackedScheduleMessages(c tgbotapi.Context, messages [
 	for _, message := range messages {
 		ids = append(ids, message.ID)
 	}
-	key := fmt.Sprintf("%d:%d", c.Chat().ID, messages[len(messages)-1].ID)
 	cutoff := time.Now().Add(-48 * time.Hour)
 	h.scheduleMessagesMu.Lock()
 	if h.scheduleMessages == nil {
@@ -326,7 +363,10 @@ func (h *Handler) rememberTrackedScheduleMessages(c tgbotapi.Context, messages [
 			delete(h.scheduleMessages, storedKey)
 		}
 	}
-	h.scheduleMessages[key] = trackedScheduleMessages{IDs: ids, CreatedAt: time.Now()}
+	for _, id := range ids {
+		key := fmt.Sprintf("%d:%d", c.Chat().ID, id)
+		h.scheduleMessages[key] = trackedScheduleMessages{IDs: ids, CreatedAt: time.Now()}
+	}
 	h.scheduleMessagesMu.Unlock()
 }
 

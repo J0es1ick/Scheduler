@@ -37,3 +37,16 @@ func (h *Handler) deleteTelegram(ctx context.Context, current tele.Context, mess
 	}
 	return err
 }
+
+func (h *Handler) editTelegramMarkup(ctx context.Context, current tele.Context, message tele.Editable, markup *tele.ReplyMarkup) error {
+	if h.TelegramLimiter != nil {
+		if err := h.TelegramLimiter.Wait(ctx, current.Recipient().Recipient()); err != nil {
+			return err
+		}
+	}
+	_, err := current.Bot().EditReplyMarkup(message, markup)
+	if h.TelegramLimiter != nil {
+		h.TelegramLimiter.Observe(err)
+	}
+	return err
+}
