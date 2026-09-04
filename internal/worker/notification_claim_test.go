@@ -99,6 +99,24 @@ func TestNotificationClaimFinalizationFailureStopsBatch(t *testing.T) {
 	}
 }
 
+func TestNotificationClaimMissingItemDoesNotStopOtherRecipients(t *testing.T) {
+	guard, err := startNotificationClaimGuard(context.Background(), "owner", []string{"deleted-user", "other-user"},
+		func(context.Context, string, []string) error { return nil }, nil, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer guard.stop()
+	if err = guard.finish("deleted-user", func(context.Context) error { return repository.ErrNotificationGone }); err != nil {
+		t.Fatal(err)
+	}
+	if err = guard.finish("other-user", func(context.Context) error { return nil }); err != nil {
+		t.Fatalf("unrelated delivery stopped: %v", err)
+	}
+	if err = context.Cause(guard.ctx); err != nil {
+		t.Fatalf("batch cancelled after profile deletion: %v", err)
+	}
+}
+
 func TestNotificationClaimShutdownWaitsForRenewal(t *testing.T) {
 	started := make(chan struct{})
 	var calls atomic.Int32

@@ -190,20 +190,34 @@ func (r *NotificationRepository) renewClaims(
 	if claimToken == "" || len(ids) == 0 {
 		return fmt.Errorf("%w: empty claim", ErrNotificationClaimLost)
 	}
-	query, args, err := sqlx.In(`UPDATE `+table+`
-		SET lease_expires_at=clock_timestamp()+(? * INTERVAL '1 second'),
-			updated_at=NOW()
-		WHERE status='pending' AND claim_token=?
-		  AND lease_expires_at>clock_timestamp() AND id IN (?)`,
-		int(notificationClaimLease/time.Second), claimToken, ids)
+	query, args, err := sqlx.In(`
+		WITH locked AS MATERIALIZED (
+			SELECT id, status='pending' AND claim_token=?
+				AND lease_expires_at>clock_timestamp() AS owned
+			FROM `+table+` WHERE id IN (?) FOR UPDATE
+		), renewed AS (
+			UPDATE `+table+` queue
+			SET lease_expires_at=clock_timestamp()+(? * INTERVAL '1 second'), updated_at=NOW()
+			FROM locked WHERE queue.id=locked.id AND locked.owned
+			RETURNING queue.id
+		)
+		SELECT (SELECT COUNT(*) FROM locked) AS existing,
+			(SELECT COUNT(*) FROM renewed) AS renewed`,
+		claimToken, ids, int(notificationClaimLease/time.Second))
 	if err != nil {
 		return fmt.Errorf("renew %s claim: %w", table, err)
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
-	if err != nil {
+	var counts struct {
+		Existing int `db:"existing"`
+		Renewed  int `db:"renewed"`
+	}
+	if err = r.db.GetContext(ctx, &counts, r.db.Rebind(query), args...); err != nil {
 		return fmt.Errorf("renew %s claim: %w", table, err)
 	}
-	return requireNotificationClaim(result, int64(len(ids)), table)
+	if counts.Existing != counts.Renewed {
+		return fmt.Errorf("%w: %s", ErrNotificationClaimLost, table)
+	}
+	return nil
 }
 
 func (r *NotificationRepository) MarkBotOutboxDelivered(ctx context.Context, id, claimToken string) error {
@@ -217,7 +231,7 @@ func (r *NotificationRepository) MarkBotOutboxDelivered(ctx context.Context, id,
 	if err != nil {
 		return fmt.Errorf("mark bot outbox %s delivered: %w", id, err)
 	}
-	return requireNotificationClaim(result, 1, id)
+	return r.requireNotificationClaim(ctx, result, "bot_outbox", id)
 }
 
 func (r *NotificationRepository) IsBotOutboxActive(ctx context.Context, id, claimToken string) (bool, error) {
@@ -245,7 +259,7 @@ func (r *NotificationRepository) MarkBotOutboxCancelled(ctx context.Context, id,
 	if err != nil {
 		return fmt.Errorf("cancel bot outbox %s: %w", id, err)
 	}
-	return requireNotificationClaim(result, 1, id)
+	return r.requireNotificationClaim(ctx, result, "bot_outbox", id)
 }
 
 func (r *NotificationRepository) MarkBotOutboxFailed(
@@ -278,7 +292,7 @@ func (r *NotificationRepository) MarkBotOutboxFailed(
 	if err != nil {
 		return fmt.Errorf("mark bot outbox %s failed: %w", id, err)
 	}
-	return requireNotificationClaim(result, 1, id)
+	return r.requireNotificationClaim(ctx, result, "bot_outbox", id)
 }
 
 func (r *NotificationRepository) MarkBotOutboxRateLimited(
@@ -309,7 +323,7 @@ func (r *NotificationRepository) MarkDelivered(ctx context.Context, id, claimTok
 	if err != nil {
 		return fmt.Errorf("mark notification %s delivered: %w", id, err)
 	}
-	return requireNotificationClaim(result, 1, id)
+	return r.requireNotificationClaim(ctx, result, "notification_deliveries", id)
 }
 
 func (r *NotificationRepository) MarkCancelled(ctx context.Context, id, claimToken string) error {
@@ -322,7 +336,7 @@ func (r *NotificationRepository) MarkCancelled(ctx context.Context, id, claimTok
 	if err != nil {
 		return fmt.Errorf("mark notification %s cancelled: %w", id, err)
 	}
-	return requireNotificationClaim(result, 1, id)
+	return r.requireNotificationClaim(ctx, result, "notification_deliveries", id)
 }
 
 func (r *NotificationRepository) IsDeliveryActive(ctx context.Context, id, claimToken string) (bool, error) {
@@ -399,7 +413,7 @@ func (r *NotificationRepository) markDeferred(
 	if err != nil {
 		return fmt.Errorf("defer %s %s: %w", table, id, err)
 	}
-	return requireNotificationClaim(result, 1, id)
+	return r.requireNotificationClaim(ctx, result, table, id)
 }
 
 func (r *NotificationRepository) MarkFailed(
@@ -432,7 +446,7 @@ func (r *NotificationRepository) MarkFailed(
 	if err != nil {
 		return fmt.Errorf("mark notification %s failed: %w", id, err)
 	}
-	return requireNotificationClaim(result, 1, id)
+	return r.requireNotificationClaim(ctx, result, "notification_deliveries", id)
 }
 
 func (r *NotificationRepository) MarkRateLimited(
@@ -471,7 +485,7 @@ func (r *NotificationRepository) markRateLimited(
 	if err != nil {
 		return fmt.Errorf("mark %s %s rate limited: %w", table, id, err)
 	}
-	return requireNotificationClaim(result, 1, id)
+	return r.requireNotificationClaim(ctx, result, table, id)
 }
 
 func (r *NotificationRepository) MarkPermanentFailure(
@@ -505,7 +519,7 @@ func (r *NotificationRepository) markPermanentFailure(
 	if err != nil {
 		return fmt.Errorf("mark %s %s permanently failed: %w", table, id, err)
 	}
-	return requireNotificationClaim(result, 1, id)
+	return r.requireNotificationClaim(ctx, result, table, id)
 }
 
 func (r *NotificationRepository) PruneCompleted(ctx context.Context, retention time.Duration) (int64, error) {
@@ -537,12 +551,23 @@ func (r *NotificationRepository) PruneCompleted(ctx context.Context, retention t
 	return eventCount + outboxCount, nil
 }
 
-func requireNotificationClaim(result sql.Result, expected int64, id string) error {
+var ErrNotificationGone = errors.New("notification queue item no longer exists")
+
+func (r *NotificationRepository) requireNotificationClaim(ctx context.Context, result sql.Result, table, id string) error {
 	updated, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("count notification claim updates for %s: %w", id, err)
 	}
-	if updated != expected {
+	if updated == 0 {
+		var exists bool
+		if err = r.db.GetContext(ctx, &exists, `SELECT EXISTS (SELECT 1 FROM `+table+` WHERE id=$1)`, id); err != nil {
+			return fmt.Errorf("inspect notification claim %s: %w", id, err)
+		}
+		if !exists {
+			return fmt.Errorf("%w: %s", ErrNotificationGone, id)
+		}
+	}
+	if updated != 1 {
 		return fmt.Errorf("%w: %s", ErrNotificationClaimLost, id)
 	}
 	return nil

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -101,7 +102,7 @@ func (g *notificationClaimGuard) finish(id string, mark func(context.Context) er
 	}
 	ctx, cancel := context.WithTimeout(g.ctx, notificationClaimQueryTimeout)
 	defer cancel()
-	if err := mark(ctx); err != nil {
+	if err := mark(ctx); err != nil && !errors.Is(err, repository.ErrNotificationGone) {
 		g.cancel(err)
 		return err
 	}

@@ -4,12 +4,52 @@ package repository_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/google/uuid"
 )
+
+func TestDeletedRecipientDoesNotInvalidateOtherQueueClaims(t *testing.T) {
+	for _, table := range []string{"notification_deliveries", "bot_outbox"} {
+		t.Run(table, func(t *testing.T) {
+			db, ctx := openOperationalIntegrationDB(t)
+			createNotificationLeaseFixture(t, db, ctx, table, 1)
+			createNotificationLeaseFixture(t, db, ctx, table, 1)
+			repo := repository.NewNotificationRepository(db)
+			queue := notificationLeaseQueues(repo)[0]
+			if table == "bot_outbox" {
+				queue = notificationLeaseQueues(repo)[1]
+			}
+			items, err := queue.claim(ctx, 2)
+			if err != nil || len(items) != 2 {
+				t.Fatalf("claim=%v err=%v", items, err)
+			}
+			var userID string
+			if err = db.GetContext(ctx, &userID, `SELECT user_id FROM `+table+` WHERE id=$1`, items[0].id); err != nil {
+				t.Fatal(err)
+			}
+			if err = repository.NewUserRepository(db).DeleteUser(ctx, userID); err != nil {
+				t.Fatal(err)
+			}
+			ids := []string{items[0].id, items[1].id}
+			if err = queue.renew(ctx, items[1].token, ids); err != nil {
+				t.Fatalf("deleted recipient stopped unrelated claim: %v", err)
+			}
+			if err = queue.delivered(ctx, items[0].id, items[0].token); !errors.Is(err, repository.ErrNotificationGone) {
+				t.Fatalf("deleted item was not distinguished from claim loss: %v", err)
+			}
+			if err = queue.renew(ctx, "stale-owner", ids); !errors.Is(err, repository.ErrNotificationClaimLost) {
+				t.Fatalf("stale claim accepted after deletion: %v", err)
+			}
+			if err = queue.delivered(ctx, items[1].id, items[1].token); err != nil {
+				t.Fatalf("surviving delivery failed: %v", err)
+			}
+		})
+	}
+}
 
 func TestClaimedScheduleCancellationKeepsBatchOwnership(t *testing.T) {
 	db, ctx := openOperationalIntegrationDB(t)
