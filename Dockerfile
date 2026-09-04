@@ -18,7 +18,13 @@ ARG COMMIT=local
 ARG BUILD_TIME=unknown
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+RUN set -eu; \
+    attempt=1; \
+    until go mod download; do \
+      if [ "$attempt" -ge 4 ]; then exit 1; fi; \
+      sleep $((attempt * 5)); \
+      attempt=$((attempt + 1)); \
+    done
 COPY . .
 COPY --from=admin-web-builder /src/internal/adminui/dist ./internal/adminui/dist
 COPY --from=site-web-builder /src/internal/siteui/dist ./internal/siteui/dist

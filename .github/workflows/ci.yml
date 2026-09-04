@@ -517,13 +517,21 @@ jobs:
         run: |
           set -euo pipefail
           offsite="$RUNNER_TEMP/scheduler-tls-offsite"
-          recipient="$(docker compose run --rm --no-deps --entrypoint /bin/sh backup -c 'identity=/tmp/age-identity-$$; age-keygen --output "$identity" >/dev/null 2>&1; age-keygen -y "$identity"')"
-          mkdir -p "$offsite"
+          key_dir="$RUNNER_TEMP/scheduler-tls-preflight-key"
+          mkdir -p "$offsite" "$key_dir"
           printf '%s\n' scheduler-offsite > "$offsite/.scheduler-offsite"
           backup_uid="$(docker compose run --rm --no-deps --entrypoint id backup -u)"
           backup_gid="$(docker compose run --rm --no-deps --entrypoint id backup -g)"
-          sudo chown -R "$backup_uid:$backup_gid" "$offsite"
-          sudo chmod 0700 "$offsite"
+          sudo chown -R "$backup_uid:$backup_gid" "$offsite" "$key_dir"
+          sudo chmod 0700 "$offsite" "$key_dir"
+          recipient="$(docker compose run --rm --no-deps --entrypoint /bin/sh \
+            -v "$key_dir:/keys" backup -ec \
+            'umask 077; age-keygen --output /keys/identity; age-keygen -y /keys/identity' \
+            | tail -n 1 | tr -d '\r')"
+          case "$recipient" in
+            age1*) ;;
+            *) echo 'Failed to generate a valid age recipient.' >&2; exit 1 ;;
+          esac
           docker compose run --rm --no-deps \
             -v "$TLS_CERT_DIR/ca.crt:/run/certs/ca.crt:ro" \
             -e DEPLOYMENT_ENV=production \
@@ -595,4 +603,4 @@ jobs:
       - name: Remove TLS material
         if: always()
         shell: bash
-        run: sudo rm -rf -- "$TLS_CERT_DIR" "$RUNNER_TEMP/scheduler-tls-offsite"
+        run: sudo rm -rf -- "$TLS_CERT_DIR" "$RUNNER_TEMP/scheduler-tls-offsite" "$RUNNER_TEMP/scheduler-tls-preflight-key"
