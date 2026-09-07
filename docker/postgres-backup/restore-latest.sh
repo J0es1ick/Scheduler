@@ -35,6 +35,7 @@ backup_selection_fatal=false
 : > "$restore_candidates"
 
 cleanup() {
+  cleanup_staged_backup || true
   if [ "$created" = true ]; then
     dropdb --if-exists --force --host "$DATABASE_HOST" --port "$DATABASE_PORT" --username "$DATABASE_USER" "$target" >/dev/null 2>&1 || true
   fi
@@ -90,12 +91,13 @@ fi
 restore_candidate() {
   candidate_kind="$1"
   candidate_archive="$2"
+  stage_backup_archive "$candidate_archive" "$BACKUP_RESTORE_RECEIPT_FILE" || return 1
   if ! createdb --host "$DATABASE_HOST" --port "$DATABASE_PORT" --username "$DATABASE_USER" "$target"; then
     backup_selection_fatal=true
     return 1
   fi
   created=true
-  if restore_backup_into_database "$candidate_kind" "$candidate_archive" "$target" &&
+  if restore_backup_into_database "$candidate_kind" "$staged_backup_archive" "$target" &&
     validate_restored_scheduler_database "$target" "$MIGRATIONS_PATH"; then
     return 0
   fi

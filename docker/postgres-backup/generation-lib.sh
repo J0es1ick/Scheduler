@@ -1,11 +1,10 @@
 #!/bin/sh
 
 backup_archive_digest() {
-  archive="$1"
-  sha256sum "$archive" | awk '{ print $1 }'
+  sha256sum "$1" | awk '{ print $1 }'
 }
 
-verify_backup_checksum() {
+verify_backup_checksum() (
   archive="$1"
   checksum="${archive}.sha256"
   [ -s "$archive" ] && [ -s "$checksum" ] || return 1
@@ -16,7 +15,7 @@ verify_backup_checksum() {
   [ "${#expected}" -eq 64 ] || return 1
   actual="$(backup_archive_digest "$archive")" || return 1
   [ "$actual" = "$expected" ]
-}
+)
 
 backup_generation_sort_key() {
   archive_name="$(basename "$1")"
@@ -113,7 +112,10 @@ select_newest_valid_backup() {
 write_backup_receipt() {
   receipt_path="$1"
   receipt_archive="$2"
-  receipt_digest="$(backup_archive_digest "$receipt_archive")" || return 1
+  receipt_digest="${3:-}"
+  if [ -z "$receipt_digest" ]; then
+    receipt_digest="$(backup_archive_digest "$receipt_archive")" || return 1
+  fi
   receipt_name="$(basename "$receipt_archive")"
   receipt_temporary="${receipt_path}.partial-$$"
   receipt_directory="$(dirname "$receipt_path")"
@@ -189,4 +191,59 @@ select_first_usable_backup() {
     echo "skipping unrestorable backup generation: $(basename "$usable_archive")" >&2
   done < "$usable_candidates_file"
   return 1
+}
+
+
+
+cleanup_staged_backup() {
+  if [ -n "${staged_backup_directory:-}" ]; then
+    rm -f "$staged_backup_archive" "${staged_backup_archive}.sha256"
+    rmdir "$staged_backup_directory" || return 1
+  fi
+  staged_backup_directory=
+  staged_backup_archive=
+  staged_backup_digest=
+}
+
+stage_backup_archive() {
+  cleanup_staged_backup || return 1
+  staging_source="$1"
+  staging_receipt="${2:-}"
+  staging_root="${BACKUP_STAGING_DIRECTORY:-/restore-staging}"
+  [ -d "$staging_root" ] && [ -w "$staging_root" ] || {
+    echo "backup staging disk is unavailable" >&2; return 1;
+  }
+
+  staging_fs="$(df -PT "$staging_root" | awk 'NR == 2 {print $2}')" || return 1
+  case "$staging_fs" in tmpfs|ramfs|'') echo "backup staging must use disk storage" >&2; return 1 ;; esac
+  staging_size="$(wc -c < "$staging_source" | tr -d ' ')" || return 1
+  staging_available="$(df -Pk "$staging_root" | awk 'NR == 2 {print $4}')" || return 1
+  case "$staging_available" in ''|*[!0-9]*) return 1 ;; esac
+  if [ "$staging_available" -lt "$(( (staging_size + 1023) / 1024 + 65536 ))" ]; then
+    echo "insufficient disk space for backup staging (64 MiB reserve required)" >&2
+    return 1
+  fi
+  staged_backup_directory="$(mktemp -d "$staging_root/generation.XXXXXX")" || return 1
+  staged_backup_archive="$staged_backup_directory/$(basename "$staging_source")"
+  if ! (umask 077; cp "$staging_source" "$staged_backup_archive" &&
+    cp "${staging_source}.sha256" "${staged_backup_archive}.sha256") ||
+    ! verify_backup_checksum "$staged_backup_archive"; then
+    cleanup_staged_backup
+    return 1
+  fi
+  staged_backup_digest="$(backup_archive_digest "$staged_backup_archive")" || {
+    cleanup_staged_backup; return 1;
+  }
+  if [ -n "$staging_receipt" ]; then
+    if ! read_backup_receipt "$staging_receipt" ||
+      [ "$receipt_archive_name" != "$(basename "$staged_backup_archive")" ] ||
+      [ "$receipt_archive_digest" != "$staged_backup_digest" ]; then
+      echo "staged backup does not match the verification receipt" >&2
+      cleanup_staged_backup
+      return 1
+    fi
+  fi
+  chmod 0400 "$staged_backup_archive" "${staged_backup_archive}.sha256" || {
+    cleanup_staged_backup; return 1;
+  }
 }

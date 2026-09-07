@@ -163,6 +163,9 @@ services:
       - type: volume
         source: pgbackups
         target: /backups
+      - type: volume
+        source: pgrestorestaging
+        target: /restore-staging
       - ${PRODUCTION_DB_CA_FILE:?PRODUCTION_DB_CA_FILE is required}:/run/certs/postgres-ca.pem:ro
       - type: bind
         source: ${PRODUCTION_OFFSITE_PATH:?PRODUCTION_OFFSITE_PATH is required}

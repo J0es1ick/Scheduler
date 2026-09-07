@@ -407,4 +407,5 @@ assert_bootstrap_password_rejected placeholder-root "must not contain a placehol
 assert_bootstrap_password_rejected duplicate-root "must be distinct" \
   DATABASE_BOT_PASSWORD=bootstrap-superuser-password-01
 
+/usr/local/bin/scheduler-staging-tests
 echo "backup failure-injection tests passed"

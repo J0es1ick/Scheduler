@@ -26,6 +26,7 @@ backup_selection_fatal=false
 : > "$verify_candidates"
 
 cleanup() {
+  cleanup_staged_backup || true
   if [ "$verify_created" = true ] && [ -n "$verify_db" ]; then
     dropdb --if-exists --force --host "$DATABASE_HOST" --port "$DATABASE_PORT" --username "$DATABASE_USER" "$verify_db" >/dev/null 2>&1 || true
   fi
@@ -84,6 +85,7 @@ fi
 verify_candidate() {
   verify_kind="$1"
   verify_archive="$2"
+  stage_backup_archive "$verify_archive" || return 1
   verify_random="$(od -An -N4 -tu4 /dev/urandom | tr -d ' ')"
   verify_db="scheduler_verify_$(date -u +%s)_$$_${verify_random}"
   if ! createdb --host "$DATABASE_HOST" --port "$DATABASE_PORT" --username "$DATABASE_USER" "$verify_db"; then
@@ -91,7 +93,7 @@ verify_candidate() {
     return 1
   fi
   verify_created=true
-  if restore_backup_into_database "$verify_kind" "$verify_archive" "$verify_db" &&
+  if restore_backup_into_database "$verify_kind" "$staged_backup_archive" "$verify_db" &&
     validate_restored_scheduler_database "$verify_db" "$MIGRATIONS_PATH"; then
     verify_result=0
   else
@@ -119,13 +121,13 @@ else
 fi
 
 if [ -n "$BACKUP_VERIFY_RECEIPT_FILE" ]; then
-  if ! write_backup_receipt "$BACKUP_VERIFY_RECEIPT_FILE" "$selected_backup_archive"; then
+  if ! write_backup_receipt "$BACKUP_VERIFY_RECEIPT_FILE" "$staged_backup_archive" "$staged_backup_digest"; then
     echo "could not write backup verification receipt" >&2
     exit 1
   fi
 fi
 
-selected_digest="$(backup_archive_digest "$selected_backup_archive")"
+selected_digest="$staged_backup_digest"
 printf 'verified backup generation: %s\n' "$(basename "$selected_backup_archive")"
 printf 'verified backup sha256: %s\n' "$selected_digest"
 if [ -n "$BACKUP_VERIFY_RECEIPT_FILE" ]; then
