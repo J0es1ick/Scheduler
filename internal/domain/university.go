@@ -17,6 +17,7 @@ type University struct {
 }
 
 type SourceFreshness struct {
+	State       string     `db:"state"`
 	ScheduleURL string     `db:"schedule_url"`
 	LastSuccess *time.Time `db:"last_success_at"`
 }

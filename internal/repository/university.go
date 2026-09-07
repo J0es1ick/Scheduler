@@ -91,11 +91,12 @@ func (r *UniversityRepository) GetSourceFreshness(ctx context.Context, universit
 	var freshness domain.SourceFreshness
 	err := r.db.GetContext(ctx, &freshness, `
 		SELECT COALESCE(u.schedule_url, '') AS schedule_url,
-			MAX(ds.last_success_at) AS last_success_at
+			snapshot.published_at AS last_success_at,
+ scheduler_source_freshness_state(NOW(),COALESCE(ds.is_enabled,FALSE),ds.last_error,snapshot.published_at,COALESCE(ds.update_interval,3600)) AS state
 		FROM universities u
-		LEFT JOIN data_sources ds ON ds.university_id=u.id
-		WHERE u.id=$1
-		GROUP BY u.id, u.schedule_url`, universityID)
+		LEFT JOIN data_sources ds ON ds.university_id=u.id AND ds.lifecycle_status='active'
+ LEFT JOIN parser_snapshots snapshot ON snapshot.id=ds.current_snapshot_id
+ WHERE u.id=$1`, universityID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil

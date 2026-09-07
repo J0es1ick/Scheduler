@@ -10,6 +10,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["cryptography>=45.0.0"]
 
+[project.optional-dependencies]
+test = ["jsonschema>=4.23,<5", "tzdata>=2025.1"]
+
 [project.scripts]
 scheduler-connector-python = "scheduler_connector.cli:main"
 

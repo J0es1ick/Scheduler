@@ -206,6 +206,13 @@ func TestSignedSnapshotIntakeAndStaging(t *testing.T) {
 	if lessonsBeforeActivation != 1 {
 		t.Fatalf("approved snapshot changed live schedule: lessons=%d, want old lesson", lessonsBeforeActivation)
 	}
+	if _, staleErr := snapshots.ActivateConnectorWithSnapshot(ctx, connectorID, candidate.ID, "integration", "stale comparison", nil, "different-live-version"); staleErr == nil {
+		t.Fatal("activation accepted a stale comparison")
+	}
+	var retainedSource string
+	if err = db.GetContext(ctx, &retainedSource, `SELECT id FROM data_sources WHERE university_id=$1 AND lifecycle_status='active'`, universityID); err != nil || retainedSource != oldSourceID {
+		t.Fatalf("failed activation changed active source: %s %v", retainedSource, err)
+	}
 	oldPublicationEntered := make(chan struct{})
 	releaseOldPublication := make(chan struct{})
 	oldPublicationDone := make(chan error, 1)

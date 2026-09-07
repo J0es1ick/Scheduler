@@ -74,6 +74,9 @@ func Validate(snapshot Snapshot) error {
 			add("%s.name is duplicated", path)
 		}
 		groupNames[name] = struct{}{}
+		if group.Lessons == nil {
+			add("%s.lessons is required", path)
+		}
 		for lessonIndex, lesson := range group.Lessons {
 			lessonCount++
 			validateLesson(
@@ -102,7 +105,7 @@ func validateInstitution(value Institution, add func(string, ...any)) {
 	if strings.TrimSpace(value.Name) == "" {
 		add("institution.name is required")
 	}
-	if _, err := time.LoadLocation(strings.TrimSpace(value.Timezone)); err != nil {
+	if _, err := time.LoadLocation(strings.TrimSpace(value.Timezone)); err != nil || strings.TrimSpace(value.Timezone) == "" || value.Timezone == "Local" {
 		add("institution.timezone must be an IANA timezone")
 	}
 	if value.ScheduleURL != "" {
@@ -233,7 +236,7 @@ func validateValidity(recurrence Recurrence, path string, termStart, termEnd tim
 }
 
 func validExternalID(value string) bool {
-	return externalIDPattern.MatchString(strings.TrimSpace(value))
+	return externalIDPattern.MatchString(value)
 }
 
 func IsValidationError(err error) bool {

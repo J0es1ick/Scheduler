@@ -111,9 +111,13 @@ func (s *Service) process(ctx context.Context, run *domain.ConnectorIngestionRun
 	if err != nil {
 		return completion, permanentError{err}
 	}
+	payload.IngestionSequence = run.IngestionSequence
 	snapshot, err := s.parser.IngestClaimedExternalSnapshot(
 		ctx, client.DataSourceID, payload, run.ID, run.ClaimToken,
 	)
+	if errors.Is(err, repository.ErrConnectorSuperseded) {
+		return ingestionCompletion{status: domain.IngestionStatusSuperseded}, nil
+	}
 	if err != nil {
 		return completion, err
 	}

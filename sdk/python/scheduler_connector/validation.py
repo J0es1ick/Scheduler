@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone, timedelta
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import re
 
@@ -21,11 +22,19 @@ class SnapshotValidationError(ValueError):
 
 def validate_snapshot(snapshot: dict) -> None:
     problems: list[str] = []
+    if not isinstance(snapshot, dict):
+        raise SnapshotValidationError(["snapshot must be an object"])
+    _check_wire(snapshot, "snapshot", _WIRE)
     if snapshot.get("schema_version") != SCHEMA_VERSION:
         problems.append(f"schema_version must be {SCHEMA_VERSION}")
     _external_id(snapshot.get("snapshot_id"), "snapshot_id", problems)
     try:
-        datetime.fromisoformat(str(snapshot.get("generated_at", "")).replace("Z", "+00:00"))
+        raw_time = snapshot.get("generated_at", "")
+        if not isinstance(raw_time, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})", raw_time):
+            raise ValueError()
+        generated = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
+        if generated > datetime.now(timezone.utc) + timedelta(minutes=10):
+            problems.append("generated_at is too far in the future")
     except ValueError:
         problems.append("generated_at must be RFC3339")
 
@@ -35,10 +44,20 @@ def validate_snapshot(snapshot: dict) -> None:
         problems.append("institution.name is required")
     try:
         ZoneInfo(str(institution.get("timezone", "")))
-    except ZoneInfoNotFoundError:
+    except (ZoneInfoNotFoundError, ValueError):
         problems.append("institution.timezone must be an IANA timezone")
 
+    schedule_url = institution.get("schedule_url", "")
+    if schedule_url:
+        try:
+            parsed_url = urlsplit(schedule_url)
+            if parsed_url.scheme not in {"http", "https"} or not parsed_url.hostname or re.search(r"[\s\x00-\x1f]", schedule_url) or re.search(r"%(?![0-9A-Fa-f]{2})", schedule_url):
+                raise ValueError()
+        except (ValueError, TypeError):
+            problems.append("institution.schedule_url must be an absolute HTTP(S) URL")
     term = snapshot.get("term") or {}
+    if not isinstance(term.get("name"), str) or not term["name"].strip():
+        problems.append("term.name is required")
     _external_id(term.get("external_id"), "term.external_id", problems)
     term_start = _date(term.get("starts_on"), "term.starts_on", problems)
     term_end = _date(term.get("ends_on"), "term.ends_on", problems)
@@ -57,14 +76,14 @@ def validate_snapshot(snapshot: dict) -> None:
     lesson_count = 0
     for group_index, group in enumerate(groups):
         prefix = f"groups[{group_index}]"
-        group_id = str(group.get("external_id", ""))
+        group_id = group.get("external_id", "")
         _external_id(group_id, prefix + ".external_id", problems)
         if group_id in group_ids:
             problems.append(prefix + ".external_id is duplicated")
         group_ids.add(group_id)
         if not str(group.get("name", "")).strip():
             problems.append(prefix + ".name is required")
-        normalized_name = str(group.get("name", "")).strip().casefold()
+        normalized_name = str(group.get("name", "")).strip().lower()
         if normalized_name in group_names:
             problems.append(prefix + ".name is duplicated")
         group_names.add(normalized_name)
@@ -75,7 +94,7 @@ def validate_snapshot(snapshot: dict) -> None:
         for lesson_index, lesson in enumerate(lessons):
             lesson_count += 1
             lesson_prefix = f"{prefix}.lessons[{lesson_index}]"
-            lesson_id = str(lesson.get("external_id", ""))
+            lesson_id = lesson.get("external_id", "")
             _external_id(lesson_id, lesson_prefix + ".external_id", problems)
             if lesson_id in lesson_ids:
                 problems.append(lesson_prefix + ".external_id is duplicated")
@@ -85,7 +104,7 @@ def validate_snapshot(snapshot: dict) -> None:
             if lesson.get("type") not in _TYPES:
                 problems.append(lesson_prefix + ".type is not supported")
             subgroup = lesson.get("subgroup", 0)
-            if not isinstance(subgroup, int) or subgroup < 0 or subgroup > 100:
+            if type(subgroup) is not int or subgroup < 0 or subgroup > 100:
                 problems.append(lesson_prefix + ".subgroup must be between 0 and 100")
             schedule = lesson.get("schedule") or {}
             if not _TIME.match(str(schedule.get("starts_at", ""))) or not _TIME.match(str(schedule.get("ends_at", ""))):
@@ -98,23 +117,27 @@ def validate_snapshot(snapshot: dict) -> None:
                 problems.append(lesson_prefix + ".schedule.recurrence.kind is not supported")
             elif kind == "date":
                 lesson_date = _date(schedule.get("date"), lesson_prefix + ".schedule.date", problems)
+                if schedule.get("day_of_week", 0) != 0:
+                    problems.append(lesson_prefix + ".schedule.day_of_week must be omitted for date recurrence")
                 if lesson_date and term_start and term_end and not term_start <= lesson_date <= term_end:
                     problems.append(lesson_prefix + ".schedule.date is outside the term")
             else:
                 day = schedule.get("day_of_week", 0)
-                if not isinstance(day, int) or day < 1 or day > 7:
+                if type(day) is not int or day < 1 or day > 7:
                     problems.append(lesson_prefix + ".schedule.day_of_week must be between 1 and 7")
             if kind == "cycle":
                 length = recurrence.get("cycle_length", 0)
                 weeks = recurrence.get("cycle_weeks") or []
-                if not isinstance(length, int) or length < 2 or length > 16:
+                if type(length) is not int or length < 2 or length > 16:
                     problems.append(lesson_prefix + ".schedule.recurrence.cycle_length must be between 2 and 16")
-                if not weeks or any(not isinstance(week, int) or week < 1 or week > length for week in weeks):
+                if not weeks or any(type(week) is not int or week < 1 or week > length for week in weeks):
                     problems.append(lesson_prefix + ".schedule.recurrence.cycle_weeks is invalid")
                 if len(weeks) != len(set(weeks)):
                     problems.append(lesson_prefix + ".schedule.recurrence.cycle_weeks contains duplicates")
             valid_from = recurrence.get("valid_from")
             valid_to = recurrence.get("valid_to")
+            if kind == "date":
+                continue
             if bool(valid_from) != bool(valid_to):
                 problems.append(lesson_prefix + ".schedule.recurrence validity dates must be supplied together")
             elif valid_from and valid_to:
@@ -129,13 +152,46 @@ def validate_snapshot(snapshot: dict) -> None:
 
 
 def _external_id(value: object, path: str, problems: list[str]) -> None:
-    if not _ID.match(str(value or "").strip()):
+    if not isinstance(value, str) or not _ID.fullmatch(value):
         problems.append(path + " has an invalid format")
 
 
 def _date(value: object, path: str, problems: list[str]) -> date | None:
     try:
-        return date.fromisoformat(str(value))
+        if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            raise ValueError()
+        return date.fromisoformat(value)
     except ValueError:
         problems.append(path + " must use YYYY-MM-DD")
         return None
+
+_RECURRENCE_WIRE = {"kind": str, "valid_from?": str, "valid_to?": str, "cycle_length?": int, "cycle_weeks?": [int]}
+_SCHEDULE_WIRE = {"starts_at": str, "ends_at": str, "recurrence": _RECURRENCE_WIRE, "day_of_week?": int, "date?": str}
+_LESSON_WIRE = {"external_id": str, "subject": str, "type": str, "schedule": _SCHEDULE_WIRE, "teachers?": [str], "rooms?": [str], "subgroup?": int, "metadata?": "metadata"}
+_GROUP_WIRE = {"external_id": str, "name": str, "lessons": [_LESSON_WIRE], "metadata?": "metadata"}
+_WIRE = {"schema_version": str, "snapshot_id": str, "generated_at": str, "institution": {"external_id": str, "name": str, "timezone": str, "full_name?": str, "schedule_url?": str, "locale?": str}, "term": {"external_id": str, "name": str, "starts_on": str, "ends_on": str, "academic_year?": str}, "groups": [_GROUP_WIRE], "metadata?": "metadata"}
+
+
+def _check_wire(value: object, path: str, spec: object) -> None:
+    def invalid(message: str) -> None:
+        raise SnapshotValidationError([path + " " + message])
+    if isinstance(spec, dict):
+        if not isinstance(value, dict):
+            invalid("must be an object")
+        for field, child in spec.items():
+            key = field.rstrip("?")
+            if key not in value:
+                if not field.endswith("?"):
+                    invalid(key + " is required")
+                continue
+            _check_wire(value[key], path + "." + key, child)
+    elif isinstance(spec, list):
+        if not isinstance(value, list):
+            invalid("must be an array")
+        for index, child in enumerate(value):
+            _check_wire(child, f"{path}[{index}]", spec[0])
+    elif spec == "metadata":
+        if not isinstance(value, dict) or any(not isinstance(item, str) for item in value.values()):
+            invalid("must map keys to strings")
+    elif type(value) is not spec:
+        invalid("has an invalid type")

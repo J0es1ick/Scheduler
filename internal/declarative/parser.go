@@ -60,10 +60,11 @@ func ValidateConfig(config Config) error {
 }
 
 type parser struct {
-	config Config
-	client *http.Client
-	mu     sync.RWMutex
-	groups map[string]connector.Group
+	config   Config
+	client   *http.Client
+	mu       sync.RWMutex
+	snapshot *connector.Snapshot
+	groups   map[string]connector.Group
 }
 
 func newParser(config Config) *parser {
@@ -124,6 +125,7 @@ func (p *parser) FetchGroups(ctx context.Context) ([]managed.Group, error) {
 	}
 	p.mu.Lock()
 	p.groups = lookup
+	p.snapshot = &snapshot
 	p.mu.Unlock()
 	return groups, nil
 }
@@ -179,4 +181,14 @@ func forbiddenHostname(host string) bool {
 func forbiddenIP(address net.IP) bool {
 	return address.IsLoopback() || address.IsPrivate() || address.IsLinkLocalUnicast() ||
 		address.IsLinkLocalMulticast() || address.IsUnspecified() || address.IsMulticast()
+}
+
+func (p *parser) FullSnapshot() *connector.Snapshot {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.snapshot == nil {
+		return nil
+	}
+	result := *p.snapshot
+	return &result
 }

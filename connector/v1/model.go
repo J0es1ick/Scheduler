@@ -82,16 +82,17 @@ type SubmissionResponse struct {
 }
 
 type RunStatus struct {
-	RunID            string     `json:"run_id"`
-	ConnectorID      string     `json:"connector_id"`
-	ExternalSnapshot string     `json:"external_snapshot_id"`
-	Status           string     `json:"status"`
-	GroupCount       int        `json:"group_count"`
-	LessonCount      int        `json:"lesson_count"`
-	Error            string     `json:"error,omitempty"`
-	ParserSnapshotID string     `json:"parser_snapshot_id,omitempty"`
-	ReceivedAt       time.Time  `json:"received_at"`
-	CompletedAt      *time.Time `json:"completed_at,omitempty"`
+	IngestionSequence int64      `json:"ingestion_sequence"`
+	RunID             string     `json:"run_id"`
+	ConnectorID       string     `json:"connector_id"`
+	ExternalSnapshot  string     `json:"external_snapshot_id"`
+	Status            string     `json:"status"`
+	GroupCount        int        `json:"group_count"`
+	LessonCount       int        `json:"lesson_count"`
+	Error             string     `json:"error,omitempty"`
+	ParserSnapshotID  string     `json:"parser_snapshot_id,omitempty"`
+	ReceivedAt        time.Time  `json:"received_at"`
+	CompletedAt       *time.Time `json:"completed_at,omitempty"`
 }
 
 type HeartbeatResponse struct {

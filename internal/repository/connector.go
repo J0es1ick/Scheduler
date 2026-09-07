@@ -86,18 +86,29 @@ func (r *ConnectorRepository) Create(ctx context.Context, params CreateConnector
 		INSERT INTO universities (
 			id, name, full_name, schedule_url, timezone, locale, is_active, created_at, updated_at
 		) VALUES ($1,$2,$3,$4,$5,$6,FALSE,NOW(),NOW())
-		ON CONFLICT (id) DO UPDATE SET
-			name=EXCLUDED.name,
-			full_name=CASE WHEN EXCLUDED.full_name='' THEN universities.full_name ELSE EXCLUDED.full_name END,
-			schedule_url=CASE WHEN EXCLUDED.schedule_url='' THEN universities.schedule_url ELSE EXCLUDED.schedule_url END,
-			timezone=EXCLUDED.timezone,
-			locale=EXCLUDED.locale,
-			updated_at=NOW()`,
+		ON CONFLICT (id) DO NOTHING`,
 		params.UniversityID, params.UniversityName, params.UniversityFullName,
 		params.ScheduleURL, params.Timezone, params.Locale,
 	); err != nil {
 		return nil, fmt.Errorf("create connector university: %w", err)
 	}
+
+	var config map[string]json.RawMessage
+	if err = json.Unmarshal([]byte(params.SourceConfig), &config); err != nil {
+		return nil, fmt.Errorf("create connector config: %w", err)
+	}
+	if config == nil {
+		config = map[string]json.RawMessage{}
+	}
+	config["candidate_institution"], err = json.Marshal(domain.SnapshotInstitutionMetadata{Name: params.UniversityName, FullName: params.UniversityFullName, ScheduleURL: params.ScheduleURL, Timezone: params.Timezone, Locale: params.Locale})
+	if err != nil {
+		return nil, err
+	}
+	encodedConfig, err := json.Marshal(config)
+	if err != nil {
+		return nil, err
+	}
+	params.SourceConfig = string(encodedConfig)
 	policy, err := json.Marshal(params.QualityPolicy)
 	if err != nil {
 		return nil, fmt.Errorf("create connector policy: %w", err)
@@ -243,7 +254,7 @@ func (r *ConnectorRepository) Enqueue(
 
 const ingestionColumns = `
 	r.id, r.connector_id, c.data_source_id, r.external_snapshot_id,
-	r.schema_version, r.idempotency_key, r.payload_sha256, r.payload,
+	r.ingestion_sequence, r.schema_version, r.idempotency_key, r.payload_sha256, r.payload,
 	r.status, r.attempts, r.error_message,
 	COALESCE(r.parser_snapshot_id, '') AS parser_snapshot_id,
 	r.group_count, r.lesson_count, r.next_attempt_at, r.claimed_at,

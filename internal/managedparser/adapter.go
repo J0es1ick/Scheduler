@@ -215,3 +215,14 @@ func clean(values []string) []string {
 	}
 	return result
 }
+
+func (a *adapter) FullSnapshot() *connector.Snapshot {
+	if provider, ok := a.parser.(interface{ FullSnapshot() *connector.Snapshot }); ok {
+		return provider.FullSnapshot()
+	}
+	return nil
+}
+func (a *adapter) InstitutionMetadata() domain.SnapshotInstitutionMetadata {
+	value := a.manifest.Institution
+	return domain.SnapshotInstitutionMetadata{Name: value.Name, FullName: value.FullName, ScheduleURL: value.ScheduleURL, Timezone: value.Timezone, Locale: value.Locale}
+}

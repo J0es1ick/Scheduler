@@ -43,9 +43,39 @@ paths:
           required: true
           schema: { type: string }
       responses:
-        "200": { description: Текущее состояние обработки }
+        "200":
+          description: Текущее состояние обработки
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunStatus"
         "404": { description: Запуск не найден }
 components:
+  schemas:
+    RunStatus:
+      type: object
+      required: [run_id, status, ingestion_sequence, received_at]
+      properties:
+        run_id: { type: string }
+        status:
+          type: string
+          enum:
+            [
+              received,
+              processing,
+              staged,
+              quarantined,
+              published,
+              rejected,
+              failed,
+              superseded,
+            ]
+        ingestion_sequence:
+          type: integer
+          minimum: 1
+          description: Монотонный номер приёма сервером в рамках источника. Не меняется при повторе idempotency key.
+        received_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
   securitySchemes:
     ed25519:
       type: apiKey

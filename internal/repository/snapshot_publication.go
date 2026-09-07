@@ -221,6 +221,7 @@ func (r *ParserSnapshotRepository) ActivateConnectorWithSnapshot(
 	ctx context.Context,
 	connectorID, snapshotID, actorID, reviewNote string,
 	hook SnapshotPublicationHook,
+	expectedCurrentSnapshot ...string,
 ) (*domain.ParserSnapshot, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -255,6 +256,15 @@ func (r *ParserSnapshotRepository) ActivateConnectorWithSnapshot(
 		WHERE university_id=$1
 		ORDER BY id FOR UPDATE`, target.UniversityID); err != nil {
 		return nil, fmt.Errorf("activate connector: lock university sources: %w", err)
+	}
+	if len(expectedCurrentSnapshot) > 0 {
+		var current string
+		if err = tx.GetContext(ctx, &current, `SELECT COALESCE((SELECT current_snapshot_id FROM data_sources WHERE university_id=$1 AND lifecycle_status='active' ORDER BY id LIMIT 1),'')`, target.UniversityID); err != nil {
+			return nil, err
+		}
+		if current != expectedCurrentSnapshot[0] {
+			return nil, errors.New("действующее расписание изменилось; повторите сравнение перед активацией")
+		}
 	}
 	row, err := loadPublicationSnapshot(ctx, tx, snapshotID, true)
 	if err != nil {
@@ -369,6 +379,8 @@ func loadPublicationSnapshot(
 	return &row, nil
 }
 
+var ErrConnectorSuperseded = errors.New("connector snapshot superseded by a newer publication")
+
 func applyPublicationSnapshot(
 	ctx context.Context,
 	tx *sqlx.Tx,
@@ -393,6 +405,21 @@ func applyPublicationSnapshot(
 			"snapshot %s belongs to university %s, expected %s",
 			row.ID, payload.UniversityID, universityID,
 		)
+	}
+
+	if row.PublishedAt == nil && payload.IngestionSequence > 0 {
+		result, orderErr := tx.ExecContext(ctx, `UPDATE data_sources SET last_published_ingestion_sequence=$2
+   WHERE id=$1 AND last_published_ingestion_sequence<$2`, row.DataSourceID, payload.IngestionSequence)
+		if orderErr != nil {
+			return nil, orderErr
+		}
+		count, countErr := result.RowsAffected()
+		if countErr != nil {
+			return nil, countErr
+		}
+		if count != 1 {
+			return nil, ErrConnectorSuperseded
+		}
 	}
 	payload = normalizeParityRecurrence(payload)
 	var existingGroups []domain.Group

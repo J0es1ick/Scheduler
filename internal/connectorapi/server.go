@@ -120,7 +120,8 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, connector.RunStatus{
-		RunID: run.ID, ConnectorID: run.ConnectorID,
+		IngestionSequence: run.IngestionSequence,
+		RunID:             run.ID, ConnectorID: run.ConnectorID,
 		ExternalSnapshot: run.ExternalSnapshotID, Status: run.Status,
 		GroupCount: run.GroupCount, LessonCount: run.LessonCount,
 		Error: run.ErrorMessage, ParserSnapshotID: run.ParserSnapshotID,

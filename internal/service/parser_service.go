@@ -15,6 +15,9 @@ import (
 	"sync"
 	"time"
 
+	connector "github.com/J0es1ick/Scheduler/connector/v1"
+	"github.com/J0es1ick/Scheduler/internal/snapshotconvert"
+
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/J0es1ick/Scheduler/internal/scraper"
@@ -204,6 +207,17 @@ func (s *ParserService) runDataSource(ctx context.Context, dataSourceID string, 
 	results := fetchReport.Results
 
 	payload, lessonCount := buildScheduleSnapshot(adapter.UniversityID(), semesterID, ds.ID, results)
+	if provider, ok := adapter.(interface{ FullSnapshot() *connector.Snapshot }); ok && provider.FullSnapshot() != nil {
+		payload, err = snapshotconvert.Convert(ds.ID, adapter.UniversityID(), *provider.FullSnapshot())
+		if err != nil {
+			return fail(lessonCount, err)
+		}
+	} else if provider, ok := adapter.(interface {
+		InstitutionMetadata() domain.SnapshotInstitutionMetadata
+	}); ok {
+		payload.Metadata = &domain.SnapshotMetadata{Institution: provider.InstitutionMetadata(), Term: domain.SnapshotTermMetadata{ExternalID: semesterID, Name: "Актуальный снимок"}}
+	}
+
 	existingGroups, err := s.groupRepo.GetAllGroupsByUniversityID(ctx, adapter.UniversityID())
 	if err != nil {
 		return fail(lessonCount, fmt.Errorf("parser: load existing group identities: %w", err))
@@ -462,6 +476,12 @@ func (s *ParserService) ingestExternalSnapshot(
 		ctx, snapshot.ID, "connector:"+dataSourceID,
 		"Автоматическая публикация внешнего коннектора", fencingHook,
 	)
+	if errors.Is(err, repository.ErrConnectorSuperseded) {
+		if finishErr := s.parseLogRepo.FinalizeAcceptedCandidate(ctx, logID, ds.ID, lessonCount); finishErr != nil {
+			return nil, finishErr
+		}
+		return nil, err
+	}
 	if err != nil {
 		return fail(fmt.Errorf("parser: publish connector snapshot: %w", err))
 	}
@@ -503,6 +523,7 @@ func (s *ParserService) PublishSnapshot(
 func (s *ParserService) ActivateConnector(
 	ctx context.Context,
 	connectorID, snapshotID, actorID, reviewNote string,
+	expectedCurrentSnapshot ...string,
 ) (*domain.ParserSnapshot, error) {
 	candidate, err := s.snapshotRepo.Get(ctx, snapshotID)
 	if err != nil || candidate == nil {
@@ -521,7 +542,7 @@ func (s *ParserService) ActivateConnector(
 		return nil, err
 	}
 	return s.snapshotRepo.ActivateConnectorWithSnapshot(
-		ctx, connectorID, snapshotID, actorID, reviewNote, hook,
+		ctx, connectorID, snapshotID, actorID, reviewNote, hook, expectedCurrentSnapshot...,
 	)
 }
 

@@ -1,0 +1,6 @@
+[
+  { "name": "maximum_groups", "groups": 5000, "lessons": 0, "valid": true },
+  { "name": "too_many_groups", "groups": 5001, "lessons": 0, "valid": false },
+  { "name": "maximum_lessons", "groups": 1, "lessons": 50000, "valid": true },
+  { "name": "too_many_lessons", "groups": 1, "lessons": 50001, "valid": false }
+]

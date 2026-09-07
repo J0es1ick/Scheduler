@@ -46,12 +46,13 @@ type SnapshotMetadata struct {
 }
 
 type ScheduleSnapshot struct {
-	UniversityID string            `json:"university_id"`
-	SemesterID   string            `json:"semester_id"`
-	StartDate    time.Time         `json:"start_date"`
-	EndDate      time.Time         `json:"end_date"`
-	Groups       []SnapshotGroup   `json:"groups"`
-	Metadata     *SnapshotMetadata `json:"metadata,omitempty"`
+	IngestionSequence int64             `json:"ingestion_sequence,omitempty"`
+	UniversityID      string            `json:"university_id"`
+	SemesterID        string            `json:"semester_id"`
+	StartDate         time.Time         `json:"start_date"`
+	EndDate           time.Time         `json:"end_date"`
+	Groups            []SnapshotGroup   `json:"groups"`
+	Metadata          *SnapshotMetadata `json:"metadata,omitempty"`
 }
 
 type ParserSnapshot struct {

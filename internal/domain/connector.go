@@ -19,6 +19,7 @@ const (
 	ConnectorStatusSuspended     = "suspended"
 	ConnectorStatusArchived      = "archived"
 
+	IngestionStatusSuperseded  = "superseded"
 	IngestionStatusReceived    = "received"
 	IngestionStatusProcessing  = "processing"
 	IngestionStatusStaged      = "staged"
@@ -53,6 +54,7 @@ type ConnectorClient struct {
 }
 
 type ConnectorIngestionRun struct {
+	IngestionSequence  int64           `db:"ingestion_sequence" json:"ingestion_sequence"`
 	ID                 string          `db:"id" json:"run_id"`
 	ConnectorID        string          `db:"connector_id" json:"connector_id"`
 	DataSourceID       string          `db:"data_source_id" json:"data_source_id,omitempty"`
