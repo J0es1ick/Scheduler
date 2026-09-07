@@ -43,22 +43,25 @@ type SnapshotGroupDiff struct {
 }
 
 type SnapshotPreview struct {
-	SnapshotID           string                    `json:"snapshot_id"`
-	DataSourceID         string                    `json:"data_source_id"`
-	Status               string                    `json:"status"`
-	Publishable          bool                      `json:"publishable"`
-	CreatedAt            time.Time                 `json:"created_at"`
-	CandidateStartDate   time.Time                 `json:"candidate_start_date"`
-	CandidateEndDate     time.Time                 `json:"candidate_end_date"`
-	CandidateGroupCount  int                       `json:"candidate_group_count"`
-	CandidateLessonCount int                       `json:"candidate_lesson_count"`
-	CurrentSnapshotID    string                    `json:"current_snapshot_id"`
-	CurrentCreatedAt     *time.Time                `json:"current_created_at"`
-	CurrentGroupCount    int                       `json:"current_group_count"`
-	CurrentLessonCount   int                       `json:"current_lesson_count"`
-	ComparisonAvailable  bool                      `json:"comparison_available"`
-	Summary              SnapshotComparisonSummary `json:"summary"`
-	Groups               []SnapshotGroupDiff       `json:"groups"`
+	CurrentInstitution   domain.SnapshotInstitutionMetadata `json:"current_institution"`
+	CandidateInstitution domain.SnapshotInstitutionMetadata `json:"candidate_institution"`
+	CurrentDataSourceID  string                             `json:"current_data_source_id"`
+	SnapshotID           string                             `json:"snapshot_id"`
+	DataSourceID         string                             `json:"data_source_id"`
+	Status               string                             `json:"status"`
+	Publishable          bool                               `json:"publishable"`
+	CreatedAt            time.Time                          `json:"created_at"`
+	CandidateStartDate   time.Time                          `json:"candidate_start_date"`
+	CandidateEndDate     time.Time                          `json:"candidate_end_date"`
+	CandidateGroupCount  int                                `json:"candidate_group_count"`
+	CandidateLessonCount int                                `json:"candidate_lesson_count"`
+	CurrentSnapshotID    string                             `json:"current_snapshot_id"`
+	CurrentCreatedAt     *time.Time                         `json:"current_created_at"`
+	CurrentGroupCount    int                                `json:"current_group_count"`
+	CurrentLessonCount   int                                `json:"current_lesson_count"`
+	ComparisonAvailable  bool                               `json:"comparison_available"`
+	Summary              SnapshotComparisonSummary          `json:"summary"`
+	Groups               []SnapshotGroupDiff                `json:"groups"`
 }
 
 type SnapshotLessonView struct {
@@ -104,6 +107,40 @@ func (s *Store) ParserSnapshotPreview(ctx context.Context, snapshotID string) (*
 	}
 	preview := buildSnapshotPreview(candidate, current)
 	preview.CurrentSnapshotID = currentID
+	var live struct {
+		Name        string `db:"name"`
+		FullName    string `db:"full_name"`
+		ScheduleURL string `db:"schedule_url"`
+		Timezone    string `db:"timezone"`
+		Locale      string `db:"locale"`
+		SourceID    string `db:"source_id"`
+	}
+	if err = s.db.GetContext(ctx, &live, `SELECT u.name, u.full_name, u.schedule_url, u.timezone, u.locale,
+ COALESCE((SELECT id FROM data_sources WHERE university_id=u.id AND lifecycle_status='active' ORDER BY id LIMIT 1),'') AS source_id
+ FROM universities u JOIN data_sources ds ON ds.university_id=u.id WHERE ds.id=$1`, candidate.DataSourceID); err != nil {
+		return nil, err
+	}
+	preview.CurrentDataSourceID = live.SourceID
+	preview.CurrentInstitution = domain.SnapshotInstitutionMetadata{Name: live.Name, FullName: live.FullName, ScheduleURL: live.ScheduleURL, Timezone: live.Timezone, Locale: live.Locale}
+	preview.CandidateInstitution = preview.CurrentInstitution
+	if candidate.Payload.Metadata != nil {
+		proposed := candidate.Payload.Metadata.Institution
+		if proposed.Name != "" {
+			preview.CandidateInstitution.Name = proposed.Name
+		}
+		if proposed.FullName != "" {
+			preview.CandidateInstitution.FullName = proposed.FullName
+		}
+		if proposed.ScheduleURL != "" {
+			preview.CandidateInstitution.ScheduleURL = proposed.ScheduleURL
+		}
+		if proposed.Timezone != "" {
+			preview.CandidateInstitution.Timezone = proposed.Timezone
+		}
+		if proposed.Locale != "" {
+			preview.CandidateInstitution.Locale = proposed.Locale
+		}
+	}
 	return preview, nil
 }
 
@@ -137,8 +174,9 @@ func (s *Store) currentParserSnapshot(
 ) (*domain.ParserSnapshot, string, error) {
 	var currentID string
 	err := s.db.GetContext(ctx, &currentID, `
-		SELECT COALESCE(current_snapshot_id, '')
-		FROM data_sources WHERE id=$1`, sourceID)
+		SELECT COALESCE((SELECT active.current_snapshot_id FROM data_sources active
+ WHERE active.university_id=candidate.university_id AND active.lifecycle_status='active' ORDER BY active.id LIMIT 1), '')
+ FROM data_sources candidate WHERE candidate.id=$1`, sourceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, "", ErrNotFound
 	}

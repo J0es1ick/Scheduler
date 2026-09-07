@@ -15,12 +15,12 @@ const editorLessonColumns = `
 	id, university_id, semester_id, COALESCE(day_of_week, 0) AS day_of_week,
 	special_date, time_start, time_end, week_type::text AS week_type,
 	subject, type::text AS type, teacher, room, group_id, subgroup,
-	valid_from, valid_to, updated_at, origin, base_lesson_id, version`
+	valid_from, valid_to, recurrence, updated_at, origin, base_lesson_id, version`
 
 func (s *Store) EditorSchedule(ctx context.Context, groupID string) (*EditorSchedule, error) {
 	var result EditorSchedule
 	if err := s.db.GetContext(ctx, &result.Group, `
-		SELECT g.id, g.name, g.university_id, u.name AS university_name, g.updated_at
+		SELECT g.id, g.name, g.university_id, u.name AS university_name, u.timezone, g.updated_at
 		FROM groups g
 		JOIN universities u ON u.id = g.university_id
 		WHERE g.id = $1`, groupID); err != nil {
@@ -51,7 +51,7 @@ func (s *Store) EditorSchedule(ctx context.Context, groupID string) (*EditorSche
 			id, university_id, semester_id, COALESCE(day_of_week, 0) AS day_of_week,
 			special_date, time_start, time_end, week_type::text AS week_type,
 			subject, type::text AS type, teacher, room, group_id, subgroup,
-			valid_from, valid_to, updated_at, 'manual'::TEXT AS origin,
+			valid_from, valid_to, recurrence, updated_at, 'manual'::TEXT AS origin,
 			base_lesson_id, version, is_deleted
 		FROM lesson_overrides
 		WHERE group_id = $1 AND is_deleted
@@ -85,20 +85,23 @@ func (s *Store) CreateManualLesson(ctx context.Context, actorID string, lesson L
 	if err = lockEditorUniversity(ctx, tx, universityID); err != nil {
 		return "", err
 	}
+	if err = resolveEditorRule(ctx, tx, &lesson, nil); err != nil {
+		return "", err
+	}
 	id := "manual:" + uuid.NewString()
 	if _, err = tx.ExecContext(ctx, `
 		INSERT INTO lesson_overrides (
 			id, university_id, semester_id, day_of_week, special_date,
 			time_start, time_end, week_type, subject, type, teacher, room,
-			group_id, subgroup, valid_from, valid_to, created_by
+			group_id, subgroup, valid_from, valid_to, created_by, recurrence
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-			$13, $14, $15, $16, $17
+			$13, $14, $15, $16, $17, $18
 		)`,
 		id, universityID, lesson.SemesterID, editorDayOfWeek(lesson), lesson.SpecialDate,
 		lesson.TimeStart, lesson.TimeEnd, lesson.WeekType, lesson.Subject, lesson.Type,
 		lesson.Teacher, lesson.Room, lesson.GroupID, lesson.Subgroup,
-		lesson.ValidFrom, lesson.ValidTo, actorID,
+		lesson.ValidFrom, lesson.ValidTo, actorID, *lesson.Recurrence,
 	); err != nil {
 		return "", fmt.Errorf("editor create lesson: insert: %w", err)
 	}
@@ -149,6 +152,9 @@ func (s *Store) UpdateEditorLesson(
 		return "", err
 	}
 
+	if err = resolveEditorRule(ctx, tx, &lesson, current); err != nil {
+		return "", err
+	}
 	resultID := lessonID
 	if current.Origin == "manual" {
 		result, updateErr := tx.ExecContext(ctx, `
@@ -156,12 +162,12 @@ func (s *Store) UpdateEditorLesson(
 				university_id=$1, semester_id=$2, day_of_week=$3, special_date=$4,
 				time_start=$5, time_end=$6, week_type=$7, subject=$8, type=$9,
 				teacher=$10, room=$11, subgroup=$12, valid_from=$13, valid_to=$14,
-				updated_at=NOW(), version=version+1, is_deleted=FALSE
+				updated_at=NOW(), version=version+1, is_deleted=FALSE, recurrence=$17
 			WHERE id=$15 AND updated_at=$16`,
 			universityID, lesson.SemesterID, editorDayOfWeek(lesson), lesson.SpecialDate,
 			lesson.TimeStart, lesson.TimeEnd, lesson.WeekType, lesson.Subject, lesson.Type,
 			lesson.Teacher, lesson.Room, lesson.Subgroup, lesson.ValidFrom, lesson.ValidTo,
-			lessonID, expectedUpdatedAt,
+			lessonID, expectedUpdatedAt, *lesson.Recurrence,
 		)
 		if updateErr != nil {
 			return "", fmt.Errorf("editor update override: %w", updateErr)
@@ -175,15 +181,15 @@ func (s *Store) UpdateEditorLesson(
 			INSERT INTO lesson_overrides (
 				id, base_lesson_id, university_id, semester_id, day_of_week, special_date,
 				time_start, time_end, week_type, subject, type, teacher, room,
-				group_id, subgroup, valid_from, valid_to, created_by
+				group_id, subgroup, valid_from, valid_to, created_by, recurrence
 			) VALUES (
 				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-				$14, $15, $16, $17, $18
+				$14, $15, $16, $17, $18, $19
 			)`,
 			resultID, current.ID, universityID, lesson.SemesterID,
 			editorDayOfWeek(lesson), lesson.SpecialDate, lesson.TimeStart, lesson.TimeEnd,
 			lesson.WeekType, lesson.Subject, lesson.Type, lesson.Teacher, lesson.Room,
-			lesson.GroupID, lesson.Subgroup, lesson.ValidFrom, lesson.ValidTo, actorID,
+			lesson.GroupID, lesson.Subgroup, lesson.ValidFrom, lesson.ValidTo, actorID, *lesson.Recurrence,
 		); err != nil {
 			return "", editorWriteError("editor create override", err)
 		}
@@ -255,16 +261,16 @@ func (s *Store) DeleteEditorLesson(
 			INSERT INTO lesson_overrides (
 				id, base_lesson_id, university_id, semester_id, day_of_week, special_date,
 				time_start, time_end, week_type, subject, type, teacher, room,
-				group_id, subgroup, valid_from, valid_to, is_deleted, created_by
+				group_id, subgroup, valid_from, valid_to, is_deleted, created_by, recurrence
 			) VALUES (
 				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-				$14, $15, $16, $17, TRUE, $18
+				$14, $15, $16, $17, TRUE, $18, $19
 			)`,
 			id, current.ID, current.UniversityID, current.SemesterID,
 			editorDayOfWeekFromView(current), current.SpecialDate,
 			current.TimeStart, current.TimeEnd, current.WeekType, current.Subject,
 			current.Type, current.Teacher, current.Room, current.GroupID,
-			current.Subgroup, current.ValidFrom, current.ValidTo, actorID,
+			current.Subgroup, current.ValidFrom, current.ValidTo, actorID, current.Recurrence,
 		); err != nil {
 			return editorWriteError("editor create deletion override", err)
 		}

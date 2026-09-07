@@ -34,6 +34,8 @@ type DashboardStats struct {
 }
 
 type SourceView struct {
+	LastPublishedAt           *time.Time                     `json:"last_published_at" db:"last_published_at"`
+	FreshnessState            string                         `json:"freshness_state" db:"freshness_state"`
 	ID                        string                         `json:"id" db:"id"`
 	UniversityID              string                         `json:"university_id" db:"university_id"`
 	UniversityName            string                         `json:"university_name" db:"university_name"`
@@ -77,6 +79,7 @@ type SourceView struct {
 }
 
 type OperationalHealth struct {
+	ExpiredPendingReminders     int                 `json:"expired_pending_reminders" db:"expired_pending_reminders"`
 	SubscriptionIntegrityIssues int64               `json:"subscription_integrity_issues" db:"subscription_integrity_issues"`
 	Status                      string              `json:"status"`
 	Database                    bool                `json:"database"`
@@ -243,6 +246,7 @@ func (p Page[T]) MarshalJSON() ([]byte, error) {
 }
 
 type EditorGroup struct {
+	Timezone       string    `json:"timezone" db:"timezone"`
 	ID             string    `json:"id" db:"id"`
 	Name           string    `json:"name" db:"name"`
 	UniversityID   string    `json:"university_id" db:"university_id"`
@@ -258,27 +262,28 @@ type SemesterOption struct {
 }
 
 type EditorLesson struct {
-	ID           string     `json:"id" db:"id"`
-	UniversityID string     `json:"university_id" db:"university_id"`
-	SemesterID   string     `json:"semester_id" db:"semester_id"`
-	DayOfWeek    int        `json:"day_of_week" db:"day_of_week"`
-	SpecialDate  *time.Time `json:"special_date" db:"special_date"`
-	TimeStart    string     `json:"time_start" db:"time_start"`
-	TimeEnd      string     `json:"time_end" db:"time_end"`
-	WeekType     string     `json:"week_type" db:"week_type"`
-	Subject      string     `json:"subject" db:"subject"`
-	Type         string     `json:"type" db:"type"`
-	Teacher      string     `json:"teacher" db:"teacher"`
-	Room         string     `json:"room" db:"room"`
-	GroupID      string     `json:"group_id" db:"group_id"`
-	Subgroup     int        `json:"subgroup" db:"subgroup"`
-	ValidFrom    *time.Time `json:"valid_from" db:"valid_from"`
-	ValidTo      *time.Time `json:"valid_to" db:"valid_to"`
-	UpdatedAt    time.Time  `json:"updated_at" db:"updated_at"`
-	Origin       string     `json:"origin" db:"origin"`
-	BaseLessonID *string    `json:"base_lesson_id" db:"base_lesson_id"`
-	Version      int64      `json:"version" db:"version"`
-	Deleted      bool       `json:"deleted" db:"is_deleted"`
+	Recurrence   domain.RecurrenceRule `json:"recurrence" db:"recurrence"`
+	ID           string                `json:"id" db:"id"`
+	UniversityID string                `json:"university_id" db:"university_id"`
+	SemesterID   string                `json:"semester_id" db:"semester_id"`
+	DayOfWeek    int                   `json:"day_of_week" db:"day_of_week"`
+	SpecialDate  *time.Time            `json:"special_date" db:"special_date"`
+	TimeStart    string                `json:"time_start" db:"time_start"`
+	TimeEnd      string                `json:"time_end" db:"time_end"`
+	WeekType     string                `json:"week_type" db:"week_type"`
+	Subject      string                `json:"subject" db:"subject"`
+	Type         string                `json:"type" db:"type"`
+	Teacher      string                `json:"teacher" db:"teacher"`
+	Room         string                `json:"room" db:"room"`
+	GroupID      string                `json:"group_id" db:"group_id"`
+	Subgroup     int                   `json:"subgroup" db:"subgroup"`
+	ValidFrom    *time.Time            `json:"valid_from" db:"valid_from"`
+	ValidTo      *time.Time            `json:"valid_to" db:"valid_to"`
+	UpdatedAt    time.Time             `json:"updated_at" db:"updated_at"`
+	Origin       string                `json:"origin" db:"origin"`
+	BaseLessonID *string               `json:"base_lesson_id" db:"base_lesson_id"`
+	Version      int64                 `json:"version" db:"version"`
+	Deleted      bool                  `json:"deleted" db:"is_deleted"`
 }
 
 type EditorSchedule struct {
@@ -289,6 +294,7 @@ type EditorSchedule struct {
 }
 
 type LessonMutation struct {
+	Recurrence  *domain.RecurrenceRule
 	GroupID     string
 	SemesterID  string
 	DayOfWeek   int

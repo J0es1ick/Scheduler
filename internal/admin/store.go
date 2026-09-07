@@ -29,7 +29,7 @@ func NewStore(db *sqlx.DB) *Store { return &Store{db: db} }
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
 
 func (s *Store) Dashboard(ctx context.Context) (*Dashboard, error) {
-	var result Dashboard
+	result := Dashboard{Sources: []SourceView{}, RecentLogs: []ParseLogView{}, Trend: []TrendPoint{}, Universities: []UniversityBreakdown{}}
 	if err := s.db.GetContext(ctx, &result.Stats, `
 		SELECT
 			(SELECT COUNT(*) FROM universities WHERE is_active) AS universities,
@@ -81,7 +81,7 @@ func (s *Store) Dashboard(ctx context.Context) (*Dashboard, error) {
 }
 
 func (s *Store) Sources(ctx context.Context, includeArchived bool) ([]SourceView, error) {
-	var sources []SourceView
+	sources := []SourceView{}
 	err := s.db.SelectContext(ctx, &sources, `
 		SELECT ds.id, ds.university_id, u.name AS university_name,
 			COALESCE(u.full_name, '') AS university_full_name,
@@ -90,6 +90,8 @@ func (s *Store) Sources(ctx context.Context, includeArchived bool) ([]SourceView
 			COALESCE((ds.quality_policy->>'allow_empty')::boolean, FALSE) AS allow_empty,
 			(COALESCE(u.schedule_url, '') LIKE 'http://%') AS insecure_transport,
 			COALESCE(ds.last_error, '') AS last_error,
+ published.published_at AS last_published_at,
+ scheduler_source_freshness_state(NOW(),ds.is_enabled,ds.last_error,published.published_at,ds.update_interval) AS freshness_state,
 			ds.consecutive_failures, ds.next_retry_at,
 			COALESCE(ds.current_snapshot_id, '') AS current_snapshot_id,
 			(SELECT COUNT(*)::int FROM parser_snapshots ps
@@ -114,6 +116,7 @@ func (s *Store) Sources(ctx context.Context, includeArchived bool) ([]SourceView
 			diagnostic.created_at AS diagnostic_created_at
 		FROM data_sources ds
 		JOIN universities u ON u.id=ds.university_id
+ LEFT JOIN parser_snapshots published ON published.id=ds.current_snapshot_id
 		LEFT JOIN LATERAL (
 			SELECT status, started_at, finished_at, records_fetched
 			FROM parse_logs WHERE data_source_id=ds.id ORDER BY started_at DESC LIMIT 1
@@ -228,6 +231,7 @@ func (s *Store) OperationalHealth(ctx context.Context) (*OperationalHealth, erro
 			(SELECT COUNT(*)::int FROM notification_deliveries WHERE status='failed') AS failed_notifications,
 			(SELECT COUNT(*)::int FROM bot_outbox WHERE status='pending') AS pending_outbox,
 			(SELECT COUNT(*)::int FROM bot_outbox WHERE status='failed') AS failed_outbox,
+ (SELECT COUNT(*)::int FROM bot_outbox WHERE status='pending' AND kind='lesson_reminder' AND (expires_at IS NULL OR expires_at<=clock_timestamp())) AS expired_pending_reminders,
 			(SELECT COUNT(*)::int FROM connector_ingestion_runs WHERE status IN ('received','processing')) AS pending_connector_runs,
 			(SELECT COUNT(*)::int FROM connector_ingestion_runs WHERE status='failed') AS failed_connector_runs,
 			pg_database_size(current_database()) AS database_bytes,
@@ -292,7 +296,7 @@ func (s *Store) Logs(ctx context.Context, limit int, sourceID, status string) ([
 		JOIN data_sources ds ON ds.id=p.data_source_id
 		JOIN universities u ON u.id=ds.university_id
 		WHERE %s ORDER BY p.started_at DESC LIMIT $%d`, strings.Join(where, " AND "), len(args))
-	var logs []ParseLogView
+	logs := []ParseLogView{}
 	if err := s.db.SelectContext(ctx, &logs, query, args...); err != nil {
 		return nil, fmt.Errorf("admin list logs: %w", err)
 	}

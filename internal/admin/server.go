@@ -114,6 +114,8 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService, o
 	}
 	server.protected(mux, "GET /api/auth/me", server.handleMe)
 	server.protected(mux, "POST /api/auth/logout", server.handleLogout)
+	server.protected(mux, "POST /api/editor/preview", server.handleEditorPreview)
+	server.protected(mux, "GET /api/editor/calendar", server.handleEditorCalendar)
 	server.protected(mux, "POST /api/client-errors", server.handleClientError)
 	server.protected(mux, "GET /api/dashboard", server.handleDashboard)
 	server.protected(mux, "GET /api/sources", server.handleSources)
@@ -133,6 +135,7 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService, o
 	server.protected(mux, "PATCH /api/connectors/{id}", server.handleUpdateConnector)
 	server.protected(mux, "POST /api/connectors/{id}/rotate-key", server.handleRotateConnectorKey)
 	server.protected(mux, "GET /api/connectors/{id}/runs", server.handleConnectorRuns)
+	server.protected(mux, "GET /api/connectors/{id}/activation", server.handleConnectorActivationPreview)
 	server.protected(mux, "GET /api/parser-snapshots", server.handleParserSnapshots)
 	server.protected(mux, "GET /api/parser-snapshots/{id}/preview", server.handleParserSnapshotPreview)
 	server.protected(mux, "GET /api/parser-snapshots/{id}/schedule", server.handleParserSnapshotSchedule)
@@ -201,7 +204,7 @@ func (s *Server) protected(mux *http.ServeMux, pattern string, handler http.Hand
 			identity := identityFromContext(r.Context())
 			details := map[string]any{
 				"method":     r.Method,
-				"path":       r.URL.Path,
+				"path":       pattern,
 				"request_id": r.Header.Get(requestIDHeader),
 			}
 			if err := s.store.WriteAudit(
@@ -218,6 +221,9 @@ func (s *Server) protected(mux *http.ServeMux, pattern string, handler http.Hand
 }
 
 func roleForPattern(pattern string) string {
+	if pattern == "POST /api/auth/logout" {
+		return "read_only"
+	}
 	switch {
 	case strings.HasPrefix(pattern, "GET /api/users"):
 		return "owner"
@@ -417,6 +423,7 @@ scheduler_reminder_worker_cursor_pending %d
 		reminderCursorPending,
 	)
 	_, _ = fmt.Fprintf(w, "scheduler_subscription_integrity_issues %d\n", operations.SubscriptionIntegrityIssues)
+	_, _ = fmt.Fprintf(w, "# TYPE scheduler_expired_pending_reminders gauge\nscheduler_expired_pending_reminders %d\n", operations.ExpiredPendingReminders)
 }
 
 func unixTimestamp(value *time.Time) int64 {
@@ -526,7 +533,14 @@ func (s *Server) handleTelegramLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	identity, err := s.auth.LoginWithTelegram(r.Context(), s.store, request.InitData)
 	if err != nil {
-		writeAPIError(w, http.StatusForbidden, "Этот Telegram-пользователь не является администратором")
+		switch {
+		case errors.Is(err, ErrUnauthorized):
+			writeAPIError(w, http.StatusUnauthorized, "Данные входа Telegram истекли или недействительны. Откройте приложение заново.")
+		case errors.Is(err, ErrForbidden):
+			writeAPIError(w, http.StatusForbidden, "Этот Telegram-пользователь не является администратором")
+		default:
+			writeAPIError(w, http.StatusServiceUnavailable, "Сервис авторизации временно недоступен. Повторите вход позже.")
+		}
 		return
 	}
 	identity, err = s.auth.IssueSession(w, identity)

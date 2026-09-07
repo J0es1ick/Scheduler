@@ -6,24 +6,27 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/J0es1ick/Scheduler/internal/domain"
 )
 
 type lessonMutationRequest struct {
-	GroupID           string `json:"group_id"`
-	SemesterID        string `json:"semester_id"`
-	DayOfWeek         int    `json:"day_of_week"`
-	SpecialDate       string `json:"special_date"`
-	TimeStart         string `json:"time_start"`
-	TimeEnd           string `json:"time_end"`
-	WeekType          string `json:"week_type"`
-	Subject           string `json:"subject"`
-	Type              string `json:"type"`
-	Teacher           string `json:"teacher"`
-	Room              string `json:"room"`
-	Subgroup          int    `json:"subgroup"`
-	ValidFrom         string `json:"valid_from"`
-	ValidTo           string `json:"valid_to"`
-	ExpectedUpdatedAt string `json:"expected_updated_at"`
+	Recurrence        *domain.RecurrenceRule `json:"recurrence"`
+	GroupID           string                 `json:"group_id"`
+	SemesterID        string                 `json:"semester_id"`
+	DayOfWeek         int                    `json:"day_of_week"`
+	SpecialDate       string                 `json:"special_date"`
+	TimeStart         string                 `json:"time_start"`
+	TimeEnd           string                 `json:"time_end"`
+	WeekType          string                 `json:"week_type"`
+	Subject           string                 `json:"subject"`
+	Type              string                 `json:"type"`
+	Teacher           string                 `json:"teacher"`
+	Room              string                 `json:"room"`
+	Subgroup          int                    `json:"subgroup"`
+	ValidFrom         string                 `json:"valid_from"`
+	ValidTo           string                 `json:"valid_to"`
+	ExpectedUpdatedAt string                 `json:"expected_updated_at"`
 }
 
 func (s *Server) handleEditorSchedule(w http.ResponseWriter, r *http.Request) {
@@ -199,7 +202,8 @@ func (r lessonMutationRequest) lesson(requireGroup bool) (LessonMutation, error)
 	}
 
 	return LessonMutation{
-		GroupID: r.GroupID, SemesterID: r.SemesterID, DayOfWeek: r.DayOfWeek,
+		Recurrence: r.Recurrence,
+		GroupID:    r.GroupID, SemesterID: r.SemesterID, DayOfWeek: r.DayOfWeek,
 		SpecialDate: specialDate, TimeStart: r.TimeStart, TimeEnd: r.TimeEnd,
 		WeekType: r.WeekType, Subject: r.Subject, Type: r.Type,
 		Teacher: r.Teacher, Room: r.Room, Subgroup: r.Subgroup,
@@ -233,6 +237,8 @@ func oneOf(value string, allowed ...string) bool {
 
 func writeEditorError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, ErrInvalidLesson):
+		writeAPIError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, ErrNotFound):
 		writeAPIError(w, http.StatusNotFound, "Группа, семестр или занятие не найдены")
 	case errors.Is(err, ErrConflict):

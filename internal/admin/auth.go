@@ -101,7 +101,13 @@ func (a *AuthManager) LoginWithTelegram(ctx context.Context, store telegramAdmin
 		return AdminIdentity{}, ErrUnauthorized
 	}
 	user, err := store.TelegramAdmin(ctx, strconv.FormatInt(telegramUser.ID, 10))
-	if err != nil || user == nil || !user.IsAdmin {
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return AdminIdentity{}, ErrForbidden
+		}
+		return AdminIdentity{}, fmt.Errorf("check Telegram administrator: %w", err)
+	}
+	if user == nil || !user.IsAdmin {
 		return AdminIdentity{}, ErrForbidden
 	}
 	name := strings.TrimSpace(user.Username)
@@ -184,8 +190,12 @@ func (a *AuthManager) Logout(w http.ResponseWriter, r *http.Request) error {
 
 func (a *AuthManager) Require(store telegramAdminChecker, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		identity, ok := a.identityForRequest(r)
-		if !ok {
+		identity, sessionErr := a.identityForRequest(r)
+		if sessionErr != nil && !errors.Is(sessionErr, ErrUnauthorized) {
+			writeAPIError(w, http.StatusServiceUnavailable, "Не удалось проверить сессию. Повторите позже.")
+			return
+		}
+		if sessionErr != nil {
 			writeAPIError(w, http.StatusUnauthorized, "Требуется вход в админку")
 			return
 		}
@@ -218,14 +228,20 @@ func (a *AuthManager) Require(store telegramAdminChecker, next http.Handler) htt
 	})
 }
 
-func (a *AuthManager) identityForRequest(r *http.Request) (AdminIdentity, bool) {
+func (a *AuthManager) identityForRequest(r *http.Request) (AdminIdentity, error) {
 	cookie, err := r.Cookie(adminSessionCookie)
 	if err != nil || cookie.Value == "" {
-		return AdminIdentity{}, false
+		return AdminIdentity{}, ErrUnauthorized
 	}
 	if a.persistence != nil {
 		identity, expires, loadErr := a.persistence.AdminSession(r.Context(), tokenHash(cookie.Value))
-		return identity, loadErr == nil && expires.After(time.Now())
+		if loadErr != nil {
+			return AdminIdentity{}, loadErr
+		}
+		if !expires.After(time.Now()) {
+			return AdminIdentity{}, ErrUnauthorized
+		}
+		return identity, nil
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -233,9 +249,9 @@ func (a *AuthManager) identityForRequest(r *http.Request) (AdminIdentity, bool) 
 	a.cleanupExpiredLocked(now)
 	current, ok := a.sessions[cookie.Value]
 	if !ok || current.expires.Before(now) {
-		return AdminIdentity{}, false
+		return AdminIdentity{}, ErrUnauthorized
 	}
-	return current.identity, true
+	return current.identity, nil
 }
 
 func tokenHash(token string) string {

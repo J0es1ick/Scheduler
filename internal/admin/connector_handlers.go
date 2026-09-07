@@ -219,8 +219,10 @@ func (s *Server) handleCreateConnector(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateConnectorRequest struct {
-	Status        string                      `json:"status"`
-	QualityPolicy *domain.SourceQualityPolicy `json:"quality_policy"`
+	SnapshotID                string                      `json:"snapshot_id"`
+	ExpectedCurrentSnapshotID *string                     `json:"expected_current_snapshot_id"`
+	Status                    string                      `json:"status"`
+	QualityPolicy             *domain.SourceQualityPolicy `json:"quality_policy"`
 }
 
 func (s *Server) handleUpdateConnector(w http.ResponseWriter, r *http.Request) {
@@ -269,8 +271,16 @@ func (s *Server) handleUpdateConnector(w http.ResponseWriter, r *http.Request) {
 				writeAPIError(w, http.StatusConflict, "Сначала откройте тестовый снимок в разделе источников и одобрите его для активации")
 				return
 			}
+			if request.SnapshotID != "" && request.SnapshotID != snapshotID {
+				writeAPIError(w, http.StatusConflict, "Появился новый снимок; повторите проверку перед активацией")
+				return
+			}
+			var expected []string
+			if request.ExpectedCurrentSnapshotID != nil {
+				expected = []string{*request.ExpectedCurrentSnapshotID}
+			}
 			if _, activateErr := s.parser.ActivateConnector(
-				r.Context(), id, snapshotID, identity.ID, "Активация проверенного источника",
+				r.Context(), id, snapshotID, identity.ID, "Активация проверенного источника", expected...,
 			); errors.Is(activateErr, service.ErrDataSourceBusy) {
 				writeAPIError(w, http.StatusConflict, "Источник сейчас обновляется")
 				return
@@ -373,4 +383,22 @@ func connectorTransitionAllowed(from, to string) bool {
 		domain.ConnectorStatusArchived:      {domain.ConnectorStatusDraft: true},
 	}
 	return allowed[from][to]
+}
+
+func (s *Server) handleConnectorActivationPreview(w http.ResponseWriter, r *http.Request) {
+	_, snapshotID, status, err := s.store.ConnectorActivationCandidate(r.Context(), r.PathValue("id"))
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && status != domain.SnapshotStatusApproved) {
+		writeAPIError(w, http.StatusConflict, "Сначала проверьте и одобрите снимок в разделе «Источники»")
+		return
+	}
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "Не удалось загрузить снимок для активации")
+		return
+	}
+	preview, err := s.store.ParserSnapshotPreview(r.Context(), snapshotID)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "Не удалось сравнить снимок с действующим расписанием")
+		return
+	}
+	writeJSON(w, http.StatusOK, preview)
 }

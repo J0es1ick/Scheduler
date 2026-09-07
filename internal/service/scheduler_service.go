@@ -131,6 +131,10 @@ func (s *ScheduleService) lessonsForRange(ctx context.Context, lessons []domain.
 }
 
 func lessonMatchesDate(lesson domain.Lesson, date time.Time, fallbackSemesterStart *time.Time) bool {
+	return LessonMatchesDate(lesson, date, fallbackSemesterStart)
+}
+
+func LessonMatchesDate(lesson domain.Lesson, date time.Time, fallbackSemesterStart *time.Time) bool {
 	date = helpers.NormalizeDate(date)
 	if lesson.SpecialDate != nil {
 		return helpers.NormalizeDate(*lesson.SpecialDate).Equal(date)
