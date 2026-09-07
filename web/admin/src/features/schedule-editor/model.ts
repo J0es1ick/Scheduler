@@ -1,4 +1,4 @@
-import type { EditorLesson, SemesterOption } from "../../types";
+import type { EditorLesson, SemesterOption, RecurrenceRule } from "../../types";
 import type { ScheduleWeekFilter } from "../schedule-shared/weekSections";
 
 export const days = [
@@ -32,7 +32,8 @@ export const lessonTypes = [
   ["other", "Другое"],
 ] as const;
 
-export const lessonTypeLabels: Record<string, string> = Object.fromEntries(lessonTypes);
+export const lessonTypeLabels: Record<string, string> =
+  Object.fromEntries(lessonTypes);
 
 export const weekLabels: Record<EditorLesson["week_type"], string> = {
   every: "Каждую неделю",
@@ -44,6 +45,7 @@ export const weekLabels: Record<EditorLesson["week_type"], string> = {
 export type WeekFilter = ScheduleWeekFilter;
 
 export type LessonForm = {
+  recurrence?: RecurrenceRule;
   semester_id: string;
   day_of_week: number;
   special_date: string;
@@ -89,6 +91,7 @@ export function formFromLesson(
     time_start: lesson.time_start,
     time_end: lesson.time_end,
     week_type: lesson.week_type,
+    recurrence: lesson.recurrence ?? {},
     subject: lesson.subject,
     type: lesson.type,
     teacher: lesson.teacher,
@@ -118,4 +121,10 @@ export function pluralLessons(value: number) {
     return "занятия";
   }
   return "занятий";
+}
+
+export function recurrenceLabel(lesson: EditorLesson): string {
+  if (lesson.recurrence?.cycle_length)
+    return `Цикл ${lesson.recurrence.cycle_length}: недели ${lesson.recurrence.cycle_weeks?.join(", ") ?? "—"}`;
+  return weekLabels[lesson.week_type];
 }

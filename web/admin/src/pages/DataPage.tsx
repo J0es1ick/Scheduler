@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useViewState } from "../hooks/useViewState";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   BookOpen,
@@ -43,17 +44,31 @@ type GroupOrder = "name" | "newest" | "oldest";
 type GroupAction = "activate" | "deactivate" | "delete";
 
 export function DataPage({
+  canManage = false,
   notify,
 }: {
+  canManage?: boolean;
   notify: (text: string, tone?: ToastMessage["tone"]) => void;
 }) {
-  const [tab, setTab] = useState<"groups" | "lessons">("groups");
-  const [query, setQuery] = useState("");
-  const [university, setUniversity] = useState("");
-  const [groupStatus, setGroupStatus] = useState<GroupStatus>("active");
-  const [groupOrder, setGroupOrder] = useState<GroupOrder>("name");
-  const [page, setPage] = useState(1);
-  const [selectedGroup, setSelectedGroup] = useState<GroupView | null>(null);
+  const [tab, setTab] = useViewState<"groups" | "lessons">(
+    "DataPage:tab",
+    "groups",
+  );
+  const [query, setQuery] = useViewState("DataPage:query", "");
+  const [university, setUniversity] = useViewState("DataPage:university", "");
+  const [groupStatus, setGroupStatus] = useViewState<GroupStatus>(
+    "DataPage:groupStatus",
+    "active",
+  );
+  const [groupOrder, setGroupOrder] = useViewState<GroupOrder>(
+    "DataPage:groupOrder",
+    "name",
+  );
+  const [page, setPage] = useViewState("DataPage:page", 1);
+  const [selectedGroup, setSelectedGroup] = useViewState<GroupView | null>(
+    "DataPage:selectedGroup",
+    null,
+  );
   const [groupAction, setGroupAction] = useState<{
     group: GroupView;
     action: GroupAction;
@@ -80,10 +95,22 @@ export function DataPage({
     { enabled: tab === "lessons" },
   );
 
-  useEffect(
-    () => setPage(1),
-    [debounced, university, groupStatus, groupOrder, tab, selectedGroup?.id],
-  );
+  const initialPage = useRef(true);
+  useEffect(() => {
+    if (initialPage.current) {
+      initialPage.current = false;
+      return;
+    }
+    setPage(1);
+  }, [
+    debounced,
+    university,
+    groupStatus,
+    groupOrder,
+    tab,
+    selectedGroup?.id,
+    setPage,
+  ]);
 
   const openGroup = (group: GroupView) => {
     setSelectedGroup(group);
@@ -279,26 +306,27 @@ export function DataPage({
                       <span>Обновлена {formatDate(group.updated_at)}</span>
                     </div>
                     <div className="group-row-actions" data-label="Действия">
-                      {group.is_active ? (
-                        <button
-                          className="button button-ghost"
-                          onClick={() =>
-                            setGroupAction({ group, action: "deactivate" })
-                          }
-                        >
-                          <PauseCircle size={15} /> Отключить
-                        </button>
-                      ) : group.manually_disabled && group.source_active ? (
-                        <button
-                          className="button button-ghost"
-                          onClick={() =>
-                            setGroupAction({ group, action: "activate" })
-                          }
-                        >
-                          <PlayCircle size={15} /> Включить
-                        </button>
-                      ) : null}
-                      {!group.source_active && (
+                      {canManage &&
+                        (group.is_active ? (
+                          <button
+                            className="button button-ghost"
+                            onClick={() =>
+                              setGroupAction({ group, action: "deactivate" })
+                            }
+                          >
+                            <PauseCircle size={15} /> Отключить
+                          </button>
+                        ) : group.manually_disabled && group.source_active ? (
+                          <button
+                            className="button button-ghost"
+                            onClick={() =>
+                              setGroupAction({ group, action: "activate" })
+                            }
+                          >
+                            <PlayCircle size={15} /> Включить
+                          </button>
+                        ) : null)}
+                      {canManage && !group.source_active && (
                         <button
                           className="button button-danger-soft"
                           onClick={() =>
@@ -492,8 +520,8 @@ function GroupLifecycleDialog({
           ) : (
             <>
               <p>
-                Группа исчезнет из поиска и расписания пользователей, даже
-                если источник продолжит её публиковать.
+                Группа исчезнет из поиска и расписания пользователей, даже если
+                источник продолжит её публиковать.
               </p>
               <p className="dialog-note">
                 Занятия, подписки, ручные правки и настройки чатов сохранятся.
@@ -505,6 +533,7 @@ function GroupLifecycleDialog({
             <button
               className="button button-ghost"
               disabled={busy}
+              data-dialog-dismiss
               onClick={onCancel}
             >
               Отмена

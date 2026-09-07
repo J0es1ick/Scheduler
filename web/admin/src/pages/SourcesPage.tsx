@@ -1,3 +1,4 @@
+import { useViewState } from "../hooks/useViewState";
 import { useState } from "react";
 import {
   ArchiveRestore,
@@ -48,9 +49,11 @@ const adapterLabels: Record<string, string> = {
 };
 
 export function SourcesPage({
+  canOperate = false,
   notify,
 }: {
   notify: (text: string, tone?: ToastMessage["tone"]) => void;
+  canOperate?: boolean;
 }) {
   const { data, loading, error, reload } = useRemote(
     async () => ({
@@ -74,7 +77,10 @@ export function SourcesPage({
     conflict: GroupIdentityConflict;
     resolution: "rename" | "new_group";
   } | null>(null);
-  const [listView, setListView] = useState<"active" | "archived">("active");
+  const [listView, setListView] = useViewState<"active" | "archived">(
+    "SourcesPage:listView",
+    "active",
+  );
 
   const allSources = data?.sources ?? [];
   const activeSources = allSources.filter(
@@ -278,7 +284,11 @@ export function SourcesPage({
     setBusy(conflict.id);
     let resolved = false;
     try {
-      await api.resolveGroupIdentityConflict(source.id, conflict.id, resolution);
+      await api.resolveGroupIdentityConflict(
+        source.id,
+        conflict.id,
+        resolution,
+      );
       resolved = true;
       setIdentityResolution(null);
       try {
@@ -286,7 +296,9 @@ export function SourcesPage({
       } catch (syncError) {
         notify(
           `Решение сохранено, но обновление не запустилось: ${
-            syncError instanceof Error ? syncError.message : "неизвестная ошибка"
+            syncError instanceof Error
+              ? syncError.message
+              : "неизвестная ошибка"
           }. Запустите источник вручную.`,
           "error",
         );
@@ -447,11 +459,13 @@ export function SourcesPage({
                   </em>
                 </div>
                 <div>
-                  <span>Результат</span>
+                  <span>Последняя публикация</span>
                   <strong>
-                    {number.format(source.latest_records)} записей
+                    {source.last_published_at
+                      ? formatDateTime(source.last_published_at)
+                      : "Ещё не опубликовано"}
                   </strong>
-                  <em>{duration}</em>
+                  <em>Последняя попытка: {duration}</em>
                 </div>
                 <div>
                   <span>В базе</span>
@@ -468,7 +482,7 @@ export function SourcesPage({
                     </span>
                     <button
                       className="button button-primary"
-                      disabled={busy === source.id}
+                      disabled={!canOperate || busy === source.id}
                       onClick={() => void restoreSource(source)}
                     >
                       <ArchiveRestore size={15} /> Восстановить
@@ -485,13 +499,16 @@ export function SourcesPage({
                         </div>
                         <button
                           className="button button-ghost"
-                          disabled={isBusy || !source.current_snapshot_id}
+                          disabled={
+                            !canOperate || isBusy || !source.current_snapshot_id
+                          }
                           onClick={() => void rollback(source.id)}
                         >
                           <RotateCcw size={15} /> Откатить снимок
                         </button>
                         <button
                           className="button button-primary"
+                          disabled={!canOperate}
                           onClick={() => {
                             window.location.hash = "/connectors";
                           }}
@@ -513,7 +530,7 @@ export function SourcesPage({
                               intervalDrafts[source.id] ??
                               String(source.update_interval / 60)
                             }
-                            disabled={busy === source.id}
+                            disabled={!canOperate || busy === source.id}
                             aria-label={`Интервал обновления ${source.university_name} в минутах`}
                             onChange={(event) =>
                               setIntervalDrafts((current) => ({
@@ -543,7 +560,7 @@ export function SourcesPage({
                         </label>
                         <button
                           className="button button-primary"
-                          disabled={isBusy || !source.is_enabled}
+                          disabled={!canOperate || isBusy || !source.is_enabled}
                           onClick={() => void sync(source.id)}
                         >
                           <RefreshCw
@@ -554,14 +571,16 @@ export function SourcesPage({
                         </button>
                         <button
                           className="button button-ghost"
-                          disabled={isBusy || !source.current_snapshot_id}
+                          disabled={
+                            !canOperate || isBusy || !source.current_snapshot_id
+                          }
                           onClick={() => void rollback(source.id)}
                         >
                           <RotateCcw size={15} /> Откатить
                         </button>
                         <button
                           className="button button-ghost"
-                          disabled={isBusy}
+                          disabled={!canOperate || isBusy}
                           onClick={() => void toggleSource(source)}
                         >
                           {source.is_enabled ? (
@@ -576,7 +595,7 @@ export function SourcesPage({
                         </button>
                         <button
                           className="button button-danger-soft"
-                          disabled={isBusy}
+                          disabled={!canOperate || isBusy}
                           onClick={() => setDeleteTarget(source)}
                         >
                           <Trash2 size={15} /> В архив
@@ -645,7 +664,9 @@ export function SourcesPage({
                     <div className="identity-conflict-actions">
                       <button
                         className="button button-ghost"
-                        disabled={busy === conflict.id || source.running}
+                        disabled={
+                          !canOperate || busy === conflict.id || source.running
+                        }
                         onClick={() =>
                           setIdentityResolution({
                             source,
@@ -658,7 +679,9 @@ export function SourcesPage({
                       </button>
                       <button
                         className="button button-primary"
-                        disabled={busy === conflict.id || source.running}
+                        disabled={
+                          !canOperate || busy === conflict.id || source.running
+                        }
                         onClick={() =>
                           setIdentityResolution({
                             source,
@@ -877,9 +900,9 @@ function IdentityConflictDialog({
           </p>
           {rename ? (
             <p className="dialog-note">
-              Название существующей группы изменится. Все её подписки,
-              настройки чатов, ручные правки и история останутся привязаны к
-              той же группе.
+              Название существующей группы изменится. Все её подписки, настройки
+              чатов, ручные правки и история останутся привязаны к той же
+              группе.
             </p>
           ) : (
             <p className="dialog-note">
@@ -895,6 +918,7 @@ function IdentityConflictDialog({
             <button
               className="button button-ghost"
               disabled={busy}
+              data-dialog-dismiss
               onClick={onCancel}
             >
               Отмена
@@ -931,44 +955,45 @@ function DeleteSourceDialog({
   return (
     <DialogPortal>
       <div className="dialog-backdrop" role="presentation">
-      <section
-        className="confirm-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="delete-source-title"
-      >
-        <span className="dialog-danger-icon">
-          <Trash2 size={19} />
-        </span>
-        <h2 id="delete-source-title">
-          Архивировать источник {source.university_name}?
-        </h2>
-        <p>
-          Источник перестанет запускаться и исчезнет из рабочего списка.
-          Настройки, история запусков, диагностика и снимки сохранятся.
-        </p>
-        <p className="dialog-note">
-          Уже опубликованные группы и занятия останутся в базе и перестанут
-          автоматически обновляться. Источник можно восстановить на вкладке
-          «Архив».
-        </p>
-        <div className="dialog-actions">
-          <button
-            className="button button-ghost"
-            disabled={busy}
-            onClick={onCancel}
-          >
-            Отмена
-          </button>
-          <button
-            className="button button-danger"
-            disabled={busy}
-            onClick={onConfirm}
-          >
-            <Trash2 size={15} /> {busy ? "Архивация…" : "Перенести в архив"}
-          </button>
-        </div>
-      </section>
+        <section
+          className="confirm-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-source-title"
+        >
+          <span className="dialog-danger-icon">
+            <Trash2 size={19} />
+          </span>
+          <h2 id="delete-source-title">
+            Архивировать источник {source.university_name}?
+          </h2>
+          <p>
+            Источник перестанет запускаться и исчезнет из рабочего списка.
+            Настройки, история запусков, диагностика и снимки сохранятся.
+          </p>
+          <p className="dialog-note">
+            Уже опубликованные группы и занятия останутся в базе и перестанут
+            автоматически обновляться. Источник можно восстановить на вкладке
+            «Архив».
+          </p>
+          <div className="dialog-actions">
+            <button
+              className="button button-ghost"
+              disabled={busy}
+              data-dialog-dismiss
+              onClick={onCancel}
+            >
+              Отмена
+            </button>
+            <button
+              className="button button-danger"
+              disabled={busy}
+              onClick={onConfirm}
+            >
+              <Trash2 size={15} /> {busy ? "Архивация…" : "Перенести в архив"}
+            </button>
+          </div>
+        </section>
       </div>
     </DialogPortal>
   );

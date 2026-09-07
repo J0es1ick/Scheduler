@@ -1,19 +1,23 @@
 import { ArrowRight, KeyRound, LockKeyhole } from "lucide-react";
-import { FormEvent, useState } from "react";
+import { FormEvent, useState, type ReactNode } from "react";
 import { LogoMark } from "../components";
 
 export function LoginPage({
   onLogin,
+  onTelegramLogin,
   loading,
   telegramDetected,
   accessKeyEnabled,
   error,
+  themeControl,
 }: {
+  onTelegramLogin?: () => Promise<void>;
   onLogin: (accessKey: string) => Promise<void>;
   loading: boolean;
   telegramDetected: boolean;
   accessKeyEnabled: boolean;
   error: string;
+  themeControl: ReactNode;
 }) {
   const [accessKey, setAccessKey] = useState("");
 
@@ -39,6 +43,7 @@ export function LoginPage({
       </section>
 
       <section className="login-panel-wrap">
+        <div className="login-theme-control">{themeControl}</div>
         <div className="login-panel">
           <span className="login-panel-icon">
             <LockKeyhole size={20} />
@@ -46,12 +51,24 @@ export function LoginPage({
           <h2>Вход в админку</h2>
           <p>
             {telegramDetected
-              ? "Проверяем вашу учётную запись Telegram…"
+              ? loading
+                ? "Проверяем вашу учётную запись Telegram…"
+                : "Нажмите «Войти через Telegram», чтобы продолжить."
               : accessKeyEnabled
                 ? "Введите аварийный ключ доступа из конфигурации сервиса."
                 : "Откройте админку из меню бота. Доступ проверяется по вашей роли в Telegram."}
           </p>
 
+          {onTelegramLogin && (
+            <button
+              type="button"
+              className="login-submit"
+              disabled={loading}
+              onClick={() => void onTelegramLogin()}
+            >
+              {loading ? "Проверяем…" : "Войти через Telegram"}
+            </button>
+          )}
           {accessKeyEnabled && (
             <form onSubmit={submit}>
               <label htmlFor="access-key">Ключ доступа</label>

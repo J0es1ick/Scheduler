@@ -6,3 +6,6 @@
 @import "./styles/snapshot-review.css";
 @import "./styles/motion.css";
 @import "./styles/responsive.css";
+
+@import "./styles/release.css";
+@import "./styles/themes.css";

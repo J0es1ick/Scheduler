@@ -82,16 +82,35 @@ export function EditorPage({
               ))}
             </select>
           </label>
-          <label className="editor-group-search editor-group-search-wide">
-            <span>Группа</span>
+          <div
+            className="editor-group-search editor-group-search-wide"
+            onBlur={(event) => {
+              if (
+                !event.currentTarget.contains(
+                  event.relatedTarget as Node | null,
+                )
+              )
+                editor.setGroupSearchOpen(false);
+            }}
+          >
+            <label htmlFor="editor-group-search">Группа</label>
             <div className="editor-group-search-input">
               <Search size={16} />
               <input
                 value={groupQuery}
                 onFocus={() => editor.setGroupSearchOpen(true)}
-                onBlur={() =>
-                  window.setTimeout(() => editor.setGroupSearchOpen(false), 120)
-                }
+                id="editor-group-search"
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") editor.setGroupSearchOpen(false);
+                  if (
+                    event.key === "Enter" &&
+                    groupSearchOpen &&
+                    groupResults.length === 1
+                  ) {
+                    event.preventDefault();
+                    editor.selectGroup(groupResults[0]);
+                  }
+                }}
                 onChange={(event) => {
                   editor.setGroupQuery(event.target.value);
                   editor.setGroupSearchOpen(true);
@@ -138,7 +157,7 @@ export function EditorPage({
                 )}
               </div>
             )}
-          </label>
+          </div>
         </div>
 
         {schedule.data && (
@@ -243,6 +262,8 @@ export function EditorPage({
 
       {dialog && schedule.data && (
         <LessonDialog
+          conflict={editor.conflict}
+          onRebase={editor.rebase}
           lesson={dialog.lesson}
           day={dialog.day}
           semesters={schedule.data.semesters}
@@ -314,42 +335,43 @@ function ConfirmDelete({
   return (
     <DialogPortal>
       <div className="dialog-backdrop" role="presentation">
-      <section
-        className="confirm-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="delete-title"
-      >
-        <span className="dialog-danger-icon">
-          <Trash2 size={20} />
-        </span>
-        <h2 id="delete-title">Удалить занятие?</h2>
-        <p>
-          <strong>{subject}</strong> больше не будет показываться в расписании
-          бота.
-        </p>
-        {parsed && (
-          <p className="dialog-note">
-            Версию с сайта можно будет восстановить в журнале изменений.
+        <section
+          className="confirm-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-title"
+        >
+          <span className="dialog-danger-icon">
+            <Trash2 size={20} />
+          </span>
+          <h2 id="delete-title">Удалить занятие?</h2>
+          <p>
+            <strong>{subject}</strong> больше не будет показываться в расписании
+            бота.
           </p>
-        )}
-        <div className="dialog-actions">
-          <button
-            className="button button-ghost"
-            disabled={busy}
-            onClick={onCancel}
-          >
-            Отмена
-          </button>
-          <button
-            className="button button-danger"
-            disabled={busy}
-            onClick={onConfirm}
-          >
-            <Trash2 size={16} /> {busy ? "Удаляем…" : "Удалить"}
-          </button>
-        </div>
-      </section>
+          {parsed && (
+            <p className="dialog-note">
+              Версию с сайта можно будет восстановить в журнале изменений.
+            </p>
+          )}
+          <div className="dialog-actions">
+            <button
+              className="button button-ghost"
+              disabled={busy}
+              data-dialog-dismiss
+              onClick={onCancel}
+            >
+              Отмена
+            </button>
+            <button
+              className="button button-danger"
+              disabled={busy}
+              onClick={onConfirm}
+            >
+              <Trash2 size={16} /> {busy ? "Удаляем…" : "Удалить"}
+            </button>
+          </div>
+        </section>
       </div>
     </DialogPortal>
   );
@@ -369,36 +391,38 @@ function ConfirmRestore({
   return (
     <DialogPortal>
       <div className="dialog-backdrop" role="presentation">
-      <section
-        className="confirm-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="restore-title"
-      >
-        <span className="dialog-neutral-icon">
-          <RotateCcw size={20} />
-        </span>
-        <h2 id="restore-title">Вернуть версию с сайта?</h2>
-        <p>
-          Ручная правка для <strong>{subject}</strong> будет удалена.
-        </p>
-        <div className="dialog-actions">
-          <button
-            className="button button-ghost"
-            disabled={busy}
-            onClick={onCancel}
-          >
-            Отмена
-          </button>
-          <button
-            className="button button-primary"
-            disabled={busy}
-            onClick={onConfirm}
-          >
-            <RotateCcw size={16} /> {busy ? "Восстанавливаем…" : "Восстановить"}
-          </button>
-        </div>
-      </section>
+        <section
+          className="confirm-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="restore-title"
+        >
+          <span className="dialog-neutral-icon">
+            <RotateCcw size={20} />
+          </span>
+          <h2 id="restore-title">Вернуть версию с сайта?</h2>
+          <p>
+            Ручная правка для <strong>{subject}</strong> будет удалена.
+          </p>
+          <div className="dialog-actions">
+            <button
+              className="button button-ghost"
+              disabled={busy}
+              data-dialog-dismiss
+              onClick={onCancel}
+            >
+              Отмена
+            </button>
+            <button
+              className="button button-primary"
+              disabled={busy}
+              onClick={onConfirm}
+            >
+              <RotateCcw size={16} />{" "}
+              {busy ? "Восстанавливаем…" : "Восстановить"}
+            </button>
+          </div>
+        </section>
       </div>
     </DialogPortal>
   );

@@ -1,3 +1,5 @@
+import { useViewState } from "../hooks/useViewState";
+import { useUnsavedChanges } from "../hooks/useUnsavedChanges";
 import { useState } from "react";
 import {
   Building2,
@@ -28,6 +30,7 @@ const statusLabels: Record<SupportRequestView["status"], string> = {
 const typeLabels: Record<SupportRequestView["request_type"], string> = {
   update_existing: "Обновление расписания",
   new_institution: "Новое учебное заведение",
+  feedback: "Пожелания и обратная связь",
 };
 
 export function SupportPage({
@@ -35,10 +38,13 @@ export function SupportPage({
 }: {
   notify: (text: string, tone?: ToastMessage["tone"]) => void;
 }) {
-  const [status, setStatus] = useState("pending");
-  const [requestType, setRequestType] = useState("");
-  const [query, setQuery] = useState("");
+  const [status, setStatus] = useViewState("support:status", "pending");
+  const [requestType, setRequestType] = useViewState("support:requestType", "");
+  const [query, setQuery] = useViewState("support:query", "");
   const [notes, setNotes] = useState<Record<string, string>>({});
+  useUnsavedChanges(
+    Object.values(notes).some((note) => note.trim().length > 0),
+  );
   const [busy, setBusy] = useState("");
   const debounced = useDebounced(query);
   const requests = useRemote(
@@ -61,6 +67,11 @@ export function SupportPage({
     setBusy(item.id);
     try {
       await api.resolveSupportRequest(item.id, nextStatus, note);
+      setNotes((current) => {
+        const remaining = { ...current };
+        delete remaining[item.id];
+        return remaining;
+      });
       notify(
         nextStatus === "approved"
           ? "Обращение принято в работу"
@@ -85,14 +96,14 @@ export function SupportPage({
         <div>
           <h2>Обращения пользователей</h2>
           <p>
-            Запросы на обновление подключённых расписаний и добавление новых
-            учебных заведений.
+            Ошибки расписания, новые учебные заведения и пожелания о работе
+            бота.
           </p>
         </div>
         <SearchField
           value={query}
           onChange={setQuery}
-          placeholder="Заведение, ссылка, Telegram ID"
+          placeholder="Текст обращения, заведение, Telegram ID"
         />
       </div>
 
@@ -115,12 +126,14 @@ export function SupportPage({
         </div>
         <select
           className="select-control"
+          aria-label="Тип обращения"
           value={requestType}
           onChange={(event) => setRequestType(event.target.value)}
         >
           <option value="">Все типы</option>
           <option value="update_existing">Обновление расписания</option>
           <option value="new_institution">Новое учебное заведение</option>
+          <option value="feedback">Пожелания и обратная связь</option>
         </select>
       </div>
 
@@ -141,6 +154,8 @@ export function SupportPage({
                 <div className={`support-type type-${item.request_type}`}>
                   {item.request_type === "new_institution" ? (
                     <Building2 size={18} />
+                  ) : item.request_type === "feedback" ? (
+                    <MessageSquareText size={18} />
                   ) : (
                     <ExternalLink size={18} />
                   )}

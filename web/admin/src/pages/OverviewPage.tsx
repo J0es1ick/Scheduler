@@ -26,7 +26,11 @@ import type { ViewName } from "../app/layout/AppLayout";
 
 export function OverviewPage({
   onNavigate,
+  canEdit = false,
+  canOperate = false,
 }: {
+  canEdit?: boolean;
+  canOperate?: boolean;
   onNavigate: (view: ViewName) => void;
 }) {
   const { data, loading, error, reload } = useRemote(() => api.dashboard(), []);
@@ -48,7 +52,8 @@ export function OverviewPage({
         <div>
           <h2>Сводка на сегодня</h2>
           <p>
-            Данные обновляются автоматически; здесь показано текущее состояние.
+            Последние полученные данные сервиса. Проверка обновлений — каждые 15
+            секунд.
           </p>
         </div>
         <div className="intro-actions">
@@ -57,6 +62,7 @@ export function OverviewPage({
           </button>
           <button
             className="button button-primary"
+            disabled={!canEdit}
             onClick={() => onNavigate("editor")}
           >
             <PencilLine size={16} /> Открыть редактор
@@ -64,29 +70,53 @@ export function OverviewPage({
         </div>
       </div>
 
-      {data.operations.status === "degraded" && (
+      {data.operations.sources_stale +
+        data.operations.sources_error +
+        data.operations.sources_quarantined >
+        0 && (
         <section className="operations-warning">
           <CircleGauge size={20} />
           <div>
-            <strong>Сервис требует внимания</strong>
+            <strong>Проблемы источников</strong>
             <span>
-              Источники: {data.operations.sources_stale} устарели,{" "}
-              {data.operations.sources_error} с ошибкой,{" "}
-              {data.operations.sources_quarantined} в карантине,{" "}
-              {data.operations.sources_disabled} отключено. Очередь:{" "}
-              {data.operations.pending_notifications +
-                data.operations.pending_outbox}{" "}
-              ожидают,{" "}
-              {data.operations.failed_notifications +
-                data.operations.failed_outbox}{" "}
-              завершились ошибкой.
+              Устарели: {data.operations.sources_stale}. Ошибки:{" "}
+              {data.operations.sources_error}. На проверке:{" "}
+              {data.operations.sources_quarantined}.
             </span>
           </div>
           <button
             className="button button-ghost"
+            disabled={!canOperate}
             onClick={() => onNavigate("sources")}
           >
             Проверить источники
+          </button>
+        </section>
+      )}
+      {data.operations.pending_notifications +
+        data.operations.pending_outbox +
+        data.operations.failed_notifications +
+        data.operations.failed_outbox >
+        0 && (
+        <section className="operations-warning">
+          <CircleGauge size={20} />
+          <div>
+            <strong>Доставка сообщений</strong>
+            <span>
+              Ожидают:{" "}
+              {data.operations.pending_notifications +
+                data.operations.pending_outbox}
+              . Ошибки:{" "}
+              {data.operations.failed_notifications +
+                data.operations.failed_outbox}
+              . Массовая отправка занимает время.
+            </span>
+          </div>
+          <button
+            className="button button-ghost"
+            onClick={() => onNavigate("logs")}
+          >
+            Открыть диагностику
           </button>
         </section>
       )}
@@ -125,6 +155,7 @@ export function OverviewPage({
             action={
               <button
                 className="text-button"
+                disabled={!canOperate}
                 onClick={() => onNavigate("sources")}
               >
                 Настроить <ChevronRight size={15} />
@@ -141,6 +172,12 @@ export function OverviewPage({
                     {source.running
                       ? "Обновляется сейчас"
                       : `Последний запуск ${relativeTime(source.last_run_at)}`}
+                  </span>
+                  <span>
+                    Публикация:{" "}
+                    {source.last_published_at
+                      ? relativeTime(source.last_published_at)
+                      : "ещё не было"}
                   </span>
                 </div>
                 <div className="source-overview-counts">

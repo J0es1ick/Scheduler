@@ -48,7 +48,7 @@ const navigation: Array<{
     id: "sources",
     label: "Источники",
     icon: RadioTower,
-    minimumRole: "operator",
+    minimumRole: "reviewer",
   },
   {
     id: "connectors",
@@ -118,12 +118,14 @@ export function AppLayout({
   view,
   onNavigate,
   onLogout,
+  themeControl,
   children,
 }: {
   user: AdminIdentity;
   view: ViewName;
   onNavigate: (view: ViewName) => void;
   onLogout: () => void;
+  themeControl: ReactNode;
   children: ReactNode;
 }) {
   const current = pageCopy[view];
@@ -157,7 +159,7 @@ export function AppLayout({
         </nav>
         <div className="sidebar-status">
           <Activity size={15} />
-          <span>Сервис работает</span>
+          <span>Scheduler · административный доступ</span>
         </div>
         <div className="sidebar-user">
           <div className="avatar">
@@ -187,16 +189,38 @@ export function AppLayout({
             <h1>{current.title}</h1>
             <span>{current.subtitle}</span>
           </div>
-          {canAccessView("audit", user.role) && (
-            <button
-              className="topbar-audit"
-              onClick={() => onNavigate("audit")}
-              aria-label="Открыть аудит"
-            >
-              <ShieldCheck size={20} />
-            </button>
-          )}
+          <div className="topbar-actions">
+            {themeControl}
+            {canAccessView("audit", user.role) && (
+              <button
+                className="topbar-audit"
+                onClick={() => onNavigate("audit")}
+                aria-label="Открыть аудит"
+              >
+                <ShieldCheck size={20} />
+              </button>
+            )}
+          </div>
         </header>
+        <div className="mobile-sections">
+          <label htmlFor="mobile-section">Раздел</label>
+          <select
+            id="mobile-section"
+            value={view}
+            onChange={(event) => onNavigate(event.target.value as ViewName)}
+          >
+            {navigation
+              .filter((item) => canAccessView(item.id, user.role))
+              .map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+          </select>
+          <button className="button button-ghost" onClick={onLogout}>
+            Выйти
+          </button>
+        </div>
         <div className="content-area">{children}</div>
       </main>
 

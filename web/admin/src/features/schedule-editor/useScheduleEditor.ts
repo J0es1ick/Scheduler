@@ -1,21 +1,37 @@
-import { useMemo, useState } from "react";
-import { api } from "../../api";
+import { useViewState } from "../../hooks/useViewState";
+import { useEffect, useMemo, useState } from "react";
+import { APIError, api } from "../../api";
 import type { ToastMessage } from "../../components";
 import { useDebounced, useRemote } from "../../hooks";
-import type { EditorLesson, EditorSchedule, GroupView, LessonMutationPayload } from "../../types";
+import type {
+  EditorLesson,
+  EditorSchedule,
+  GroupView,
+  LessonMutationPayload,
+} from "../../types";
 import { buildScheduleWeekSections } from "../schedule-shared/weekSections";
 import type { LessonForm, WeekFilter } from "./model";
 
 export function useScheduleEditor(
   notify: (text: string, tone?: ToastMessage["tone"]) => void,
 ) {
-  const [university, setUniversity] = useState("");
-  const [groupQuery, setGroupQuery] = useState("");
+  const [university, setUniversity] = useViewState("editor:university", "");
+  const [groupQuery, setGroupQuery] = useViewState("editor:groupQuery", "");
   const [groupSearchOpen, setGroupSearchOpen] = useState(false);
-  const [selectedGroupID, setSelectedGroupID] = useState("");
-  const [week, setWeek] = useState<WeekFilter>("all");
-  const [lessonQuery, setLessonQuery] = useState("");
-  const [dialog, setDialog] = useState<{ lesson: EditorLesson | null; day: number } | null>(null);
+  const [selectedGroupID, setSelectedGroupID] = useViewState(
+    "editor:selectedGroupID",
+    "",
+  );
+  const [week, setWeek] = useViewState<WeekFilter>("editor:week", "all");
+  const [lessonQuery, setLessonQuery] = useViewState("editor:lessonQuery", "");
+  const [dialog, setDialog] = useState<{
+    lesson: EditorLesson | null;
+    day: number;
+  } | null>(null);
+  const [conflict, setConflict] = useState<EditorLesson | null | undefined>(
+    undefined,
+  );
+  useEffect(() => setConflict(undefined), [dialog]);
   const [deleteTarget, setDeleteTarget] = useState<EditorLesson | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<EditorLesson | null>(null);
   const [changesOpen, setChangesOpen] = useState(false);
@@ -25,26 +41,33 @@ export function useScheduleEditor(
 
   const universities = useRemote(() => api.universities(), []);
   const groups = useRemote(
-    () => api.groups({
-      page: 1,
-      pageSize: 20,
-      q: debouncedGroupQuery,
-      university,
-      status: "active",
-      selector: true,
-    }),
+    () =>
+      api.groups({
+        page: 1,
+        pageSize: 20,
+        q: debouncedGroupQuery,
+        university,
+        status: "active",
+        selector: true,
+      }),
     [debouncedGroupQuery, university],
     { enabled: debouncedGroupQuery.trim().length > 0 },
   );
   const schedule = useRemote<EditorSchedule | null>(
-    () => selectedGroupID ? api.editorSchedule(selectedGroupID) : Promise.resolve(null),
+    () =>
+      selectedGroupID
+        ? api.editorSchedule(selectedGroupID)
+        : Promise.resolve(null),
     [selectedGroupID],
   );
 
   const searchedLessons = useMemo(() => {
     const query = lessonQuery.trim().toLocaleLowerCase("ru-RU");
     return (schedule.data?.lessons ?? []).filter((lesson) => {
-      const haystack = `${lesson.subject} ${lesson.teacher} ${lesson.room}`.toLocaleLowerCase("ru-RU");
+      const haystack =
+        `${lesson.subject} ${lesson.teacher} ${lesson.room}`.toLocaleLowerCase(
+          "ru-RU",
+        );
       return !query || haystack.includes(query);
     });
   }, [lessonQuery, schedule.data]);
@@ -56,7 +79,9 @@ export function useScheduleEditor(
 
   const editorLessons = schedule.data?.lessons ?? [];
   const deletedLessons = schedule.data?.deleted_lessons ?? [];
-  const manualLessons = editorLessons.filter((lesson) => lesson.origin === "manual");
+  const manualLessons = editorLessons.filter(
+    (lesson) => lesson.origin === "manual",
+  );
 
   async function saveLesson(form: LessonForm) {
     if (!schedule.data || !dialog) return;
@@ -77,7 +102,35 @@ export function useScheduleEditor(
       setDialog(null);
       await schedule.reload();
     } catch (caught) {
-      notify(caught instanceof Error ? caught.message : "Не удалось сохранить занятие", "error");
+      if (
+        caught instanceof APIError &&
+        caught.status === 409 &&
+        dialog.lesson
+      ) {
+        try {
+          const latest = await api.editorSchedule(schedule.data.group.id);
+          const originalID = dialog.lesson.base_lesson_id ?? dialog.lesson.id;
+          setConflict(
+            latest.lessons.find(
+              (item) =>
+                item.id === dialog.lesson?.id ||
+                item.id === originalID ||
+                item.base_lesson_id === originalID,
+            ) ?? null,
+          );
+        } catch {
+          notify(
+            "Не удалось загрузить новую версию для сравнения. Ваш ввод сохранён.",
+            "error",
+          );
+        }
+      }
+      notify(
+        caught instanceof Error
+          ? caught.message
+          : "Не удалось сохранить занятие",
+        "error",
+      );
     } finally {
       setBusy(false);
     }
@@ -88,13 +141,18 @@ export function useScheduleEditor(
     setBusy(true);
     try {
       await api.deleteEditorLesson(deleteTarget);
-      notify(deleteTarget.base_lesson_id || deleteTarget.origin === "parsed"
-        ? "Занятие скрыто. Исходную версию можно восстановить"
-        : "Занятие удалено");
+      notify(
+        deleteTarget.base_lesson_id || deleteTarget.origin === "parsed"
+          ? "Занятие скрыто. Исходную версию можно восстановить"
+          : "Занятие удалено",
+      );
       setDeleteTarget(null);
       await schedule.reload();
     } catch (caught) {
-      notify(caught instanceof Error ? caught.message : "Не удалось удалить занятие", "error");
+      notify(
+        caught instanceof Error ? caught.message : "Не удалось удалить занятие",
+        "error",
+      );
     } finally {
       setBusy(false);
     }
@@ -109,7 +167,12 @@ export function useScheduleEditor(
       setRestoreTarget(null);
       await schedule.reload();
     } catch (caught) {
-      notify(caught instanceof Error ? caught.message : "Не удалось восстановить занятие", "error");
+      notify(
+        caught instanceof Error
+          ? caught.message
+          : "Не удалось восстановить занятие",
+        "error",
+      );
     } finally {
       setBusy(false);
     }
@@ -129,12 +192,43 @@ export function useScheduleEditor(
   }
 
   return {
-    university, groupQuery, groupSearchOpen, selectedGroupID, week, lessonQuery,
-    dialog, deleteTarget, restoreTarget, changesOpen, exportOpen, busy,
-    universities, groups, schedule, groupResults: groups.data?.items ?? [],
-    weekSections, editorLessons, deletedLessons, manualLessons,
-    setGroupQuery, setGroupSearchOpen, setWeek, setLessonQuery, setDialog,
-    setDeleteTarget, setRestoreTarget, setChangesOpen, setExportOpen,
-    changeUniversity, selectGroup, saveLesson, deleteLesson, restoreLesson,
+    university,
+    groupQuery,
+    groupSearchOpen,
+    selectedGroupID,
+    week,
+    lessonQuery,
+    conflict,
+    rebase: () => {
+      if (conflict) setDialog({ lesson: conflict, day: dialog?.day ?? 1 });
+    },
+    dialog,
+    deleteTarget,
+    restoreTarget,
+    changesOpen,
+    exportOpen,
+    busy,
+    universities,
+    groups,
+    schedule,
+    groupResults: groups.data?.items ?? [],
+    weekSections,
+    editorLessons,
+    deletedLessons,
+    manualLessons,
+    setGroupQuery,
+    setGroupSearchOpen,
+    setWeek,
+    setLessonQuery,
+    setDialog,
+    setDeleteTarget,
+    setRestoreTarget,
+    setChangesOpen,
+    setExportOpen,
+    changeUniversity,
+    selectGroup,
+    saveLesson,
+    deleteLesson,
+    restoreLesson,
   };
 }

@@ -54,6 +54,8 @@ export interface GroupIdentityConflict {
 }
 
 export interface SourceView {
+  last_published_at?: string | null;
+  freshness_state?: string;
   id: string;
   university_id: string;
   university_name: string;
@@ -155,11 +157,7 @@ export interface ParserSnapshot {
   reviewed_at: string | null;
 }
 
-export type SnapshotGroupStatus =
-  | "added"
-  | "removed"
-  | "changed"
-  | "unchanged";
+export type SnapshotGroupStatus = "added" | "removed" | "changed" | "unchanged";
 
 export interface SnapshotComparisonSummary {
   added_groups: number;
@@ -183,6 +181,15 @@ export interface SnapshotGroupDiff {
 }
 
 export interface SnapshotPreview {
+  current_institution: {
+    name: string;
+    full_name?: string;
+    schedule_url?: string;
+    timezone?: string;
+    locale?: string;
+  };
+  candidate_institution: SnapshotPreview["current_institution"];
+  current_data_source_id: string;
   snapshot_id: string;
   data_source_id: string;
   status: ParserSnapshot["status"];
@@ -229,6 +236,7 @@ export interface SnapshotScheduleComparison {
 }
 
 export interface OperationalHealth {
+  expired_pending_reminders?: number;
   status: "healthy" | "degraded";
   database: boolean;
   sources_total: number;
@@ -308,6 +316,7 @@ export interface LessonView {
 }
 
 export interface EditorGroup {
+  timezone: string;
   id: string;
   name: string;
   university_id: string;
@@ -322,7 +331,14 @@ export interface SemesterOption {
   end_date: string;
 }
 
+export interface RecurrenceRule {
+  cycle_length?: number;
+  cycle_weeks?: number[];
+  anchor_date?: string;
+}
+
 export interface EditorLesson {
+  recurrence: RecurrenceRule;
   id: string;
   university_id: string;
   semester_id: string;
@@ -354,6 +370,7 @@ export interface EditorSchedule {
 }
 
 export interface LessonMutationPayload {
+  recurrence?: RecurrenceRule;
   group_id: string;
   semester_id: string;
   day_of_week: number;
@@ -447,12 +464,21 @@ export interface ManagedParserCatalogItem {
 }
 
 export interface ConnectorRun {
+  ingestion_sequence: number;
   run_id: string;
   connector_id: string;
   external_snapshot_id: string;
   schema_version: string;
   payload_sha256: string;
-  status: "received" | "processing" | "staged" | "quarantined" | "published" | "rejected" | "failed";
+  status:
+    | "superseded"
+    | "received"
+    | "processing"
+    | "staged"
+    | "quarantined"
+    | "published"
+    | "rejected"
+    | "failed";
   attempts: number;
   error?: string;
   parser_snapshot_id?: string;
@@ -483,7 +509,7 @@ export interface SupportRequestView {
   id: string;
   user_id: string;
   username: string;
-  request_type: "update_existing" | "new_institution";
+  request_type: "update_existing" | "new_institution" | "feedback";
   details: string;
   status: "pending" | "approved" | "rejected";
   review_note: string;
@@ -523,6 +549,29 @@ declare global {
         initData: string;
         ready(): void;
         expand(): void;
+        viewportHeight?: number;
+        safeAreaInset?: {
+          top: number;
+          bottom: number;
+          left: number;
+          right: number;
+        };
+        contentSafeAreaInset?: {
+          top: number;
+          bottom: number;
+          left: number;
+          right: number;
+        };
+        BackButton?: {
+          show(): void;
+          hide(): void;
+          onClick(callback: () => void): void;
+          offClick(callback: () => void): void;
+        };
+        onEvent?(event: string, callback: () => void): void;
+        offEvent?(event: string, callback: () => void): void;
+        enableClosingConfirmation?(): void;
+        disableClosingConfirmation?(): void;
         colorScheme?: "light" | "dark";
         setHeaderColor?(color: string): void;
         setBackgroundColor?(color: string): void;

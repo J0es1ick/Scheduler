@@ -1,3 +1,4 @@
+import { useViewState } from "../hooks/useViewState";
 import { useState } from "react";
 import { BellRing, Shield, UserRoundCheck } from "lucide-react";
 import { api } from "../api";
@@ -30,7 +31,7 @@ export function UsersPage({
   user: AdminIdentity;
   notify: (text: string, tone?: ToastMessage["tone"]) => void;
 }) {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useViewState("users:query", "");
   const [busy, setBusy] = useState("");
   const debounced = useDebounced(query);
   const users = useRemote(() => api.users(debounced), [debounced]);

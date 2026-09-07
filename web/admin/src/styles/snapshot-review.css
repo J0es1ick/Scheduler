@@ -11,7 +11,7 @@
   border: 1px solid var(--line-strong);
   border-radius: 16px;
   background: var(--surface);
-  box-shadow: 0 26px 80px rgba(50, 43, 33, 0.26);
+  box-shadow: 0 26px 80px var(--shadow-raised, rgba(50, 43, 33, 0.26));
 }
 
 .snapshot-review-header,
@@ -104,7 +104,10 @@
 
 .snapshot-version-comparison {
   display: grid;
-  grid-template-columns: minmax(140px, 0.8fr) auto minmax(140px, 0.8fr) minmax(260px, 1.7fr);
+  grid-template-columns: minmax(140px, 0.8fr) auto minmax(140px, 0.8fr) minmax(
+      260px,
+      1.7fr
+    );
   gap: 13px;
   align-items: center;
 }
@@ -124,7 +127,7 @@
 }
 
 .snapshot-version-comparison article.is-candidate {
-  border-color: #aeb7a2;
+  border-color: var(--accent-border, #aeb7a2);
   background: var(--olive-soft);
 }
 
@@ -172,17 +175,17 @@
 }
 
 .snapshot-delta-strip .is-changed {
-  border-color: #d8bd96;
-  color: #7b5b31;
+  border-color: var(--warning-border, #d8bd96);
+  color: var(--warning-ink, #7b5b31);
 }
 
 .snapshot-delta-strip .is-added {
-  border-color: #b8c8aa;
+  border-color: var(--accent-border, #b8c8aa);
   color: var(--olive-dark);
 }
 
 .snapshot-delta-strip .is-removed {
-  border-color: #ddb1a7;
+  border-color: var(--danger-border, #ddb1a7);
   color: var(--red);
 }
 
@@ -200,7 +203,7 @@
   min-width: 0;
   min-height: 0;
   border-right: 1px solid var(--line);
-  background: #faf7f0;
+  background: var(--inset-surface, #faf7f0);
 }
 
 .snapshot-group-search {
@@ -217,7 +220,7 @@
 
 .snapshot-group-search:focus-within {
   border-color: var(--olive);
-  box-shadow: 0 0 0 2px rgba(104, 112, 92, 0.1);
+  box-shadow: 0 0 0 2px var(--focus-ring, rgba(104, 112, 92, 0.1));
 }
 
 .snapshot-group-search input {
@@ -289,7 +292,7 @@
 .snapshot-group-item.is-selected {
   border-color: var(--line-strong);
   background: var(--surface);
-  box-shadow: 0 5px 14px rgba(70, 60, 45, 0.07);
+  box-shadow: 0 5px 14px var(--shadow-soft, rgba(70, 60, 45, 0.07));
 }
 
 .snapshot-group-item > div {
@@ -320,7 +323,7 @@
 }
 
 .snapshot-group-item.is-changed span {
-  color: #866133;
+  color: var(--warning-ink, #866133);
 }
 
 .snapshot-group-item p {
@@ -467,7 +470,7 @@
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fbf8f1;
+  background: var(--inset-surface, #fbf8f1);
 }
 
 .snapshot-week-section.is-all {
@@ -484,11 +487,11 @@
   align-items: center;
   padding: 10px 11px;
   border-bottom: 1px solid var(--line);
-  background: #f2ede3;
+  background: var(--inset-surface, #f2ede3);
 }
 
 .snapshot-week-section.is-even .snapshot-week-heading {
-  background: #eef0e8;
+  background: var(--added-surface, #eef0e8);
 }
 
 .snapshot-week-heading > div {
@@ -594,15 +597,15 @@
 }
 
 .snapshot-lesson-card.is-added {
-  border-color: #afc19f;
+  border-color: var(--accent-border, #afc19f);
   border-left-color: var(--olive);
-  background: #f6f8f1;
+  background: var(--added-surface, #f6f8f1);
 }
 
 .snapshot-lesson-card.is-removed {
-  border-color: #dfb8af;
+  border-color: var(--danger-border, #dfb8af);
   border-left-color: var(--red);
-  background: #fcf3f0;
+  background: var(--removed-surface, #fcf3f0);
 }
 
 .snapshot-lesson-topline {

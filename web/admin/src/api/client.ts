@@ -33,7 +33,8 @@ export class APIError extends Error {
   requestID: string;
 
   constructor(status: number, message: string, code = "", requestID = "") {
-    super(message);
+    const guidance = status === 401 ? "Сессия истекла. Войдите снова." : status === 403 ? "Нет права на это действие." : status >= 500 ? "Сервис временно недоступен. Повторите попытку." : message;
+    super(`${guidance}${requestID ? ` · Запрос ${requestID}` : ""}`);
     this.status = status;
     this.code = code;
     this.requestID = requestID;
@@ -124,7 +125,10 @@ export const api = {
     csrfToken = "";
   },
 
-  dashboard: () => request<Dashboard>("/api/dashboard"),
+  dashboard: async () => {
+    const data = await request<Dashboard>("/api/dashboard");
+    return {...data, sources:data.sources ?? [], recent_logs:data.recent_logs ?? [], trend:data.trend ?? [], universities:data.universities ?? []};
+  },
   sources: async () =>
     (await request<{ items: SourceView[] }>("/api/sources")).items,
   updateSource: (
@@ -254,6 +258,10 @@ export const api = {
     request<EditorSchedule>(
       `/api/editor/schedule?group=${encodeURIComponent(groupID)}`,
     ),
+  previewEditorLesson: (lesson: LessonMutationPayload, from: string, days = 112, lessonID?: string) =>
+    request<{ dates: string[] }>("/api/editor/preview", { method: "POST", body: JSON.stringify({ lesson, from, days, lesson_id: lessonID }) }),
+  editorCalendar: (group: string, from: string, days: number) =>
+    request<{ content: string }>(`/api/editor/calendar?${new URLSearchParams({ group, from, days: String(days) })}`),
   createEditorLesson: (lesson: LessonMutationPayload) =>
     request<{ id: string }>("/api/editor/lessons", {
       method: "POST",
@@ -321,9 +329,10 @@ export const api = {
       credentials?: ConnectorCredentials;
       credentials_warning: string;
     }>("/api/connectors", { method: "POST", body: JSON.stringify(payload) }),
+  connectorActivation: (id: string) => request<SnapshotPreview>(`/api/connectors/${encodeURIComponent(id)}/activation`),
   updateConnector: (
     id: string,
-    payload: { status?: ConnectorStatus; quality_policy?: SourceQualityPolicy },
+    payload: { status?: ConnectorStatus; quality_policy?: SourceQualityPolicy; snapshot_id?: string; expected_current_snapshot_id?: string },
   ) =>
     request<{ connector: ConnectorClient }>(
       `/api/connectors/${encodeURIComponent(id)}`,

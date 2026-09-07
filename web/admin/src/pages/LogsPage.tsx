@@ -1,3 +1,4 @@
+import { useViewState } from "../hooks/useViewState";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -16,11 +17,12 @@ import {
   StatusPill,
 } from "../components";
 import { useRemote } from "../hooks";
-import { useState } from "react";
 
 export function LogsPage() {
-  const [source, setSource] = useState("");
-  const [status, setStatus] = useState("");
+  const [source, setSource] = useViewState("LogsPage:source", "");
+  const [status, setStatus] = useViewState("LogsPage:status", "");
+  const health = useRemote(() => api.dashboard(), []);
+  const delivery = health.data?.operations;
   const sources = useRemote(() => api.sources(), []);
   const logs = useRemote(() => api.logs(source, status), [source, status]);
 
@@ -33,6 +35,45 @@ export function LogsPage() {
 
   return (
     <div className="page-stack logs-page">
+      <section
+        className="card-surface table-card"
+        aria-label="Диагностика доставки"
+      >
+        <SectionTitle
+          title="Доставка сообщений"
+          action={
+            <button
+              className="text-button"
+              onClick={() => void health.reload()}
+            >
+              Обновить
+            </button>
+          }
+        />
+        {delivery ? (
+          <div className="calendar-preview">
+            <p>
+              Ожидают:{" "}
+              {delivery.pending_notifications + delivery.pending_outbox}. С
+              ошибкой: {delivery.failed_notifications + delivery.failed_outbox}.
+            </p>
+            <p>
+              Возраст старейшего сообщения:{" "}
+              {Math.round(delivery.oldest_pending_seconds)} сек. Просроченных
+              напоминаний в очереди: {delivery.expired_pending_reminders ?? 0}.
+            </p>
+            <p>
+              Проверено: {formatDateTime(delivery.checked_at)}. При устойчивом
+              росте очереди проверьте доступность Telegram и состояние процесса
+              бота по инструкции эксплуатации.
+            </p>
+          </div>
+        ) : health.error ? (
+          <ErrorBlock message={health.error} retry={health.reload} />
+        ) : (
+          <LoadingBlock rows={2} />
+        )}
+      </section>
       <section className="log-summary">
         <article>
           <CheckCircle2 size={21} />

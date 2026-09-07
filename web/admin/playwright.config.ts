@@ -12,6 +12,11 @@ export default defineConfig({
   },
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    {
+      name: "chromium-dark",
+      use: { ...devices["Desktop Chrome"], colorScheme: "dark" },
+      testMatch: ["**/admin.spec.ts", "**/release.spec.ts"],
+    },
   ],
   webServer: {
     command: "npm run dev -- --host 127.0.0.1",

@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { explicitlyLoggedOut, setExplicitLogout } from "./logoutState";
+import { RefreshStatus } from "./RefreshStatus";
+import { useMiniApp } from "./useMiniApp";
+import { useTheme } from "./useTheme";
+import { ThemeSwitch } from "./ThemeSwitch";
+import { clearViewState } from "../hooks/useViewState";
+import { useEffect, useState } from "react";
 import { APIError, api } from "../api";
 import { Toasts, type ToastMessage } from "../components";
 import { AuditPage } from "../pages/AuditPage";
@@ -35,7 +41,7 @@ function messageFrom(error: unknown) {
   if (error instanceof APIError && error.status === 403)
     return "Доступ разрешён только администраторам.";
   if (error instanceof APIError && error.status === 401)
-    return "Неверный ключ доступа.";
+    return "Сессия недействительна. Откройте вход заново.";
   return error instanceof Error
     ? error.message
     : "Не удалось выполнить запрос.";
@@ -48,6 +54,8 @@ export default function App() {
   const [accessKeyEnabled, setAccessKeyEnabled] = useState(false);
   const [view, setView] = useState<ViewName>(viewFromHash);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  useMiniApp(view);
+  const theme = useTheme();
   const telegram = window.Telegram?.WebApp;
   const telegramDetected = Boolean(telegram?.initData);
 
@@ -55,8 +63,6 @@ export default function App() {
     if (telegram?.initData) {
       telegram.ready();
       telegram.expand();
-      telegram.setHeaderColor?.("#e9e2d5");
-      telegram.setBackgroundColor?.("#f3efe5");
     }
 
     let active = true;
@@ -74,7 +80,8 @@ export default function App() {
         if (
           error instanceof APIError &&
           error.status === 401 &&
-          telegram?.initData
+          telegram?.initData &&
+          !explicitlyLoggedOut()
         ) {
           try {
             const identity = await api.loginWithTelegram(telegram.initData);
@@ -99,10 +106,31 @@ export default function App() {
   }, [telegram]);
 
   useEffect(() => {
-    const syncHash = () => setView(viewFromHash());
+    let accepted = window.location.hash;
+    const syncHash = () => {
+      if (window.location.hash === accepted) return;
+      if (
+        !window.dispatchEvent(
+          new Event("scheduler:before-navigate", { cancelable: true }),
+        )
+      ) {
+        window.history.pushState(
+          { scheduler: true },
+          "",
+          accepted || "#/overview",
+        );
+        return;
+      }
+      accepted = window.location.hash;
+      setView(viewFromHash());
+    };
     window.addEventListener("hashchange", syncHash);
-    return () => window.removeEventListener("hashchange", syncHash);
-  }, []);
+    window.addEventListener("popstate", syncHash);
+    return () => {
+      window.removeEventListener("hashchange", syncHash);
+      window.removeEventListener("popstate", syncHash);
+    };
+  }, [view]);
 
   useEffect(() => {
     if (user && !canAccessView(view, user.role)) {
@@ -113,6 +141,7 @@ export default function App() {
 
   useEffect(() => {
     const sessionExpired = () => {
+      clearViewState();
       setUser(null);
       setAuthError(
         "Сессия истекла. Войдите снова через Telegram или аварийный ключ.",
@@ -124,8 +153,15 @@ export default function App() {
   }, []);
 
   function navigate(next: ViewName) {
+    if (
+      next === view ||
+      !window.dispatchEvent(
+        new Event("scheduler:before-navigate", { cancelable: true }),
+      )
+    )
+      return;
     setView(next);
-    window.history.replaceState(null, "", `#/${next}`);
+    window.history.pushState({ scheduler: true }, "", `#/${next}`);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -143,6 +179,21 @@ export default function App() {
     setAuthError("");
     try {
       setUser(await api.loginWithAccessKey(accessKey));
+      setExplicitLogout(false);
+    } catch (error) {
+      setAuthError(messageFrom(error));
+    } finally {
+      setBooting(false);
+    }
+  }
+
+  async function loginTelegram() {
+    if (!telegram?.initData) return;
+    setBooting(true);
+    setAuthError("");
+    try {
+      setUser(await api.loginWithTelegram(telegram.initData));
+      setExplicitLogout(false);
     } catch (error) {
       setAuthError(messageFrom(error));
     } finally {
@@ -153,24 +204,38 @@ export default function App() {
   async function logout() {
     try {
       await api.logout();
-    } finally {
+      clearViewState();
+      setExplicitLogout(true);
+      clearViewState();
       setUser(null);
       setAuthError("");
+    } catch (error) {
+      notify(messageFrom(error), "error");
     }
   }
 
-  const page = useMemo(() => {
+  const page = (() => {
     switch (view) {
       case "editor":
         return <EditorPage notify={notify} />;
       case "sources":
-        return <SourcesPage notify={notify} />;
+        return (
+          <SourcesPage
+            canOperate={user?.role === "owner" || user?.role === "operator"}
+            notify={notify}
+          />
+        );
       case "connectors":
         return <ConnectorsPage notify={notify} />;
       case "logs":
         return <LogsPage />;
       case "data":
-        return <DataPage notify={notify} />;
+        return (
+          <DataPage
+            canManage={user?.role === "owner" || user?.role === "operator"}
+            notify={notify}
+          />
+        );
       case "support":
         return <SupportPage notify={notify} />;
       case "users":
@@ -178,14 +243,22 @@ export default function App() {
       case "audit":
         return <AuditPage />;
       default:
-        return <OverviewPage onNavigate={navigate} />;
+        return (
+          <OverviewPage
+            canEdit={!!user && canAccessView("editor", user.role)}
+            canOperate={!!user && canAccessView("sources", user.role)}
+            onNavigate={navigate}
+          />
+        );
     }
-  }, [view, user]);
+  })();
 
   if (!user) {
     return (
       <LoginPage
+        themeControl={<ThemeSwitch {...theme} />}
         onLogin={login}
+        onTelegramLogin={telegramDetected ? loginTelegram : undefined}
         loading={booting}
         telegramDetected={telegramDetected && booting}
         accessKeyEnabled={accessKeyEnabled}
@@ -197,11 +270,13 @@ export default function App() {
   return (
     <>
       <AppLayout
+        themeControl={<ThemeSwitch {...theme} />}
         user={user}
         view={view}
         onNavigate={navigate}
         onLogout={() => void logout()}
       >
+        <RefreshStatus />
         {page}
       </AppLayout>
       <Toasts items={toasts} />

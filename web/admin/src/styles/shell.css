@@ -44,7 +44,7 @@
   width: 40px;
   height: 40px;
   overflow: hidden;
-  border: 1px solid #465044;
+  border: 1px solid var(--logo-border, #465044);
   border-radius: 9px;
   background: var(--olive);
 }
@@ -54,7 +54,7 @@
   left: 9px;
   right: 9px;
   height: 2px;
-  background: #f8f4eb;
+  background: var(--logo-ink, #f8f4eb);
 }
 
 .logo-mark .line-a {
@@ -72,7 +72,7 @@
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: #f8f4eb;
+  background: var(--logo-ink, #f8f4eb);
 }
 
 .logo-lockup.is-compact .logo-mark {
@@ -107,20 +107,20 @@
   border: 1px solid transparent;
   border-radius: 9px;
   background: transparent;
-  color: #5f6259;
+  color: var(--nav-ink, #5f6259);
   font-size: 13px;
   font-weight: 600;
   text-align: left;
 }
 
 .desktop-nav button:hover {
-  border-color: rgba(104, 112, 92, 0.18);
-  background: rgba(255, 253, 248, 0.5);
+  border-color: var(--hover-border, rgba(104, 112, 92, 0.18));
+  background: var(--surface-overlay, rgba(255, 253, 248, 0.5));
   color: var(--ink);
 }
 
 .desktop-nav button.is-active {
-  border-color: #c8cdbd;
+  border-color: var(--accent-border, #c8cdbd);
   background: var(--surface);
   color: var(--olive-dark);
 }
@@ -165,7 +165,7 @@
   place-items: center;
   width: 36px;
   height: 36px;
-  border: 1px solid #bdc2b3;
+  border: 1px solid var(--accent-border, #bdc2b3);
   border-radius: 50%;
   background: var(--olive-soft);
   color: var(--olive-dark);
@@ -244,7 +244,7 @@
   letter-spacing: -0.03em;
 }
 
-.topbar > div > span:not(.mobile-brand) {
+.topbar-heading > span:not(.mobile-brand) {
   display: block;
   margin-top: 8px;
   color: var(--muted);
@@ -259,5 +259,3 @@
 .content-area {
   padding-top: 28px;
 }
-
-
