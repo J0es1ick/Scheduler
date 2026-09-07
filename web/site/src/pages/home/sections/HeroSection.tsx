@@ -60,12 +60,12 @@ export function HeroSection({ botURL, projectURL }: HeroSectionProps) {
         <div className="public-hero-product" aria-label="Пример расписания">
           <div className="public-product-top">
             <div>
-              <span>Сегодня</span>
+              <span>Пример расписания</span>
               <strong>Понедельник, 27 июля</strong>
             </div>
             <span className="public-product-status">
               <i />
-              обновлено
+              демонстрация
             </span>
           </div>
           <div className="public-lesson is-current">
@@ -86,7 +86,7 @@ export function HeroSection({ botURL, projectURL }: HeroSectionProps) {
           </div>
           <div className="public-product-footer">
             <CalendarCheck2 size={18} />
-            <span>Следующее изменение бот пришлёт сам</span>
+            <span>Уведомления можно включить в настройках</span>
             <Check size={17} />
           </div>
           <div className="public-product-stamp" aria-hidden="true">

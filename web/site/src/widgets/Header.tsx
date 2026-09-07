@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowUpRight, Menu, X } from "lucide-react";
 import { ProjectMark } from "../shared/ui/ProjectMark";
 
@@ -8,6 +8,17 @@ interface HeaderProps {
 
 export function Header({ botURL }: HeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const toggle = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && menuOpen) {
+        setMenuOpen(false);
+        toggle.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", escape);
+    return () => document.removeEventListener("keydown", escape);
+  }, [menuOpen]);
   const closeMenu = () => setMenuOpen(false);
 
   return (
@@ -15,6 +26,8 @@ export function Header({ botURL }: HeaderProps) {
       <div className="public-container public-header-inner">
         <ProjectMark />
         <button
+          ref={toggle}
+          aria-controls="public-navigation"
           className="public-menu-button"
           type="button"
           onClick={() => setMenuOpen((current) => !current)}
@@ -23,7 +36,11 @@ export function Header({ botURL }: HeaderProps) {
         >
           {menuOpen ? <X size={21} /> : <Menu size={21} />}
         </button>
-        <nav className={menuOpen ? "is-open" : ""} aria-label="Навигация">
+        <nav
+          id="public-navigation"
+          className={menuOpen ? "is-open" : ""}
+          aria-label="Навигация"
+        >
           <a href="#about" onClick={closeMenu}>
             О проекте
           </a>

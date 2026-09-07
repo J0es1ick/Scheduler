@@ -11,8 +11,14 @@ export function StatisticsSection({ info, loading }: StatisticsSectionProps) {
     <section className="public-stats" aria-label="Статистика проекта">
       <div className="public-container public-stats-inner">
         <div className="public-stats-title">
-          <span>Сервис уже работает</span>
-          <p>Показатели обновляются вместе с данными проекта.</p>
+          <span>
+            {!loading && !info ? "Статистика недоступна" : "Показатели сервиса"}
+          </span>
+          <p>
+            {!loading && !info
+              ? "Не удалось получить данные. Повторите загрузку позже; бот доступен по ссылке."
+              : "Показатели обновляются вместе с данными проекта."}
+          </p>
         </div>
         <Metric
           value={info?.universities}
