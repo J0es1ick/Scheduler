@@ -54,7 +54,7 @@ func (h *Handler) HandleReminders(c tele.Context) error {
 }
 
 func (h *Handler) HandleShowReminderSettings(c tele.Context) error {
-	defer c.Respond()
+	_ = c.Respond()
 	return h.editReminderSettings(c, callbackPage(c, 0))
 }
 
@@ -95,7 +95,7 @@ func (h *Handler) HandleSetReminder(c tele.Context) error {
 }
 
 func (h *Handler) HandleBackSubscriptionSettings(c tele.Context) error {
-	defer c.Respond()
+	_ = c.Respond()
 	return h.showSubscriptionSettingsPage(c, true, callbackPage(c, 0))
 }
 

@@ -298,8 +298,8 @@ func TestSplitCompactScheduleNavigationDeletesPreviousMessageSet(t *testing.T) {
 			deleted = append(deleted, item.messageID)
 		}
 	}
-	if !slices.Contains(deleted, "6") || !slices.Contains(deleted, "7") {
-		t.Fatalf("deleted message ids after main menu = %#v, want both compact schedule parts", deleted)
+	if slices.Contains(deleted, "6") || slices.Contains(deleted, "7") {
+		t.Fatalf("main menu deleted the compact schedule: %#v", deleted)
 	}
 
 	bot.ProcessUpdate(tele.Update{Message: &tele.Message{

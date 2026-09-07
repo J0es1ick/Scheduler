@@ -1,9 +1,37 @@
 package handlers
 
 import (
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+func TestHelpCategoriesCoverEveryRegisteredCommand(t *testing.T) {
+	body, err := os.ReadFile("../bot.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	public := helpText(false)
+	for _, match := range regexp.MustCompile(`bot.Handle\("(/\w+)"`).FindAllStringSubmatch(string(body), -1) {
+		if match[1] == "/admin" || match[1] == "/metrics" {
+			continue
+		}
+		if !strings.Contains(public, match[1]) {
+			t.Errorf("command %s has no help category", match[1])
+		}
+	}
+	for _, feature := range []string{"PNG", "JSON", "CSV", "ICS", "подгрупп", "inline", "формат", "пожелан", "от -7 до 7"} {
+		if !strings.Contains(public, feature) {
+			t.Errorf("feature %s missing", feature)
+		}
+	}
+	for _, topic := range helpTopics {
+		if len([]rune(topic.text)) > tgMaxLen {
+			t.Errorf("topic %s exceeds Telegram limit", topic.id)
+		}
+	}
+}
 
 func TestHelpTextForRegularUserDoesNotExposeAdminCommands(t *testing.T) {
 	text := helpText(false)
@@ -46,6 +74,10 @@ func TestHelpTextIncludesAllUserCommands(t *testing.T) {
 func TestGroupHelpContainsConfigurationCommands(t *testing.T) {
 	text := groupHelpText()
 	for _, command := range []string{
+		"/start",
+		"/help",
+		"/privacy",
+		"/connect_source",
 		"/date",
 		"/chat_settings",
 		"/set_chat_group",

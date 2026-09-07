@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -26,11 +25,43 @@ func (h *Handler) HandleOpenMainMenu(c tele.Context) error {
 	}
 	_ = c.Respond()
 	if c.Callback() != nil {
-		if err := h.retireCurrentInlineFlow(c, "Открыто главное меню."); err != nil {
+		if err := h.leaveInlineForMenu(c); err != nil {
 			return err
 		}
 	}
 	return h.HandleMenu(c)
+}
+
+func (h *Handler) leaveInlineForMenu(c tele.Context) error {
+	message := c.Message()
+	isSchedule := h.hasTrackedScheduleMessages(c)
+	if message != nil {
+		isSchedule = isSchedule || message.Photo != nil
+		if message.ReplyMarkup != nil {
+			for _, row := range message.ReplyMarkup.InlineKeyboard {
+				for _, button := range row {
+					for _, action := range []string{"schedule_date", "schedule_week", "open_schedule_exports"} {
+						if button.Unique == action || strings.HasPrefix(strings.TrimPrefix(button.Data, "\f"), action+"|") {
+							isSchedule = true
+						}
+					}
+				}
+			}
+		}
+	}
+	if !isSchedule {
+		return h.retireCurrentInlineFlow(c, "Открыто главное меню.")
+	}
+	if err := c.Edit(&tele.ReplyMarkup{}); err != nil && !strings.Contains(err.Error(), "message is not modified") {
+		return err
+	}
+	h.scheduleMessagesMu.Lock()
+	tracked := h.scheduleMessages[scheduleMessagesKey(c)]
+	for _, id := range tracked.IDs {
+		delete(h.scheduleMessages, strconv.FormatInt(c.Chat().ID, 10)+":"+strconv.Itoa(id))
+	}
+	h.scheduleMessagesMu.Unlock()
+	return nil
 }
 
 func (h *Handler) HandleMore(c tele.Context) error {
@@ -310,15 +341,9 @@ func (h *Handler) HandleShowPrivacy(c tele.Context) error {
 }
 
 func (h *Handler) HandleShowHelp(c tele.Context) error {
+	_ = c.Respond()
 	if err := h.finishTransientFlow(c); err != nil {
 		return err
 	}
-	_ = c.Respond()
-	ctx, cancel := reqCtx()
-	defer cancel()
-	isAdmin, err := h.UserService.IsAdmin(ctx, fmt.Sprint(c.Sender().ID))
-	if err != nil {
-		slog.Debug("help role check failed", "user_id", c.Sender().ID, "err", err)
-	}
-	return editOrSend(c, helpText(isAdmin), keyboards.BackToMoreMenu())
+	return editOrSend(c, compactHelpText, helpCategories(h.helpAdmin(c)))
 }

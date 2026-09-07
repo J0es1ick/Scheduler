@@ -107,6 +107,9 @@ func TestScheduleNavigationContainsDateAndGroupActions(t *testing.T) {
 			t.Errorf("schedule navigation has no %s action", action)
 		}
 	}
+	if seen["schedule_feedback"] {
+		t.Fatal("feedback belongs in the message text")
+	}
 	if len(menu.InlineKeyboard) != 4 {
 		t.Fatalf("daily schedule navigation has %d rows, want 4", len(menu.InlineKeyboard))
 	}

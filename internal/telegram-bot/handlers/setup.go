@@ -113,6 +113,15 @@ func (h *Handler) HandleTextInput(c tgbotapi.Context) error {
 		state.UniversityID = university.ID
 		state.University = university.Name
 
+		if state.SetSelectedGroupDefault {
+			state.Step = "confirming_primary_group"
+			state.FlowNonce = newFlowNonce()
+			state.GroupActive = group.IsActive
+			h.StateManager.Set(userID, state)
+			menu := &tgbotapi.ReplyMarkup{}
+			menu.Inline(menu.Row(menu.Data("Подтвердить основную группу", "confirm_primary_group", "save", state.FlowNonce)), menu.Row(menu.Data("Выбрать другую", "confirm_primary_group", "back", state.FlowNonce)))
+			return c.Send(fmt.Sprintf("Основная группа: %s · %s\n\nПодтвердите выбор. Напоминания можно настроить отдельно после просмотра расписания.", state.University, state.Query), menu)
+		}
 		userIDText := fmt.Sprint(userID)
 		var saveErr error
 		if state.SetSelectedGroupDefault {
@@ -172,4 +181,44 @@ func qualifiedGroupSuggestionsText(university string, groups []domain.Group) str
 		fmt.Fprintf(&result, "\n%s %s", university, group.Name)
 	}
 	return result.String()
+}
+
+func (h *Handler) HandleConfirmPrimaryGroup(c tgbotapi.Context) error {
+	args := callbackArguments(c)
+	current := h.StateManager.Get(c.Sender().ID)
+	if len(args) != 2 || !validFlow(current, "confirming_primary_group", args[1]) {
+		return respondStaleCallback(c)
+	}
+	_ = c.Respond()
+	if args[0] == "back" {
+		current.Step = "awaiting_query"
+		current.FlowNonce = newFlowNonce()
+		h.StateManager.Set(c.Sender().ID, current)
+		return editOrSend(c, groupInputPrompt(current.UniversityID), groupInputBack(current))
+	}
+	if args[0] != "save" {
+		return respondStaleCallback(c)
+	}
+	ctx, cancel := reqCtx()
+	defer cancel()
+	group, err := h.GroupService.GetGroupByName(ctx, current.UniversityID, current.Query)
+	if err != nil {
+		return c.Send("Не удалось проверить группу. Попробуйте подтвердить выбор ещё раз.")
+	}
+	if group == nil || !group.IsActive || group.ID != current.GroupID {
+		return c.Send("Группа временно недоступна. Выберите другую группу или повторите /start позже.")
+	}
+	if err = h.SubscriptionService.SubscribeAndSetDefault(ctx, fmt.Sprint(c.Sender().ID), group.ID); err != nil {
+		return c.Send("Не удалось сохранить группу. Попробуйте подтвердить выбор ещё раз.")
+	}
+	current.Step = "done"
+	current.FlowNonce = ""
+	current.GroupActive = true
+	h.StateManager.Set(c.Sender().ID, current)
+	if err = h.HandleToday(c); err != nil {
+		return err
+	}
+	menu := &tgbotapi.ReplyMarkup{}
+	menu.Inline(menu.Row(menu.Data("Настроить напоминания", "show_reminder_settings", "0")), menu.Row(menu.Data("Главное меню", "open_main_menu")))
+	return c.Send("Основная группа сохранена. Личные напоминания включаются только в настройках по вашему выбору.", menu)
 }

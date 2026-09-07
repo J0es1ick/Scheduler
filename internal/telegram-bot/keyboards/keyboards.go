@@ -479,6 +479,7 @@ func HotlineTypeSelector(nonce ...string) *tgbotapi.ReplyMarkup {
 	menu.Inline(
 		menu.Row(menu.Data("Обновить подключённое расписание", "select_hotline_type", domain.SupportRequestUpdateExisting, flowNonce)),
 		menu.Row(menu.Data("Добавить учебное заведение", "select_hotline_type", domain.SupportRequestNewInstitution, flowNonce)),
+		menu.Row(menu.Data("Пожелания и обратная связь", "select_hotline_type", domain.SupportRequestFeedback, flowNonce)),
 		menu.Row(menu.Data("Назад", "cancel_hotline_type", flowNonce)),
 	)
 	return menu
@@ -490,7 +491,7 @@ func MoreMenu() *tgbotapi.ReplyMarkup {
 		menu.Row(menu.Data("Формат расписания из поиска", "search_view_settings")),
 		menu.Row(menu.Data("Источники расписания", "show_sources")),
 		menu.Row(menu.Data("Подключить своё расписание", "show_connector")),
-		menu.Row(menu.Data("Сообщить о расписании", "open_hotline")),
+		menu.Row(menu.Data("Горячая линия и обратная связь", "open_hotline")),
 		menu.Row(menu.Data("Конфиденциальность и данные", "show_privacy")),
 		menu.Row(menu.Data("Помощь", "show_help")),
 		menu.Row(menu.Data("Закрыть", "close_inline")),
@@ -641,20 +642,15 @@ func scheduleWeekNavigation(
 			),
 		),
 	}
+	periodText, periodDays := "Две недели", "14"
 	if daysCount == 14 {
-		rows = append(rows, menu.Row(menu.Data("Одна неделя", "schedule_week", from.Format("2006-01-02"), "7", token)))
-	} else {
-		rows = append(rows, menu.Row(menu.Data("Две недели", "schedule_week", from.Format("2006-01-02"), "14", token)))
+		periodText, periodDays = "Одна неделя", "7"
 	}
+	periodRow := menu.Row(menu.Data(periodText, "schedule_week", from.Format("2006-01-02"), periodDays, token))
 	if canExport {
-		rows = append(rows, menu.Row(menu.Data(
-			"Скачать расписание",
-			"open_schedule_exports",
-			token,
-			from.Format("2006-01-02"),
-			fmt.Sprint(daysCount),
-		)))
+		periodRow = append(periodRow, menu.Data("Скачать расписание", "open_schedule_exports", token, from.Format("2006-01-02"), fmt.Sprint(daysCount)))
 	}
+	rows = append(rows, periodRow)
 	if groupChat {
 		rows = append(rows, menu.Row(menu.Data(targetLabel, "open_schedule_group")))
 	} else {
@@ -783,5 +779,11 @@ func DeleteProfileConfirmation(token string) *tgbotapi.ReplyMarkup {
 		menu.Data("Удалить мои данные", "confirm_delete_profile", token),
 		menu.Data("Отмена", "cancel_delete_profile", token),
 	))
+	return menu
+}
+
+func BackToHelpMenu() *tgbotapi.ReplyMarkup {
+	menu := &tgbotapi.ReplyMarkup{}
+	menu.Inline(menu.Row(menu.Data("Назад к помощи", "show_help")))
 	return menu
 }

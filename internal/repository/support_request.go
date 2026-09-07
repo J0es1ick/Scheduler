@@ -68,6 +68,9 @@ func supportAdminMessage(id, requestType, userID, details string) string {
 	if requestType == domain.SupportRequestNewInstitution {
 		typeLabel = "Новое учебное заведение"
 	}
+	if requestType == domain.SupportRequestFeedback {
+		typeLabel = "Пожелания и обратная связь"
+	}
 	return fmt.Sprintf(
 		"📨 Новое обращение в горячую линию\n\n%s\nЗаявка: %s\nПользователь: %s\n\n%s\n\nРассмотреть: раздел «Обращения» в админке.",
 		typeLabel, id, userID, truncateSupportMessage(details, 3400),

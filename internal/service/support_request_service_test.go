@@ -17,6 +17,7 @@ func TestValidateSupportRequest(t *testing.T) {
 	}{
 		{"existing schedule", domain.SupportRequestUpdateExisting, strings.Repeat("я", 20), false},
 		{"new institution", domain.SupportRequestNewInstitution, strings.Repeat("a", 4096), false},
+		{"general feedback", "feedback", "Хочу предложить улучшение работы бота", false},
 		{"unknown type", "other", strings.Repeat("a", 20), true},
 		{"too short", domain.SupportRequestUpdateExisting, strings.Repeat("a", 19), true},
 		{"too long", domain.SupportRequestNewInstitution, strings.Repeat("a", 4097), true},

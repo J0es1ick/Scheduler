@@ -120,16 +120,32 @@ func (h *Handler) sendDaysWithOptions(
 	from time.Time,
 	daysCount int,
 ) error {
+	footer := h.sourceFreshnessText(universityID) + scheduleReportLink(c)
 	header = strings.TrimSpace(header)
 	if header != "" {
 		header += "\n\n"
 	}
-	if len(days) == 0 {
-		emptySchedule := "Занятий нет."
-		if daysCount == 14 {
-			emptySchedule = formatScheduleDays(nil, showGroupNames, from, daysCount)
+	hasLessons := false
+	for _, day := range days {
+		if len(day.Lessons) > 0 {
+			hasLessons = true
+			break
 		}
-		text := header + emptySchedule + h.sourceFreshnessText(universityID)
+	}
+	if !hasLessons {
+		emptySchedule := formatScheduleDays(days, showGroupNames, from, daysCount)
+		if len(days) == 0 && daysCount != 14 {
+			emptySchedule = "Занятий нет."
+		}
+		freshnessCtx, cancel := reqCtx()
+		freshness, freshnessErr := h.UniversityService.GetSourceFreshness(freshnessCtx, universityID)
+		cancel()
+		if freshnessErr != nil {
+			emptySchedule = "Не удалось проверить наличие публикации. Повторите запрос позже."
+		} else if freshness != nil && freshness.LastSuccess == nil {
+			emptySchedule = "Расписание пока не опубликовано. Попробуйте после обновления источника."
+		}
+		text := header + emptySchedule + footer
 		if c.Callback() != nil && markup != nil {
 			if h.hasTrackedScheduleMessages(c) {
 				return h.replaceTrackedScheduleMessages(c, []string{text}, markup)
@@ -145,7 +161,7 @@ func (h *Handler) sendDaysWithOptions(
 	var full strings.Builder
 	full.WriteString(header)
 	full.WriteString(formatScheduleDays(days, showGroupNames, from, daysCount))
-	full.WriteString(h.sourceFreshnessText(universityID))
+	full.WriteString(footer)
 
 	parts := service.SplitMessage(full.String(), tgMaxLen)
 	if len(parts) == 1 && c.Callback() != nil && markup != nil {
@@ -388,7 +404,17 @@ func (h *Handler) sourceFreshnessText(universityID string) string {
 	if freshness.LastSuccess == nil {
 		return result + "\nПоследнее успешное обновление ещё не зафиксировано."
 	}
-	return result + "\nОбновлено: " + freshness.LastSuccess.In(h.universityLocation(ctx, universityID)).Format("02.01.2006 15:04 MST")
+	label := "Опубликовано: "
+	if freshness.State == "stale" {
+		result += "\nОбновление задерживается. Данные могут быть устаревшими."
+	}
+	if freshness.State == "error" {
+		result += "\nИсточник временно недоступен; показана последняя публикация."
+	}
+	if freshness.State == "disabled" {
+		result += "\nАвтообновление приостановлено."
+	}
+	return result + "\n" + label + freshness.LastSuccess.In(h.universityLocation(ctx, universityID)).Format("02.01.2006 15:04 MST")
 }
 
 func (h *Handler) universityLocation(ctx context.Context, universityID string) *time.Location {
@@ -667,14 +693,14 @@ func (h *Handler) sendScheduleView(
 	if target.ViewFormat != domain.ScheduleViewVisual {
 		return h.sendDaysWithOptions(c, days, target.UniversityID, markup, header, target.showGroupNames(), from, daysCount)
 	}
-	payload, err := schedulePNG(ctx, target, days, from, daysCount)
+	payload, err := scheduleview.RenderPNGContext(ctx, h.visualScheduleRequest(ctx, target, days, from, daysCount))
 	if err != nil {
 		slog.Error("render visual schedule failed", "group_id", target.GroupID, "err", err)
 		return h.sendDaysWithOptions(c, days, target.UniversityID, markup, header, target.showGroupNames(), from, daysCount)
 	}
 	photo := &tgbotapi.Photo{
 		File:    tgbotapi.FromReader(bytes.NewReader(payload)),
-		Caption: target.decorateScheduleHeader(formatSchedulePeriodHTML(from, daysCount)) + h.sourceFreshnessText(target.UniversityID),
+		Caption: target.decorateScheduleHeader(formatSchedulePeriodHTML(from, daysCount)) + h.sourceFreshnessText(target.UniversityID) + scheduleReportLink(c),
 	}
 	if c.Callback() != nil {
 		if messageSupportsCaption(c.Message()) {
@@ -858,6 +884,7 @@ func (h *Handler) handleDownloadSchedule(c tgbotapi.Context, format string, args
 	)
 	switch format {
 	case "png":
+		request = h.visualScheduleRequest(ctx, target, days, from, daysCount)
 		payload, err = scheduleview.RenderPNGContext(ctx, request)
 		extension = ".png"
 	case "json":
@@ -883,6 +910,9 @@ func (h *Handler) handleDownloadSchedule(c tgbotapi.Context, format string, args
 			target.displayName(),
 			formatSchedulePeriod(from, daysCount),
 		),
+	}
+	if format == "ics" {
+		document.Caption += "\nICS — разовый импорт, не обновляемая подписка. При изменении расписания скачайте файл заново."
 	}
 	sent, err := h.sendTelegram(
 		ctx,

@@ -35,7 +35,7 @@ func (s *SupportRequestService) Submit(ctx context.Context, userID, requestType,
 }
 
 func validateSupportRequest(requestType, details string) error {
-	if requestType != domain.SupportRequestUpdateExisting && requestType != domain.SupportRequestNewInstitution {
+	if requestType != domain.SupportRequestUpdateExisting && requestType != domain.SupportRequestNewInstitution && requestType != domain.SupportRequestFeedback {
 		return fmt.Errorf("%w: unsupported type", ErrInvalidSupportRequest)
 	}
 	length := utf8.RuneCountInString(details)

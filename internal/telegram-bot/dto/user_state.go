@@ -12,6 +12,7 @@ type UserState struct {
 	TeacherCandidates                  []string
 	TeacherSearchOrigin                string
 	HotlineType                        string
+	HotlineContext                     string
 	Step                               string
 	FlowNonce                          string
 	GroupChangeDestination             string

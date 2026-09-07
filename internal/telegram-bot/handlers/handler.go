@@ -19,6 +19,7 @@ func reqCtx() (context.Context, context.CancelFunc) {
 
 type Handler struct {
 	ScheduleService       scheduleService
+	TimeSlotService       timeSlotService
 	StateManager          *state.Manager
 	UniversityService     universityService
 	UserService           userService
@@ -80,6 +81,10 @@ type scheduleService interface {
 	FindTeachers(context.Context, string, string) ([]string, error)
 }
 
+type timeSlotService interface {
+	GetTimeSlots(context.Context, string, time.Time, time.Time) ([]domain.LessonTimeSlot, error)
+}
+
 type subscriptionService interface {
 	GetGroupSubscriptions(context.Context, string) ([]domain.GroupSubscription, error)
 	Subscribe(context.Context, string, string, string) error
@@ -106,6 +111,7 @@ func NewHandler(
 ) *Handler {
 	return &Handler{
 		ScheduleService:       scheduleService,
+		TimeSlotService:       scheduleService,
 		StateManager:          stateManager,
 		UniversityService:     universityService,
 		UserService:           userService,

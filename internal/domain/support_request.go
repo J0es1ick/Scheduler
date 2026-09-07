@@ -1,8 +1,12 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 const (
+	SupportRequestFeedback       = "feedback"
 	SupportRequestUpdateExisting = "update_existing"
 	SupportRequestNewInstitution = "new_institution"
 )
@@ -21,12 +25,15 @@ type SupportRequest struct {
 }
 
 type BotOutboxDelivery struct {
-	ID             string     `db:"id"`
-	UserID         string     `db:"user_id"`
-	RequestID      string     `db:"request_id"`
-	Kind           string     `db:"kind"`
-	Body           string     `db:"body"`
-	Attempts       int        `db:"attempts"`
-	ClaimToken     string     `db:"claim_token"`
-	LeaseExpiresAt *time.Time `db:"lease_expires_at"`
+	GroupID         string          `db:"group_id"`
+	ExpiresAt       *time.Time      `db:"expires_at"`
+	ReminderContext json.RawMessage `db:"reminder_context"`
+	ID              string          `db:"id"`
+	UserID          string          `db:"user_id"`
+	RequestID       string          `db:"request_id"`
+	Kind            string          `db:"kind"`
+	Body            string          `db:"body"`
+	Attempts        int             `db:"attempts"`
+	ClaimToken      string          `db:"claim_token"`
+	LeaseExpiresAt  *time.Time      `db:"lease_expires_at"`
 }
