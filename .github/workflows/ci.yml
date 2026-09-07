@@ -127,6 +127,8 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+      - name: Build embedded admin assets for the API fixture
+        run: npm run build
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
         with:
           go-version-file: go.mod
@@ -547,12 +549,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          docker compose build backup
           offsite="$RUNNER_TEMP/scheduler-tls-offsite"
           key_dir="$RUNNER_TEMP/scheduler-tls-preflight-key"
           mkdir -p "$offsite" "$key_dir"
           printf '%s\n' scheduler-offsite > "$offsite/.scheduler-offsite"
-          backup_uid="$(docker compose run --rm --no-deps --entrypoint id backup -u)"
-          backup_gid="$(docker compose run --rm --no-deps --entrypoint id backup -g)"
+          backup_uid="$(docker compose run --rm --no-deps -T --entrypoint id backup -u)"
+          backup_gid="$(docker compose run --rm --no-deps -T --entrypoint id backup -g)"
           sudo chown -R "$backup_uid:$backup_gid" "$offsite" "$key_dir"
           sudo chmod 0700 "$offsite" "$key_dir"
           recipient="$(docker compose run --rm --no-deps --entrypoint /bin/sh \

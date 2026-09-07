@@ -376,6 +376,16 @@ func effectiveLessonForUpdate(
 		FROM effective_lessons
 		WHERE id=$1`, lessonID)
 	if errors.Is(err, sql.ErrNoRows) {
+		var overridden bool
+		if err = tx.GetContext(ctx, &overridden, `
+			SELECT EXISTS (
+				SELECT 1 FROM lesson_overrides WHERE id=$1 OR base_lesson_id=$1
+			)`, lessonID); err != nil {
+			return nil, fmt.Errorf("editor check replaced lesson: %w", err)
+		}
+		if overridden {
+			return nil, ErrConflict
+		}
 		return nil, ErrNotFound
 	}
 	if err != nil {

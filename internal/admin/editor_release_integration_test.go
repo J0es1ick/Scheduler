@@ -4,6 +4,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"os"
 	"reflect"
 	"testing"
@@ -54,12 +55,28 @@ func TestEditorSQLPreservesRecurrenceAcrossOverrideUpdates(t *testing.T) {
 		if _, err = store.UpdateEditorLesson(ctx, "synthetic", lesson.ID, lesson.UpdatedAt, mutation); err != nil {
 			t.Fatal(err)
 		}
+		for _, operation := range []string{"update", "delete"} {
+			t.Run(room+"/stale_"+operation, func(t *testing.T) {
+				var conflictErr error
+				if operation == "update" {
+					_, conflictErr = store.UpdateEditorLesson(ctx, "other-editor", lesson.ID, lesson.UpdatedAt, mutation)
+				} else {
+					conflictErr = store.DeleteEditorLesson(ctx, "other-editor", lesson.ID, lesson.UpdatedAt)
+				}
+				if !errors.Is(conflictErr, ErrConflict) {
+					t.Fatalf("stale %s must report a version conflict, got %v", operation, conflictErr)
+				}
+			})
+		}
 		after, err := store.EditorSchedule(ctx, id)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !reflect.DeepEqual(expected, after.Lessons[0].Recurrence) || after.Lessons[0].Room != room {
 			t.Fatal("override changed recurrence or lost edit")
+		}
+		if _, err = store.UpdateEditorLesson(ctx, "synthetic", "missing-"+id, lesson.UpdatedAt, mutation); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("missing lesson must remain not found, got %v", err)
 		}
 	}
 }
