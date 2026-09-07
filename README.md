@@ -449,14 +449,15 @@ npm ci --prefix web/site
 npm run build --prefix web/site
 go test -race ./cmd/... ./connector/... ./parser/... ./integrations/... ./internal/... ./migration/...
 go vet ./cmd/... ./connector/... ./parser/... ./integrations/... ./internal/... ./migration/...
+python -m pip install "./sdk/python[test]"
+python -m unittest discover -s sdk/python/tests -v
 npm run lint --prefix web/admin
 npm run test:e2e --prefix web/admin
 npm run lint --prefix web/site
 ```
 
 Рабочая эксплуатация, резервное копирование, восстановление и настройка обратного прокси описаны в
-[`docs/operations.md`](docs/operations.md), полный порядок выпуска — в
-[`docs/release-checklist.md`](docs/release-checklist.md), а подключение собственного
+[`docs/operations.md`](docs/operations.md), а подключение собственного
 парсера — в руководствах по [управляемым парсерам](docs/managed-parsers.md) и
 [внешнему API коннекторов](docs/connector-api.md).
 

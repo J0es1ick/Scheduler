@@ -113,3 +113,11 @@ groups:
           severity: critical
         annotations:
           summary: "Alertmanager не может доставить внешние оповещения"
+
+      - alert: SchedulerExpiredRemindersStuck
+        expr: scheduler_expired_pending_reminders > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Просроченные напоминания не очищаются из очереди"
