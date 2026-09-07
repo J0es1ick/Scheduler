@@ -222,6 +222,9 @@ SELECT format('GRANT CONNECT ON DATABASE %I TO %I, %I, %I, %I, %I, %I, %I, %I',
 
 SELECT format('ALTER SCHEMA public OWNER TO %I', :'migrator') \gexec
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+SELECT format('REVOKE TEMPORARY ON DATABASE %I FROM PUBLIC', :'database') \gexec
+SELECT format('REVOKE TEMPORARY ON DATABASE %I FROM %I, %I, %I, %I, %I, %I', :'database', :'bot', :'admin', :'parser', :'privacy', :'site', :'backup') \gexec
+SELECT format('GRANT TEMPORARY ON DATABASE %I TO %I, %I', :'database', :'migrator', :'restore') \gexec
 SELECT format('GRANT USAGE ON SCHEMA public TO %I, %I, %I, %I, %I, %I, %I', :'bot', :'admin', :'parser', :'privacy', :'site', :'site_reader', :'backup') \gexec
 
 SELECT format(

@@ -32,7 +32,14 @@ func ApplyRuntimeGrants(
 		return err
 	}
 	defer tx.Rollback()
+	var databaseName string
+	if err = tx.GetContext(ctx, &databaseName, `SELECT current_database()`); err != nil {
+		return err
+	}
 	for _, role := range roles {
+		if _, err = tx.ExecContext(ctx, "REVOKE TEMPORARY ON DATABASE "+pgx.Identifier{databaseName}.Sanitize()+" FROM "+pgx.Identifier{role}.Sanitize()); err != nil {
+			return err
+		}
 		quoted := pgx.Identifier{role}.Sanitize()
 		for _, statement := range []string{
 			"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM " + quoted,

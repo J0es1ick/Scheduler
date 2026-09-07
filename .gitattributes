@@ -7,3 +7,4 @@ web/site/node_modules export-ignore
 web/admin/playwright-report export-ignore
 web/admin/test-results export-ignore
 *.sh text eol=lf
+migration/*.sql text eol=lf

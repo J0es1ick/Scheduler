@@ -336,17 +336,20 @@ func (r *UserRepository) ExportUserData(ctx context.Context, id string) (*domain
 	}
 	if err = r.db.SelectContext(ctx, &result.SupportRequests, `
 		SELECT id, user_id, request_type, details, status, review_note,
-			reviewed_by, reviewed_at, created_at, updated_at
+			CASE WHEN reviewed_by=$1 THEN reviewed_by ELSE '' END AS reviewed_by, reviewed_at, created_at, updated_at
 		FROM support_requests
 		WHERE user_id=$1
 		ORDER BY created_at`, id); err != nil {
 		return nil, fmt.Errorf("export support requests for user %s: %w", id, err)
 	}
 	if err = r.db.SelectContext(ctx, &result.AuditRecords, `
-		SELECT id, actor_name, action, object_type, object_id, details,
-		       ip_address, created_at
-		FROM admin_audit_logs
-		WHERE actor_id=$1
+		SELECT id, CASE WHEN actor_id=$1 THEN actor_name ELSE '' END AS actor_name,
+               action, object_type,
+               CASE WHEN object_type='user' AND object_id<>$1 THEN '' ELSE object_id END AS object_id,
+               jsonb_strip_nulls(jsonb_build_object('role',details->'role','admin_role',details->'admin_role','status',details->'status')) AS details,
+               CASE WHEN actor_id=$1 THEN ip_address ELSE '' END AS ip_address, created_at
+        FROM admin_audit_logs
+        WHERE actor_id=$1 OR (object_type='user' AND object_id=$1)
 		ORDER BY created_at`, id); err != nil {
 		return nil, fmt.Errorf("export audit records for user %s: %w", id, err)
 	}
