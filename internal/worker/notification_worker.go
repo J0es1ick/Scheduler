@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -47,6 +48,9 @@ type notificationSender interface {
 }
 
 type NotificationWorker struct {
+	reminderSchedule   reminderScheduleProvider
+	reminderRecipient  func(context.Context, string, string) (*domain.ReminderRecipient, error)
+	backgroundLimiter  *telegramlimit.Limiter
 	batchSize          int
 	maxBatches         int
 	waitSend           func(context.Context, string) error
@@ -58,6 +62,7 @@ type NotificationWorker struct {
 }
 
 type NotificationOptions struct {
+	Schedule   reminderScheduleProvider
 	BatchSize  int
 	MaxBatches int
 	Limiter    *telegramlimit.Limiter
@@ -84,6 +89,8 @@ func NewNotificationWorker(
 		)
 	}
 	return &NotificationWorker{
+		reminderSchedule: settings.Schedule, reminderRecipient: repository.ReminderRecipient,
+		backgroundLimiter:  telegramlimit.New(time.Second/15, 0),
 		batchSize:          min(1000, max(1, settings.BatchSize)),
 		maxBatches:         min(20, max(1, settings.MaxBatches)),
 		repository:         repository,
@@ -176,7 +183,8 @@ func (w *NotificationWorker) tick(ctx context.Context, monitors ...*Monitor) err
 }
 
 func (w *NotificationWorker) drainBatch(ctx context.Context, monitor *Monitor, batchSize int) (bool, error) {
-	items, err := w.repository.ClaimPending(ctx, batchSize)
+	scheduleLimit := min(batchSize, 30)
+	items, err := w.repository.ClaimPending(ctx, scheduleLimit)
 	if err != nil {
 		slog.Error("notification worker: claim failed", "err", err)
 		return false, err
@@ -203,7 +211,7 @@ func (w *NotificationWorker) drainBatch(ctx context.Context, monitor *Monitor, b
 		return false, err
 	}
 	if len(outbox) == 0 {
-		return len(items) >= batchSize, nil
+		return len(items) >= scheduleLimit, nil
 	}
 	ids := make([]string, len(outbox))
 	for index, item := range outbox {
@@ -232,7 +240,7 @@ func (w *NotificationWorker) drainBatch(ctx context.Context, monitor *Monitor, b
 	if errors.Is(err, errTelegramRateLimited) {
 		return false, nil
 	}
-	return len(items) >= batchSize || len(outbox) >= batchSize, err
+	return len(items) >= scheduleLimit || len(outbox) >= batchSize, err
 }
 
 func (w *NotificationWorker) withClaims(
@@ -386,6 +394,19 @@ func (w *NotificationWorker) deliverBotOutbox(ctx context.Context, item domain.B
 	}
 	if err = context.Cause(ctx); err != nil {
 		return err
+	}
+
+	if item.Kind == "lesson_reminder" {
+		body, valid, refreshErr := w.refreshReminder(ctx, item, time.Now())
+		if refreshErr != nil {
+			return guard.finish(item.ID, func(markCtx context.Context) error { return w.recordBotOutboxFailure(markCtx, item, refreshErr) })
+		}
+		if !valid || item.ExpiresAt == nil || !time.Now().Before(*item.ExpiresAt) {
+			return guard.finish(item.ID, func(markCtx context.Context) error {
+				return w.repository.MarkBotOutboxCancelled(markCtx, item.ID, item.ClaimToken)
+			})
+		}
+		item.Body = body
 	}
 	telegramID, err := strconv.ParseInt(item.UserID, 10, 64)
 	if err == nil {
@@ -569,8 +590,62 @@ func telegramRetryPolicy(deliveryErr error, attempt int) (time.Duration, bool) {
 }
 
 func (w *NotificationWorker) waitForTelegram(ctx context.Context, recipient string) error {
+	if w.backgroundLimiter != nil {
+		if err := w.backgroundLimiter.WaitGlobal(ctx); err != nil {
+			return err
+		}
+	}
 	if w.waitSend != nil {
 		return w.waitSend(ctx, recipient)
 	}
 	return w.limiter.Wait(ctx, recipient)
+}
+
+func (w *NotificationWorker) refreshReminder(ctx context.Context, item domain.BotOutboxDelivery, now time.Time) (string, bool, error) {
+	if item.ExpiresAt == nil || !now.Before(*item.ExpiresAt) {
+		return "", false, nil
+	}
+	var slot domain.ReminderContext
+	if err := json.Unmarshal(item.ReminderContext, &slot); err != nil {
+		return "", false, nil
+	}
+	if w.reminderSchedule == nil || w.reminderRecipient == nil {
+		return "", false, fmt.Errorf("reminder delivery provider is unavailable")
+	}
+	recipient, err := w.reminderRecipient(ctx, item.UserID, item.GroupID)
+	if err != nil || recipient == nil {
+		return "", false, err
+	}
+	location, err := time.LoadLocation(recipient.Timezone)
+	if err != nil {
+		return "", false, err
+	}
+	date, err := time.ParseInLocation(time.DateOnly, slot.Date, location)
+	if err != nil {
+		return "", false, nil
+	}
+	startsAt, err := lessonStart(date, slot.TimeStart)
+	if err != nil || !now.Before(startsAt) {
+		return "", false, nil
+	}
+	if !startsAt.Equal(slot.StartsAt) || recipient.Subgroup != slot.Subgroup {
+		return "", false, nil
+	}
+	if recipient.ReminderMinutes <= 0 || startsAt.Sub(now) > time.Duration(recipient.ReminderMinutes)*time.Minute {
+		return "", false, nil
+	}
+	lessons, err := w.reminderSchedule.GetScheduleForGroup(ctx, item.GroupID, date)
+	if err != nil {
+		return "", false, err
+	}
+	current := reminderSlot{TimeStart: slot.TimeStart, TimeEnd: slot.TimeEnd}
+	for _, lesson := range lessons {
+		if lesson.TimeStart == slot.TimeStart && lesson.TimeEnd == slot.TimeEnd && (recipient.Subgroup == 0 || lesson.Subgroup == 0 || lesson.Subgroup == recipient.Subgroup) {
+			current.Lessons = append(current.Lessons, lesson)
+		}
+	}
+	if len(current.Lessons) == 0 {
+		return "", false, nil
+	}
+	return reminderText(*recipient, date, current, startsAt.Sub(now)), true, nil
 }

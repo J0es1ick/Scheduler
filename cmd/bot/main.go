@@ -173,6 +173,7 @@ func main() {
 	notificationWorker := worker.NewNotificationWorker(notificationRepo, bot,
 		time.Duration(cfg.NotificationPollSeconds)*time.Second,
 		worker.NotificationOptions{
+			Schedule:   scheduleService,
 			BatchSize:  cfg.NotificationBatchSize,
 			MaxBatches: cfg.NotificationMaxBatches,
 			Limiter:    telegramLimiter,

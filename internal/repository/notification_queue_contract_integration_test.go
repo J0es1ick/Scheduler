@@ -8,9 +8,41 @@ import (
 	"testing"
 	"time"
 
+	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/google/uuid"
 )
+
+func TestRegeneratesCancelledReminderButNeverDeliveredReminder(t *testing.T) {
+	db, ctx := openOperationalIntegrationDB(t)
+	createNotificationLeaseFixture(t, db, ctx, "bot_outbox", 1)
+	var row struct{ ID, UserID, GroupID string }
+	if err := db.GetContext(ctx, &row, `SELECT o.id, o.user_id AS userid, s.object_id AS groupid FROM bot_outbox o JOIN subscriptions s ON s.user_id=o.user_id LIMIT 1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE bot_outbox SET kind='lesson_reminder', status='cancelled', attempts=3, next_attempt_at=NOW()+INTERVAL '1 day' WHERE id=$1`, row.ID); err != nil {
+		t.Fatal(err)
+	}
+	starts := time.Now().UTC().Add(5 * time.Minute).Truncate(time.Second)
+	slot := domain.ReminderContext{Date: starts.Format(time.DateOnly), TimeStart: starts.Format("15:04"), TimeEnd: starts.Add(time.Hour).Format("15:04"), StartsAt: starts}
+	repo := repository.NewReminderRepository(db)
+	if err := repo.Enqueue(ctx, row.ID, row.UserID, row.GroupID, "current room", slot); err != nil {
+		t.Fatal(err)
+	}
+	var ready bool
+	if err := db.GetContext(ctx, &ready, `SELECT status='pending' AND attempts=0 AND next_attempt_at<=NOW() AND body='current room' AND expires_at=$2 FROM bot_outbox WHERE id=$1`, row.ID, starts); err != nil || !ready {
+		t.Fatalf("cancelled reminder was not regenerated: ready=%t err=%v", ready, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE bot_outbox SET status='delivered' WHERE id=$1`, row.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Enqueue(ctx, row.ID, row.UserID, row.GroupID, "must not be sent again", slot); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.GetContext(ctx, &ready, `SELECT status='delivered' AND body='current room' FROM bot_outbox WHERE id=$1`, row.ID); err != nil || !ready {
+		t.Fatalf("delivered reminder was revived: retained=%t err=%v", ready, err)
+	}
+}
 
 func TestDeletedRecipientDoesNotInvalidateOtherQueueClaims(t *testing.T) {
 	for _, table := range []string{"notification_deliveries", "bot_outbox"} {
@@ -131,7 +163,7 @@ func TestClaimedReminderCancellationKeepsBatchOwnership(t *testing.T) {
 	}
 	if _, err := db.ExecContext(ctx, `
 		UPDATE bot_outbox o
-		SET kind='lesson_reminder', group_id=u.default_group_id
+		SET kind='lesson_reminder', group_id=u.default_group_id, expires_at=NOW()+INTERVAL '1 hour', reminder_context=jsonb_build_object('starts_at',NOW()+INTERVAL '1 hour','date',CURRENT_DATE::text,'time_start','09:00','time_end','10:30','subgroup',0)
 		FROM users u
 		WHERE u.id=o.user_id`); err != nil {
 		t.Fatal(err)
@@ -199,8 +231,8 @@ func TestQueuedReminderIsCancelledWhenScheduleScopeBecomesInactive(t *testing.T)
 				t.Fatal(err)
 			}
 			if _, err := db.ExecContext(ctx, `
-				INSERT INTO bot_outbox(id, user_id, group_id, kind, body)
-				VALUES ($1, $2, $3, 'lesson_reminder', 'test reminder')`, outboxID, userID, groupID); err != nil {
+				INSERT INTO bot_outbox(id, user_id, group_id, kind, body, expires_at, reminder_context)
+				VALUES ($1, $2, $3, 'lesson_reminder', 'test reminder', NOW()+INTERVAL '1 hour', jsonb_build_object('starts_at',NOW()+INTERVAL '1 hour','date',CURRENT_DATE::text,'time_start','09:00','time_end','10:30','subgroup',0))`, outboxID, userID, groupID); err != nil {
 				t.Fatal(err)
 			}
 			if scope == "group" {

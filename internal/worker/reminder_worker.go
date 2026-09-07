@@ -25,7 +25,7 @@ const (
 
 type reminderRecipientRepository interface {
 	ActiveRecipientsPage(context.Context, string, int) ([]domain.ReminderRecipient, error)
-	Enqueue(context.Context, string, string, string, string) error
+	Enqueue(context.Context, string, string, string, string, domain.ReminderContext) error
 }
 
 type reminderScheduleProvider interface {
@@ -324,6 +324,7 @@ func (w *ReminderWorker) enqueueReminderSlot(
 		recipient.UserID,
 		recipient.GroupID,
 		body,
+		domain.ReminderContext{Date: date.Format(time.DateOnly), TimeStart: slot.TimeStart, TimeEnd: slot.TimeEnd, Subgroup: recipient.Subgroup, StartsAt: startsAt},
 	); err != nil {
 		slog.Error(
 			"lesson reminder worker: enqueue failed",

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
@@ -54,16 +55,25 @@ func (r *ReminderRepository) Enqueue(
 	userID string,
 	groupID string,
 	body string,
+	slot domain.ReminderContext,
 ) error {
+	raw, err := json.Marshal(slot)
+	if err != nil {
+		return err
+	}
 	if _, err := r.db.ExecContext(ctx, `
-		INSERT INTO bot_outbox (id, user_id, group_id, kind, body)
-		VALUES ($1, $2, $3, 'lesson_reminder', $4)
+		INSERT INTO bot_outbox (id, user_id, group_id, kind, body, expires_at, reminder_context)
+		VALUES ($1, $2, $3, 'lesson_reminder', $4, $5, $6::jsonb)
 		ON CONFLICT (id) DO UPDATE SET
-			body=EXCLUDED.body,
+			body=EXCLUDED.body, expires_at=EXCLUDED.expires_at, reminder_context=EXCLUDED.reminder_context,
+			status='pending', last_error='',
+			attempts=CASE WHEN bot_outbox.status='cancelled' THEN 0 ELSE bot_outbox.attempts END,
+			next_attempt_at=CASE WHEN bot_outbox.status='cancelled' THEN NOW() ELSE bot_outbox.next_attempt_at END,
+			cancel_requested_at=NULL, cancel_reason='',
 			group_id=EXCLUDED.group_id,
 			updated_at=NOW()
-		WHERE bot_outbox.status='pending'`,
-		id, userID, groupID, body,
+		WHERE bot_outbox.kind='lesson_reminder' AND ((bot_outbox.status='pending' AND bot_outbox.claim_token='') OR bot_outbox.status='cancelled')`,
+		id, userID, groupID, body, slot.StartsAt, raw,
 	); err != nil {
 		return fmt.Errorf("enqueue lesson reminder %s: %w", id, err)
 	}

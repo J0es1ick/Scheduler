@@ -122,19 +122,24 @@ func (r *NotificationRepository) ClaimBotOutbox(ctx context.Context, limit int) 
 	claimToken := uuid.NewString()
 	var items []domain.BotOutboxDelivery
 	err := r.db.SelectContext(ctx, &items, `
-		WITH candidates AS (
+		WITH ordinary AS (
+ SELECT o.id FROM bot_outbox o JOIN notification_queue_eligibility q ON q.queue_type='outbox' AND q.id=o.id
+ WHERE o.status='pending' AND o.kind<>'lesson_reminder' AND o.next_attempt_at<=clock_timestamp()
+ AND (o.claim_token='' OR o.lease_expires_at<=clock_timestamp()) AND q.policy_decision='ready'
+ ORDER BY o.created_at,o.id FOR UPDATE OF o SKIP LOCKED LIMIT GREATEST(1,$1/5)
+ ), reminders AS (
 			SELECT o.id
 			FROM bot_outbox o
 			JOIN notification_queue_eligibility q
 			  ON q.queue_type='outbox' AND q.id=o.id
-			WHERE o.status='pending'
+			WHERE o.status='pending' AND o.id NOT IN (SELECT id FROM ordinary)
 			  AND o.next_attempt_at<=clock_timestamp()
 			  AND (o.claim_token='' OR o.lease_expires_at<=clock_timestamp())
 			  AND q.policy_decision='ready'
-			ORDER BY o.created_at, o.id
+			ORDER BY o.expires_at NULLS LAST, o.created_at, o.id
 			FOR UPDATE OF o SKIP LOCKED
-			LIMIT $1
-		), claimed AS (
+			LIMIT ($1-(SELECT COUNT(*) FROM ordinary))
+ ), candidates AS (SELECT id FROM ordinary UNION ALL SELECT id FROM reminders), claimed AS (
 			UPDATE bot_outbox o
 			SET attempts=o.attempts+1,
 				claim_token=$2,
@@ -142,13 +147,13 @@ func (r *NotificationRepository) ClaimBotOutbox(ctx context.Context, limit int) 
 				updated_at=NOW()
 			FROM candidates c
 			WHERE o.id=c.id
-			RETURNING o.id, o.user_id, o.request_id, o.kind, o.body, o.attempts,
+			RETURNING o.id, o.user_id, o.request_id, o.kind, o.body, o.attempts, o.group_id, o.expires_at, o.reminder_context,
 				o.claim_token, o.lease_expires_at
 		)
-		SELECT id, user_id, COALESCE(request_id, '') AS request_id, kind, body, attempts,
+		SELECT id, user_id, COALESCE(request_id, '') AS request_id, kind, body, attempts, COALESCE(group_id, '') AS group_id, expires_at, reminder_context,
 			claim_token, lease_expires_at
 		FROM claimed
-		ORDER BY id`, limit, claimToken, int(notificationClaimLease/time.Second))
+		ORDER BY expires_at NULLS LAST, id`, limit, claimToken, int(notificationClaimLease/time.Second))
 	if err != nil {
 		return nil, fmt.Errorf("claim bot outbox: %w", err)
 	}
@@ -571,4 +576,21 @@ func (r *NotificationRepository) requireNotificationClaim(ctx context.Context, r
 		return fmt.Errorf("%w: %s", ErrNotificationClaimLost, id)
 	}
 	return nil
+}
+
+func (r *NotificationRepository) ReminderRecipient(ctx context.Context, userID, groupID string) (*domain.ReminderRecipient, error) {
+	var recipient domain.ReminderRecipient
+	err := r.db.GetContext(ctx, &recipient, `SELECT u.id AS user_id, g.id AS group_id, g.name AS group_name,
+ un.name AS university_name, un.timezone, u.reminder_minutes, COALESCE(s.subgroup,0) AS subgroup
+ FROM users u JOIN groups g ON g.id=u.default_group_id AND g.is_active
+ JOIN universities un ON un.id=g.university_id AND un.is_active
+ LEFT JOIN subscriptions s ON s.user_id=u.id AND s.object_id=g.id AND s.object_type='group'
+ WHERE u.id=$1 AND g.id=$2 AND u.reminder_enabled`, userID, groupID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &recipient, nil
 }

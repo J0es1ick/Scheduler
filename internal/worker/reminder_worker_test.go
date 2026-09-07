@@ -51,6 +51,7 @@ func (r *fakeReminderRepository) Enqueue(
 	userID string,
 	_ string,
 	body string,
+	_ domain.ReminderContext,
 ) error {
 	r.enqueued = append(r.enqueued, enqueuedReminder{userID: userID, body: body})
 	return nil

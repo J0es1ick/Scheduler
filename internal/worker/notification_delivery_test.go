@@ -213,7 +213,7 @@ func TestNotificationWorkerFencesBothQueuesAndBoundsBatch(t *testing.T) {
 	if sent != 2 || marked["schedule"] != "schedule-owner" || marked["outbox"] != "outbox-owner" {
 		t.Fatalf("sent=%d marked=%v", sent, marked)
 	}
-	if repo.scheduleLimit != notificationBatchSize || repo.outboxLimit != notificationBatchSize {
+	if repo.scheduleLimit != min(notificationBatchSize, 30) || repo.outboxLimit != notificationBatchSize {
 		t.Fatalf("unbounded delivery batch: schedule=%d outbox=%d", repo.scheduleLimit, repo.outboxLimit)
 	}
 }
