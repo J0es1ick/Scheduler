@@ -91,6 +91,8 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 		{botRole, "users", "DELETE", false},
 		{botRole, "lesson_overrides", "INSERT", false},
 		{botRole, "subscriptions", "INSERT", true},
+		{botRole, "universities", "UPDATE", false},
+		{botRole, "groups", "UPDATE", false},
 		{botRole, "notification_deliveries", "UPDATE", true},
 		{botRole, "support_requests", "INSERT", true},
 		{botRole, "support_requests", "UPDATE", false},
@@ -137,6 +139,12 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 		want           bool
 	}{
 		{botRole, "enqueue_privacy_deletion(text)", true},
+		{botRole, "scheduler_lock_active_group(text)", true},
+		{botRole, "scheduler_select_replacement_group(text)", true},
+		{adminRole, "scheduler_lock_active_group(text)", false},
+		{adminRole, "scheduler_select_replacement_group(text)", false},
+		{parserRole, "scheduler_lock_active_group(text)", false},
+		{privacyRole, "scheduler_select_replacement_group(text)", false},
 		{botRole, "enqueue_schedule_change(text,text,text,text)", false},
 		{parserRole, "enqueue_schedule_change(text,text,text,text)", true},
 		{parserRole, "enqueue_admin_alert(text,text)", true},

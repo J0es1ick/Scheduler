@@ -203,13 +203,7 @@ func (r *SubscriptionRepository) UnsubscribeAndSelectDefault(
 		newDefault = currentDefault.String
 	} else {
 		err = tx.GetContext(ctx, &newDefault, `
-			SELECT s.object_id
-			FROM subscriptions s
-			JOIN groups g ON g.id=s.object_id AND g.is_active
-			JOIN universities u ON u.id=g.university_id AND u.is_active
-			WHERE s.user_id=$1 AND s.object_type='group'
-			ORDER BY s.updated_at DESC, s.created_at DESC, s.id
-			LIMIT 1 FOR SHARE OF g, u SKIP LOCKED`, userID)
+			SELECT scheduler_select_replacement_group($1)`, userID)
 		if errors.Is(err, sql.ErrNoRows) {
 			newDefault = ""
 		} else if err != nil {
@@ -249,16 +243,9 @@ func lockUser(ctx context.Context, tx *sqlx.Tx, userID string) error {
 }
 
 func lockActiveGroup(ctx context.Context, tx *sqlx.Tx, groupID string) error {
-	var universityID string
-	if err := tx.GetContext(ctx, &universityID, `SELECT university_id FROM groups WHERE id=$1`, groupID); err != nil {
-		return fmt.Errorf("load group university: %w", err)
-	}
 	var id string
-	if err := tx.GetContext(ctx, &id, `SELECT id FROM universities WHERE id=$1 AND is_active FOR SHARE`, universityID); err != nil {
-		return fmt.Errorf("lock active university: %w", err)
-	}
 	if err := tx.GetContext(ctx, &id, `
-		SELECT id FROM groups WHERE id=$1 AND university_id=$2 AND is_active FOR SHARE`, groupID, universityID); errors.Is(err, sql.ErrNoRows) {
+		SELECT scheduler_lock_active_group($1)`, groupID); errors.Is(err, sql.ErrNoRows) {
 		return sql.ErrNoRows
 	} else if err != nil {
 		return fmt.Errorf("lock active group %s: %w", groupID, err)

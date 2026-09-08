@@ -4,6 +4,8 @@ package database
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"net/url"
 	"os"
 	"strings"
@@ -41,6 +43,7 @@ func TestDefinerCannotBeShadowedByRuntimeConnection(t *testing.T) {
 		`GRANT USAGE ON SCHEMA ` + pgx.Identifier{schema}.Sanitize() + ` TO ` + pgx.Identifier{role}.Sanitize(),
 		`GRANT TEMPORARY ON DATABASE ` + pgx.Identifier{databaseName}.Sanitize() + ` TO ` + pgx.Identifier{role}.Sanitize(),
 		`GRANT EXECUTE ON FUNCTION enqueue_privacy_deletion(TEXT) TO ` + pgx.Identifier{role}.Sanitize(),
+		`GRANT EXECUTE ON FUNCTION scheduler_lock_active_group(TEXT), scheduler_select_replacement_group(TEXT) TO ` + pgx.Identifier{role}.Sanitize(),
 		`INSERT INTO users(id,username) VALUES ('123456789','Synthetic user')`,
 	} {
 		if _, err := db.Exec(sql); err != nil {
@@ -61,6 +64,25 @@ func TestDefinerCannotBeShadowedByRuntimeConnection(t *testing.T) {
 	}
 	defer limited.Close()
 	limited.SetMaxOpenConns(1)
+	if _, err = limited.Exec(`
+		CREATE TEMP TABLE universities(id TEXT, is_active BOOLEAN);
+		CREATE TEMP TABLE groups(id TEXT, university_id TEXT, is_active BOOLEAN);
+		CREATE TEMP TABLE subscriptions(id TEXT, user_id TEXT, object_id TEXT, object_type TEXT, updated_at TIMESTAMPTZ, created_at TIMESTAMPTZ);
+		INSERT INTO universities VALUES('shadow-university',TRUE);
+		INSERT INTO groups VALUES('shadow-group','shadow-university',TRUE);
+		INSERT INTO subscriptions VALUES('shadow-sub','shadow-user','shadow-group','group',NOW(),NOW());
+	`); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{
+		`SELECT scheduler_lock_active_group('shadow-group')`,
+		`SELECT scheduler_select_replacement_group('shadow-user')`,
+	} {
+		var groupID string
+		if err = limited.Get(&groupID, query); !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("runtime shadow group accepted: group=%q err=%v", groupID, err)
+		}
+	}
 	if _, err = limited.Exec(`CREATE TEMP TABLE privacy_deletion_requests (id TEXT, user_id TEXT, status TEXT, created_at TIMESTAMPTZ, next_retry_at TIMESTAMPTZ);
  CREATE FUNCTION pg_temp.attack() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN EXECUTE 'ALTER ROLE "` + role + `" SUPERUSER'; RETURN NEW; END $$;
  CREATE TRIGGER attack BEFORE INSERT ON privacy_deletion_requests FOR EACH ROW EXECUTE FUNCTION pg_temp.attack()`); err != nil {

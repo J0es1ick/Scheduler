@@ -119,6 +119,8 @@ func ApplyRuntimeGrants(
 
 	functions := map[string][]string{
 		botRole: {
+			"scheduler_lock_active_group(TEXT)",
+			"scheduler_select_replacement_group(TEXT)",
 			"scheduler_request_notification_cancellation(TEXT, TEXT, TEXT)",
 			"scheduler_request_outbox_cancellation(TEXT, TEXT, TEXT, TEXT)",
 			"scheduler_reconcile_notification_queue()",

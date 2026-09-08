@@ -209,6 +209,7 @@ func (h *Handler) HandleConfirmPrimaryGroup(c tgbotapi.Context) error {
 		return c.Send("Группа временно недоступна. Выберите другую группу или повторите /start позже.")
 	}
 	if err = h.SubscriptionService.SubscribeAndSetDefault(ctx, fmt.Sprint(c.Sender().ID), group.ID); err != nil {
+		slog.Error("save primary group failed", "group", group.ID, "err", err)
 		return c.Send("Не удалось сохранить группу. Попробуйте подтвердить выбор ещё раз.")
 	}
 	current.Step = "done"
