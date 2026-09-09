@@ -5,6 +5,10 @@ import (
 	"html"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
+	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 
 	tele "gopkg.in/telebot.v3"
 )
@@ -18,21 +22,24 @@ func (h *Handler) HandleInlineQuery(c tele.Context) error {
 	defer cancel()
 
 	user, err := h.UserService.GetUser(ctx, fmt.Sprint(query.Sender.ID))
-	if err != nil || user == nil || user.DefaultGroupID == "" {
+	if err != nil {
+		return c.Answer(inlineUnavailableResponse())
+	}
+	if user == nil || user.DefaultGroupID == "" {
 		return c.Answer(inlineSetupResponse())
 	}
-	group, err := h.GroupService.GetGroupByID(ctx, user.DefaultGroupID)
-	if err != nil || group == nil || !group.IsActive {
-		return c.Answer(inlineSetupResponse())
+	target, err := h.downloadTarget(ctx, c, keyboards.GroupToken(user.DefaultGroupID))
+	if err != nil {
+		return c.Answer(inlineUnavailableResponse())
 	}
 
-	location := h.universityLocation(ctx, group.UniversityID)
+	location := h.universityLocation(ctx, target.UniversityID)
 	now := time.Now().In(location)
 	dates, ok := inlineQueryDates(query.Text, now)
 	if !ok {
 		return c.Answer(&tele.QueryResponse{
 			Results:           tele.Results{},
-			CacheTime:         0,
+			CacheTime:         1,
 			IsPersonal:        true,
 			SwitchPMText:      "Открыть выбор даты",
 			SwitchPMParameter: "date",
@@ -40,23 +47,21 @@ func (h *Handler) HandleInlineQuery(c tele.Context) error {
 	}
 
 	results := make(tele.Results, 0, len(dates))
+	freshness := h.sourceFreshnessText(target.UniversityID)
 	for _, date := range dates {
-		data, loadErr := h.ScheduleService.GetScheduleForGroupRange(ctx, group.ID, date, date)
+		days, loadErr := h.getScheduleForTarget(ctx, target, date, date)
 		if loadErr != nil {
-			continue
+			return c.Answer(inlineUnavailableResponse())
 		}
-		days := mapToDaySchedule(data)
 		if len(days) == 0 {
 			continue
 		}
-		text := fmt.Sprintf("Группа: %s\n\n%s%s", html.EscapeString(group.Name), formatDaySchedule(days[0]), h.sourceFreshnessText(group.UniversityID))
 		article := &tele.ArticleResult{
 			Title:       inlineDateTitle(date, now),
-			Description: fmt.Sprintf("%s · %d занятий", group.Name, len(days[0].Lessons)),
-			Text:        text,
+			Description: fmt.Sprintf("%s · Занятий: %d", target.GroupName, len(days[0].Lessons)),
 		}
 		article.SetResultID(date.Format("20060102"))
-		article.SetParseMode(tele.ModeHTML)
+		article.SetContent(&tele.InputTextMessageContent{Text: inlineScheduleText(target, days[0], freshness), ParseMode: tele.ModeHTML})
 		results = append(results, article)
 	}
 
@@ -69,10 +74,40 @@ func (h *Handler) HandleInlineQuery(c tele.Context) error {
 	})
 }
 
+func inlineScheduleText(target *scheduleTarget, day dto.DaySchedule, freshness string) string {
+	header := fmt.Sprintf("%s · Группа: %s", html.EscapeString(target.University), html.EscapeString(target.GroupName))
+	if target.Subgroup > 0 {
+		header += fmt.Sprintf(" · Подгруппа: %d", target.Subgroup)
+	}
+	best := "Дата: " + day.Date.Format("02.01.2006") + "\nПолное расписание откройте в личном чате с ботом."
+	for count := 0; count <= len(day.Lessons); count++ {
+		visible := day
+		visible.Lessons = day.Lessons[:count]
+		body := formatDaySchedule(visible)
+		tail := freshness
+		if count < len(day.Lessons) {
+			if count == 0 {
+				body = "Дата: " + day.Date.Format("02.01.2006") + "\n"
+			}
+			tail += fmt.Sprintf("\nПоказано занятий: %d из %d. Полное расписание откройте в личном чате с ботом.", count, len(day.Lessons))
+		}
+		text := header + "\n\n" + body + tail
+		if utf8.RuneCountInString(text) > tgMaxLen {
+			break
+		}
+		best = text
+	}
+	return best
+}
+
+func inlineUnavailableResponse() *tele.QueryResponse {
+	return &tele.QueryResponse{Results: tele.Results{}, CacheTime: 1, IsPersonal: true, SwitchPMText: "Проверить доступность расписания", SwitchPMParameter: "menu"}
+}
+
 func inlineSetupResponse() *tele.QueryResponse {
 	return &tele.QueryResponse{
 		Results:           tele.Results{},
-		CacheTime:         0,
+		CacheTime:         1,
 		IsPersonal:        true,
 		SwitchPMText:      "Сначала выбрать группу",
 		SwitchPMParameter: "setup",

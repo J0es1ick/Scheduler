@@ -66,12 +66,14 @@ func (s *scheduleScenarioService) GetScheduleForGroupRange(_ context.Context, gr
 }
 
 type telegramScenario struct {
-	bot     *tele.Bot
-	mu      sync.Mutex
-	markup  tele.ReplyMarkup
-	files   map[string]string
-	methods []string
-	text    string
+	bot      *tele.Bot
+	mu       sync.Mutex
+	markup   tele.ReplyMarkup
+	files    map[string]string
+	methods  []string
+	text     string
+	payloads []map[string]string
+	chatRole string
 }
 
 func newTelegramScenario(t *testing.T) *telegramScenario {
@@ -104,12 +106,23 @@ func newTelegramScenario(t *testing.T) *telegramScenario {
 					files[header.Filename] = string(data)
 				}
 			}
-		} else if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("decode Telegram request: %v", err)
+		} else {
+			var raw map[string]json.RawMessage
+			if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+				t.Errorf("decode Telegram request: %v", err)
+			}
+			for key, value := range raw {
+				var text string
+				if err := json.Unmarshal(value, &text); err != nil {
+					text = string(value)
+				}
+				body[key] = text
+			}
 		}
 		method := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
 		scenario.mu.Lock()
 		scenario.methods = append(scenario.methods, method)
+		scenario.payloads = append(scenario.payloads, body)
 		for name, data := range files {
 			scenario.files[name] = data
 		}
@@ -123,7 +136,15 @@ func newTelegramScenario(t *testing.T) *telegramScenario {
 		}
 		scenario.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		if method == "answerCallbackQuery" || method == "deleteMessage" {
+		if method == "getChatMember" {
+			role := scenario.chatRole
+			if role == "" {
+				role = "member"
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"status": role, "user": map[string]any{"id": 42}}})
+			return
+		}
+		if method == "answerCallbackQuery" || method == "deleteMessage" || method == "answerInlineQuery" || method == "setChatMenuButton" || method == "setMyCommands" {
 			_, _ = io.WriteString(w, `{"ok":true,"result":true}`)
 			return
 		}
