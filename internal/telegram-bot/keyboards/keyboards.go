@@ -630,7 +630,6 @@ func scheduleWeekNavigation(
 			menu.Data(periodLabel+" →", "schedule_week", from.AddDate(0, 0, step).Format("2006-01-02"), fmt.Sprint(daysCount), token),
 		),
 		menu.Row(
-			menu.Data("Выбрать день", "open_weekday", from.Format("2006-01-02"), fmt.Sprint(daysCount), token),
 			menu.Data(
 				"Выбрать дату",
 				"open_calendar",

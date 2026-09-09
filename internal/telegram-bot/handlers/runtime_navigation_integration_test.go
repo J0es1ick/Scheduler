@@ -47,7 +47,7 @@ func TestRuntimeGeneratedScheduleButtonsRestoreContext(t *testing.T) {
 	j.pressAction(t, "calendar_month", j.h.HandleCalendarMonth, nil)
 	j.pressAction(t, "schedule_date", j.h.HandleScheduleDateSelect, nil)
 	j.pressAction(t, "schedule_week", j.h.HandleScheduleWeekSelect, nil)
-	j.pressAction(t, "open_weekday", j.h.HandleOpenWeekday, nil)
+	j.pressAction(t, "open_calendar", j.h.HandleOpenCalendar, nil)
 	j.pressAction(t, "schedule_period_date", j.h.HandleSchedulePeriodDateSelect, nil)
 	j.pressAction(t, "schedule_week", j.h.HandleScheduleWeekSelect, nil)
 	j.pressAction(t, "schedule_week", j.h.HandleScheduleWeekSelect, func(args string) bool { return strings.Contains(args, "|14|") })

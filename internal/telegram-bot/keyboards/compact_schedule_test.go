@@ -17,12 +17,19 @@ func TestWeekAndExportShareRowForGroupsAndTeachers(t *testing.T) {
 			if len(menu.InlineKeyboard) != 4 {
 				t.Fatalf("expected four rows, got %d", len(menu.InlineKeyboard))
 			}
-			row := menu.InlineKeyboard[2]
+			row := menu.InlineKeyboard[1]
+			if len(row) != 1 || row[0].Unique != "open_calendar" || row[0].Text != "Выбрать дату" {
+				t.Fatalf("calendar must occupy its own row: %+v", row)
+			}
+			row = menu.InlineKeyboard[2]
 			if len(row) != 2 || row[0].Unique != "schedule_week" || row[1].Unique != "open_schedule_exports" {
 				t.Fatalf("period/export row: %+v", row)
 			}
 			for _, row := range menu.InlineKeyboard {
 				for _, button := range row {
+					if button.Unique == "open_weekday" {
+						t.Fatal("redundant weekday button remains")
+					}
 					if button.Unique == "schedule_feedback" {
 						t.Fatal("feedback button remains")
 					}

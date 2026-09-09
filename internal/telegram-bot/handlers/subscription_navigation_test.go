@@ -238,11 +238,8 @@ func TestSecondarySubscriptionKeepsGroupAcrossScheduleNavigation(t *testing.T) {
 					if last.to.Sub(last.from) != 13*24*time.Hour {
 						t.Fatalf("two-week range = %s .. %s", last.from, last.to)
 					}
-					s.callback(t, h.HandleOpenWeekday, s.button(t, "Выбрать день"), visual)
-					s.mu.Lock()
-					dayData := strings.SplitN(s.markup.InlineKeyboard[4][0].Data, "|", 2)[1]
-					s.mu.Unlock()
-					s.callback(t, h.HandleSchedulePeriodDateSelect, dayData, visual)
+					s.callback(t, h.HandleOpenCalendar, s.button(t, "Выбрать дату"), visual)
+					s.callback(t, h.HandleSchedulePeriodDateSelect, s.button(t, "1"), visual)
 					s.requireActions(t, "schedule_date", "schedule_week", "open_calendar", "open_schedule_exports")
 					s.button(t, "Назад к двум неделям")
 					s.callback(t, h.HandleOpenCalendar, s.button(t, "Выбрать дату"), visual)
@@ -330,7 +327,7 @@ func TestGroupSearchUsesFullNavigationWithoutSubscribing(t *testing.T) {
 	if err := h.HandleSearchResult(ctx, current); err != nil {
 		t.Fatal(err)
 	}
-	s.requireActions(t, "schedule_week", "open_calendar", "open_weekday", "open_schedule_exports")
+	s.requireActions(t, "schedule_week", "open_calendar", "open_schedule_exports")
 	s.callback(t, h.HandleScheduleWeekSelect, s.button(t, "Две недели"), true)
 	s.callback(t, h.HandleOpenCalendar, s.button(t, "Выбрать дату"), true)
 	s.callback(t, h.HandleCalendarMonth, s.button(t, "›"), true)

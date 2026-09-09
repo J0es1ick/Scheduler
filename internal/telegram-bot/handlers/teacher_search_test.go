@@ -79,7 +79,7 @@ func TestTeacherSearchSelectsCandidateAndKeepsFullNavigation(t *testing.T) {
 	}
 	scenario.callback(t, handler.HandleTeacherSelect, scenario.button(t, "Константинов Е.С."), false)
 	scenario.requireActions(t,
-		"schedule_week", "open_weekday", "open_calendar", "open_schedule_exports", "search_teacher_again", "open_main_menu",
+		"schedule_week", "open_calendar", "open_schedule_exports", "search_teacher_again", "open_main_menu",
 	)
 	scenario.callback(t, handler.HandleScheduleWeekSelect, scenario.button(t, "Две недели"), true)
 	if len(schedule.queries) != 2 || schedule.queries[0] != "Константинов Е.С." || schedule.queries[1] != "Константинов Е.С." {
