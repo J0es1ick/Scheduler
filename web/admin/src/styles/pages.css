@@ -1602,6 +1602,119 @@
 .logs-page .section-title {
   flex-wrap: wrap;
 }
+.log-tab-panel {
+  min-width: 0;
+}
+.log-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  max-width: 100%;
+  padding: 4px;
+  border-bottom: 1px solid var(--line);
+}
+.log-tabs button {
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  padding: 10px 14px;
+  min-height: 44px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+}
+.log-tabs button[aria-selected="true"] {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  color: var(--ink);
+  font-weight: 700;
+}
+.log-tabs button:focus-visible {
+  outline: 2px solid var(--olive);
+  outline-offset: -2px;
+}
+.service-logs > .log-tabs {
+  margin: 0 0 18px;
+}
+.log-view-control {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: -4px 0 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.log-view-control .is-active {
+  color: var(--ink);
+  font-weight: 700;
+}
+.log-console-shell {
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #20251e;
+  color: #ecece1;
+}
+.log-console-caption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid #515847;
+  font-size: 12px;
+}
+.log-console-caption span {
+  color: #bfc5b4;
+}
+.log-console {
+  height: min(58vh, 640px);
+  min-height: 240px;
+  overflow: auto;
+  padding: 14px;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  font:
+    12px/1.8 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+}
+.log-console:focus-visible {
+  outline: 2px solid var(--olive);
+  outline-offset: -2px;
+}
+.log-console-record {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-bottom: 6px;
+}
+.log-console-record time,
+.log-console-fields,
+.log-console-empty {
+  color: #bfc5b4;
+}
+.log-console-module {
+  color: #bfd8b4;
+}
+.log-console-level {
+  color: #c4d9be;
+}
+.log-console-error .log-console-level {
+  color: #ffaaa0;
+}
+.log-console-warn .log-console-level {
+  color: #ecd19a;
+}
+.log-console-shell .log-console-bottom {
+  color: #dce2cf;
+  border-top: 1px solid #515847;
+  padding: 12px 14px;
+  width: 100%;
+  min-height: 44px;
+}
 .service-log-filters {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

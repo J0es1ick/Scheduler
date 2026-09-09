@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { List, Terminal } from "lucide-react";
 import { api } from "../api";
 import {
   EmptyBlock,
@@ -10,6 +11,8 @@ import {
 import { useRemote } from "../hooks";
 import { useViewState } from "../hooks/useViewState";
 import type { ServiceLogPage } from "../types";
+import { LogTabs } from "./LogTabs";
+import { LogConsole } from "./LogConsole";
 
 const labels: Record<string, string> = {
   bot: "Telegram-бот",
@@ -38,6 +41,10 @@ function timeRange(minutes: string) {
 }
 
 export function ServiceLogs() {
+  const [view, setView] = useViewState<"list" | "console">(
+    "ServiceLogs:view",
+    "list",
+  );
   const [filters, setFilters] = useViewState("ServiceLogs:filters", {
     component: "",
     module: "",
@@ -126,6 +133,28 @@ export function ServiceLogs() {
     setRange(timeRange(key === "period" ? value : filters.period));
   }
 
+  function selectStream(component: string) {
+    sequence.current++;
+    setPage(null);
+    setFilters({ ...filters, component, module: "", source: "" });
+    setCursors([""]);
+    setRange(timeRange(filters.period));
+  }
+
+  const streams = [
+    ...new Set([
+      "bot",
+      "admin",
+      "postgres",
+      ...catalog.components.map((item) => item.name),
+      ...(filters.component ? [filters.component] : []),
+    ]),
+  ].map((component) => ({
+    value: component,
+    label: labels[component] ?? component,
+  }));
+  const stream = filters.component || "all";
+
   return (
     <section
       className="card-surface table-card service-logs"
@@ -139,6 +168,36 @@ export function ServiceLogs() {
           </button>
         }
       />
+      <div className="log-view-control" role="group" aria-label="Вид журнала">
+        <span className={view === "list" ? "is-active" : ""}>Список</span>
+        <button
+          type="button"
+          className="theme-switch"
+          role="switch"
+          aria-label="Консольный вид логов"
+          aria-checked={view === "console"}
+          onClick={() => {
+            if (view === "list" && !filters.component) selectStream("bot");
+            setView(view === "list" ? "console" : "list");
+          }}
+        >
+          <span className="theme-switch-track" aria-hidden="true">
+            <List size={14} />
+            <Terminal size={14} />
+            <span className="theme-switch-thumb" />
+          </span>
+        </button>
+        <span className={view === "console" ? "is-active" : ""}>Консоли</span>
+      </div>
+      {view === "console" && (
+        <LogTabs
+          id="log-stream"
+          label="Потоки приложения"
+          options={[{ value: "all", label: "Все потоки" }, ...streams]}
+          value={stream}
+          onChange={(value) => selectStream(value === "all" ? "" : value)}
+        />
+      )}
       <form
         className="service-log-filters"
         onSubmit={(event) => {
@@ -146,29 +205,31 @@ export function ServiceLogs() {
           change("q", search);
         }}
       >
-        <label>
-          Компонент
-          <select
-            aria-label="Компонент"
-            value={filters.component}
-            onChange={(event) => change("component", event.target.value)}
-          >
-            <option value="">Все компоненты</option>
-            {catalog.components.map((item) => (
-              <option key={item.name} value={item.name}>
-                {labels[item.name] ?? item.name} · {item.state}
-              </option>
-            ))}
-            {filters.component &&
-              !catalog.components.some(
-                (item) => item.name === filters.component,
-              ) && (
-                <option value={filters.component}>
-                  {labels[filters.component] ?? filters.component}
+        {view === "list" && (
+          <label>
+            Компонент
+            <select
+              aria-label="Компонент"
+              value={filters.component}
+              onChange={(event) => change("component", event.target.value)}
+            >
+              <option value="">Все компоненты</option>
+              {catalog.components.map((item) => (
+                <option key={item.name} value={item.name}>
+                  {labels[item.name] ?? item.name} · {item.state}
                 </option>
-              )}
-          </select>
-        </label>
+              ))}
+              {filters.component &&
+                !catalog.components.some(
+                  (item) => item.name === filters.component,
+                ) && (
+                  <option value={filters.component}>
+                    {labels[filters.component] ?? filters.component}
+                  </option>
+                )}
+            </select>
+          </label>
+        )}
         <label>
           Модуль
           <select
@@ -302,7 +363,21 @@ export function ServiceLogs() {
       ) : (
         page && (
           <>
-            {page.entries.length === 0 ? (
+            {view === "console" ? (
+              <div
+                role="tabpanel"
+                id={`log-stream-panel-${stream}`}
+                aria-labelledby={`log-stream-tab-${stream}`}
+              >
+                <LogConsole
+                  entries={page.entries}
+                  label={
+                    labels[filters.component] ??
+                    (filters.component || "Все потоки")
+                  }
+                />
+              </div>
+            ) : page.entries.length === 0 ? (
               <EmptyBlock
                 title="Записей не найдено"
                 text={

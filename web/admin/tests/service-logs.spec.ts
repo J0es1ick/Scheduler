@@ -206,7 +206,7 @@ test("read-only administrators see parser history without operational log access
   });
   await page.goto("/#/logs");
   await expect(
-    page.getByText("Запуски парсеров", { exact: true }),
+    page.getByRole("heading", { name: "Запуски парсеров", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByText("Журналы компонентов", { exact: true }),
@@ -228,6 +228,255 @@ test("malformed log response stays inside the log panel", async ({ page }) => {
   ).toBeVisible();
   await expect(page.getByRole("switch", { name: "Тёмная тема" })).toBeVisible();
   await expect(
-    page.getByText("Запуски парсеров", { exact: true }),
+    page.getByRole("tab", { name: "Запуски парсеров", exact: true }),
   ).toBeVisible();
+});
+
+test("diagnostic tabs load separately and restore selections", async ({
+  page,
+}) => {
+  await setup(page);
+  let runs = 0;
+  await page.route("**/api/logs?**", (route) => {
+    runs++;
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ items: [] }),
+    });
+  });
+  await page.route("**/api/service-logs?**", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(result),
+    }),
+  );
+  await page.goto("/#/logs");
+  await expect(
+    page.getByRole("tab", { name: "Логи", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(
+    page.getByRole("heading", { name: "Запуски парсеров", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Доставка сообщений" }),
+  ).toHaveCount(0);
+  expect(runs).toBe(0);
+  await page.getByLabel("Уровень", { exact: true }).selectOption("ERROR");
+  await page
+    .getByRole("tab", { name: "Запуски парсеров", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Запуски парсеров", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".service-logs")).toHaveCount(0);
+  expect(runs).toBeGreaterThan(0);
+  await page
+    .getByRole("tab", { name: "Запуски парсеров", exact: true })
+    .press("ArrowRight");
+  await expect(
+    page.getByRole("heading", { name: "Доставка сообщений" }),
+  ).toBeVisible();
+  await page.getByRole("tab", { name: "Доставка", exact: true }).press("Home");
+  await expect(page.getByLabel("Уровень", { exact: true })).toHaveValue(
+    "ERROR",
+  );
+});
+
+for (const width of [320, 390, 768, 1440])
+  test(`console streams and list switch fit ${width}px`, async ({ page }) => {
+    await setup(page);
+    await page.setViewportSize({ width, height: 844 });
+    const requests: URL[] = [];
+    await page.route("**/api/service-logs?**", (route) => {
+      const url = new URL(route.request().url());
+      requests.push(url);
+      const component = url.searchParams.get("component") || "bot";
+      return route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...result,
+          next_cursor: "",
+          entries: [
+            {
+              ...result.entries[0],
+              id: "new",
+              component,
+              module: component,
+              source: "",
+              message: `${component} second <script>alert(1)</script>`,
+              time: "2026-09-09T10:00:01Z",
+            },
+            {
+              ...result.entries[0],
+              id: "old",
+              component,
+              module: component,
+              source: "",
+              message: `${component} first`,
+              time: "2026-09-09T10:00:00Z",
+            },
+          ],
+        }),
+      });
+    });
+    await page.goto("/#/logs");
+    const slider = page.getByRole("switch", { name: "Консольный вид логов" });
+    await slider.focus();
+    await slider.press("Space");
+    await expect(slider).toBeChecked();
+    const consoleView = page.getByRole("region", {
+      name: "Консоль: Telegram-бот",
+      exact: true,
+    });
+    await expect(consoleView).toContainText("bot first");
+    await expect(
+      consoleView.locator(".log-console-record").first(),
+    ).toContainText("bot first");
+    await expect(consoleView).toContainText(
+      "permission denied for table groups",
+    );
+    await expect(consoleView.locator("script")).toHaveCount(0);
+    await page
+      .getByRole("tab", { name: "Административный API", exact: true })
+      .click();
+    await expect(
+      page.getByRole("region", {
+        name: "Консоль: Административный API",
+        exact: true,
+      }),
+    ).toContainText("admin first");
+    expect(requests.at(-1)?.searchParams.get("component")).toBe("admin");
+    await page.getByRole("tab", { name: "PostgreSQL", exact: true }).click();
+    await expect(
+      page.getByRole("region", { name: "Консоль: PostgreSQL", exact: true }),
+    ).toContainText("postgres first");
+    await page
+      .getByRole("tab", { name: "Запуски парсеров", exact: true })
+      .click();
+    await page.getByRole("tab", { name: "Логи", exact: true }).click();
+    await expect(slider).toBeChecked();
+    await expect(
+      page.getByRole("region", { name: "Консоль: PostgreSQL", exact: true }),
+    ).toContainText("postgres first");
+    for (const selector of [
+      ".main-area",
+      ".service-logs",
+      ".log-console",
+      '.log-tabs[aria-label="Потоки приложения"]',
+    ]) {
+      const bounds = await page.locator(selector).boundingBox();
+      expect(bounds!.x, selector).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width, selector).toBeLessThanOrEqual(
+        width + 1,
+      );
+    }
+    await slider.click();
+    await expect(page.getByLabel("Компонент", { exact: true })).toHaveValue(
+      "postgres",
+    );
+    await expect(page.locator(".service-log-entry")).toHaveCount(2);
+    await expect(page.locator(".log-console")).toHaveCount(0);
+  });
+
+test("changing console streams ignores an older response", async ({ page }) => {
+  await setup(page);
+  let releaseBot: (() => void) | undefined;
+  let botRequested = false;
+  await page.route("**/api/service-logs?**", async (route) => {
+    const component = new URL(route.request().url()).searchParams.get(
+      "component",
+    );
+    if (component === "bot") {
+      botRequested = true;
+      await new Promise<void>((resolve) => {
+        releaseBot = resolve;
+      });
+    }
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...result,
+        entries: [
+          {
+            ...result.entries[0],
+            component: component || "bot",
+            message:
+              component === "bot"
+                ? "outdated bot response"
+                : "current admin response",
+          },
+        ],
+      }),
+    });
+  });
+  await page.goto("/#/logs");
+  await page.getByRole("switch", { name: "Консольный вид логов" }).click();
+  await expect.poll(() => botRequested).toBe(true);
+  await page
+    .getByRole("tab", { name: "Административный API", exact: true })
+    .click();
+  await expect(page.locator(".log-console")).toContainText(
+    "current admin response",
+  );
+  releaseBot?.();
+  await expect(page.locator(".log-console")).not.toContainText(
+    "outdated bot response",
+  );
+});
+
+test("console refresh preserves reading position until following is resumed", async ({
+  page,
+}) => {
+  await setup(page);
+  let count = 60;
+  await page.route("**/api/service-logs?**", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...result,
+        next_cursor: "",
+        entries: Array.from({ length: count }, (_, index) => ({
+          ...result.entries[0],
+          id: String(count - index),
+          component: "bot",
+          module: "bot",
+          message: `Record ${count - index}`,
+          source: "",
+        })),
+      }),
+    }),
+  );
+  await page.goto("/#/logs");
+  await page.getByRole("switch", { name: "Консольный вид логов" }).click();
+  const consoleView = page.locator(".log-console");
+  const distance = () =>
+    consoleView.evaluate(
+      (node) => node.scrollHeight - node.scrollTop - node.clientHeight,
+    );
+  await expect.poll(distance).toBeLessThan(2);
+  await consoleView.evaluate((node) => {
+    node.scrollTop = 150;
+    node.dispatchEvent(new Event("scroll"));
+  });
+  count++;
+  await page
+    .getByRole("button", { name: "Обновить журнал", exact: true })
+    .click();
+  await expect(consoleView.locator(".log-console-record")).toHaveCount(count);
+  await expect
+    .poll(() => consoleView.evaluate((node) => node.scrollTop))
+    .toBe(150);
+  await page
+    .getByRole("button", {
+      name: "К последним записям на странице ↓",
+      exact: true,
+    })
+    .click();
+  await expect.poll(distance).toBeLessThan(2);
+  count++;
+  await page
+    .getByRole("button", { name: "Обновить журнал", exact: true })
+    .click();
+  await expect(consoleView.locator(".log-console-record")).toHaveCount(count);
+  await expect.poll(distance).toBeLessThan(2);
 });
