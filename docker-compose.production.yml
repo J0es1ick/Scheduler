@@ -8,6 +8,17 @@ x-production-database: &production-database
 x-production-volumes: &production-volumes
   - ${PRODUCTION_DB_CA_FILE:?PRODUCTION_DB_CA_FILE is required}:/run/certs/postgres-ca.pem:ro
 
+x-production-logging: &production-logging
+  driver: syslog
+  options:
+    syslog-address: "udp://127.0.0.1:${SCHEDULER_LOG_PORT:-15140}"
+    syslog-format: rfc5424micro
+    tag: "${COMPOSE_PROJECT_NAME:-scheduler}/{{.Name}}"
+    mode: non-blocking
+    max-buffer-size: "1m"
+    cache-max-size: "10m"
+    cache-max-file: "5"
+
 services:
   app-image:
     image: ${SCHEDULER_IMAGE:?SCHEDULER_IMAGE is required}
@@ -27,6 +38,10 @@ services:
     security_opt: [no-new-privileges:true]
     mem_limit: 128m
     pids_limit: 64
+    logging: *production-logging
+    depends_on:
+      log-reader:
+        condition: service_healthy
     environment:
       <<: *production-database
       DATABASE_NAME: ${DATABASE_NAME:-scheduler}
@@ -69,6 +84,10 @@ services:
     security_opt: [no-new-privileges:true]
     mem_limit: 128m
     pids_limit: 64
+    logging: *production-logging
+    depends_on:
+      log-reader:
+        condition: service_healthy
     environment:
       DEPLOYMENT_ENV: production
       BACKUP_REQUIRE_OFFSITE: "true"

@@ -19,6 +19,7 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/logging"
 	"github.com/J0es1ick/Scheduler/internal/parserruntime"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	"github.com/J0es1ick/Scheduler/internal/servicelogs"
 	"github.com/J0es1ick/Scheduler/internal/worker"
 	managed "github.com/J0es1ick/Scheduler/parser/v1"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -89,6 +90,7 @@ func main() {
 	workerMonitor := worker.NewMonitor()
 	workerMonitor.Register(worker.ConnectorWorkerName, 35*time.Minute)
 	adminServer, err := admin.NewServer(store, auth, parserService, admin.ServerOptions{
+		ServiceLogs:       servicelogs.NewClient(cfg.Admin.LogSocket),
 		MetricsToken:      cfg.Admin.MetricsToken,
 		TrustedProxyCIDRs: cfg.Admin.TrustedProxyCIDRs,
 		ConnectorHandler:  connectorServer.Handler(),

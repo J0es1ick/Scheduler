@@ -50,7 +50,18 @@ async function mockShell(page: Page, authenticated = true) {
                     oldest_pending_seconds: 0,
                   },
                 }
-              : { items: [], pagination: { page: 1, page_size: 20, total: 0 } };
+              : path === "/api/service-logs"
+                ? {
+                    entries: [],
+                    components: [],
+                    modules: [],
+                    warnings: [],
+                    checked_at: new Date().toISOString(),
+                  }
+                : {
+                    items: [],
+                    pagination: { page: 1, page_size: 20, total: 0 },
+                  };
       return route.fulfill({
         status: path === "/api/auth/me" && !authenticated ? 401 : 200,
         contentType: "application/json",

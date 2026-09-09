@@ -4,11 +4,19 @@ x-monitor-runtime: &monitor-runtime
   cap_drop: [ALL]
   security_opt: [no-new-privileges:true]
   pids_limit: 128
+  depends_on:
+    log-reader:
+      condition: service_healthy
   logging:
-    driver: json-file
+    driver: syslog
     options:
-      max-size: 10m
-      max-file: "3"
+      syslog-address: "udp://127.0.0.1:${SCHEDULER_LOG_PORT:-15140}"
+      syslog-format: rfc5424micro
+      tag: "${COMPOSE_PROJECT_NAME:-scheduler}/{{.Name}}"
+      mode: non-blocking
+      max-buffer-size: "1m"
+      cache-max-size: "10m"
+      cache-max-file: "5"
 
 services:
   prometheus:

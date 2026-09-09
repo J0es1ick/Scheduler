@@ -46,6 +46,7 @@ type DatabaseConfig struct {
 }
 
 type AdminConfig struct {
+	LogSocket             string `mapstructure:"ADMIN_LOG_SOCKET"`
 	Port                  string `mapstructure:"ADMIN_PORT"`
 	AccessToken           string `mapstructure:"ADMIN_ACCESS_TOKEN"`
 	AccessKeyLoginEnabled bool   `mapstructure:"ADMIN_ACCESS_LOGIN_ENABLED"`
@@ -95,6 +96,7 @@ func initConfig(requireBotToken bool) (*Config, error) {
 	reader.AutomaticEnv()
 	reader.SetDefault("DEPLOYMENT_ENV", "development")
 	reader.SetDefault("ADMIN_PORT", "18080")
+	reader.SetDefault("ADMIN_LOG_SOCKET", "/run/scheduler-logs/reader.sock")
 	reader.SetDefault("DATABASE_SSLMODE", "disable")
 	reader.SetDefault("DATABASE_MAX_OPEN_CONNECTIONS", 15)
 	reader.SetDefault("DATABASE_MAX_IDLE_CONNECTIONS", 5)
@@ -142,6 +144,7 @@ func initConfig(requireBotToken bool) (*Config, error) {
 		"DATABASE_CONNECT_TIMEOUT_SECONDS",
 		"DATABASE_STATEMENT_TIMEOUT_SECONDS",
 		"ADMIN_PORT",
+		"ADMIN_LOG_SOCKET",
 		"ADMIN_ACCESS_TOKEN",
 		"ADMIN_ACCESS_LOGIN_ENABLED",
 		"ADMIN_COOKIE_SECURE",

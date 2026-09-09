@@ -579,3 +579,22 @@ declare global {
     };
   }
 }
+export interface ServiceLogEntry {
+  id: string;
+  time: string;
+  component: string;
+  module: string;
+  source?: string;
+  level: string;
+  message: string;
+  fields: Record<string, unknown>;
+}
+
+export interface ServiceLogPage {
+  entries: ServiceLogEntry[];
+  components: { name: string; state: string }[];
+  modules: string[];
+  warnings: string[];
+  next_cursor?: string;
+  checked_at: string;
+}

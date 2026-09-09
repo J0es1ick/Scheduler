@@ -34,6 +34,7 @@ const (
 )
 
 type ServerOptions struct {
+	ServiceLogs       serviceLogReader
 	MetricsToken      string
 	TrustedProxyCIDRs string
 	ConnectorHandler  http.Handler
@@ -42,6 +43,7 @@ type ServerOptions struct {
 }
 
 type Server struct {
+	serviceLogs     serviceLogReader
 	store           *Store
 	auth            *AuthManager
 	parser          *service.ParserService
@@ -80,6 +82,7 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService, o
 		catalog[item.ParserID] = item
 	}
 	server := &Server{
+		serviceLogs:     opts.ServiceLogs,
 		store:           store,
 		auth:            auth,
 		parser:          parser,
@@ -143,6 +146,7 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService, o
 	server.protected(mux, "POST /api/parser-snapshots/{id}/reject", server.handleRejectSnapshot)
 	server.protected(mux, "GET /api/operations", server.handleOperations)
 	server.protected(mux, "GET /api/logs", server.handleLogs)
+	server.protected(mux, "GET /api/service-logs", server.handleServiceLogs)
 	server.protected(mux, "GET /api/universities", server.handleUniversities)
 	server.protected(mux, "GET /api/groups", server.handleGroups)
 	server.protected(mux, "PATCH /api/groups/{id}", server.handleUpdateGroup)
@@ -225,6 +229,8 @@ func roleForPattern(pattern string) string {
 		return "read_only"
 	}
 	switch {
+	case strings.HasPrefix(pattern, "GET /api/service-logs"):
+		return "operator"
 	case strings.HasPrefix(pattern, "GET /api/users"):
 		return "owner"
 	case strings.HasPrefix(pattern, "GET /api/audit"):
@@ -1270,7 +1276,14 @@ func (s *Server) requestLog(next http.Handler) http.Handler {
 		if status == 0 {
 			status = http.StatusOK
 		}
-		slog.Info("admin request",
+		level := slog.LevelInfo
+		if status >= 500 {
+			level = slog.LevelError
+		} else if status >= 400 {
+			level = slog.LevelWarn
+		}
+		slog.Log(r.Context(), level, "admin request",
+			"module", "http",
 			"request_id", requestIDFromContext(r.Context()),
 			"method", r.Method,
 			"path", r.URL.Path,

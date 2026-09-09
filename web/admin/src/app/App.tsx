@@ -228,7 +228,7 @@ export default function App() {
       case "connectors":
         return <ConnectorsPage notify={notify} />;
       case "logs":
-        return <LogsPage />;
+        return <LogsPage role={user?.role ?? "none"} />;
       case "data":
         return (
           <DataPage

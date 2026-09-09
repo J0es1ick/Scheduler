@@ -156,7 +156,9 @@ func (s *ParserService) runDataSource(ctx context.Context, dataSourceID string, 
 		return 0, fmt.Errorf("parser: create parse log: %w", err)
 	}
 	startedAt := time.Now()
+	slog.Info("parser: source run started", "module", "parser", "source_id", ds.ID, "adapter", ds.AdapterType, "parse_log_id", logID)
 	fail := func(records int, runErr error) (int, error) {
+		slog.Error("parser: source run failed", "module", "parser", "source_id", ds.ID, "adapter", ds.AdapterType, "parse_log_id", logID, "records", records, "err", runErr)
 		message := truncate(runErr.Error(), 4000)
 		failures, nextRetryAt, recordErr := s.parseLogRepo.FinalizeFailure(
 			ctx, logID, ds.ID, records, message,
@@ -279,6 +281,7 @@ func (s *ParserService) runDataSource(ctx context.Context, dataSourceID string, 
 	}
 	if status == domain.SnapshotStatusQuarantined {
 		summary := anomalySummary(anomalies)
+		slog.Warn("parser: snapshot quarantined", "module", "parser", "source_id", ds.ID, "parse_log_id", logID, "snapshot_id", snapshot.ID, "lessons", lessonCount, "reason", summary)
 		if finalizeErr := s.parseLogRepo.FinalizeQuarantine(
 			ctx, logID, ds.ID, lessonCount, summary,
 			fmt.Sprintf("Снимок %s помещён в карантин: %s", snapshot.ID, summary),
@@ -314,6 +317,8 @@ func (s *ParserService) runDataSource(ctx context.Context, dataSourceID string, 
 		slog.Error("parser: prune snapshot history failed", "source", ds.ID, "err", pruneErr)
 	}
 	slog.Info("parser: data source run complete",
+		"source_id", ds.ID,
+		"parse_log_id", logID,
 		"adapter", adapter.Name(),
 		"groups", len(payload.Groups),
 		"lessons", lessonCount,

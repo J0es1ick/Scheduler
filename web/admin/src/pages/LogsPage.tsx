@@ -17,8 +17,10 @@ import {
   StatusPill,
 } from "../components";
 import { useRemote } from "../hooks";
+import { ServiceLogs } from "./ServiceLogs";
+import type { AdminRole } from "../types";
 
-export function LogsPage() {
+export function LogsPage({ role }: { role: AdminRole }) {
   const [source, setSource] = useViewState("LogsPage:source", "");
   const [status, setStatus] = useViewState("LogsPage:status", "");
   const health = useRemote(() => api.dashboard(), []);
@@ -35,6 +37,7 @@ export function LogsPage() {
 
   return (
     <div className="page-stack logs-page">
+      {(role === "owner" || role === "operator") && <ServiceLogs />}
       <section
         className="card-surface table-card"
         aria-label="Диагностика доставки"
@@ -123,6 +126,7 @@ export function LogsPage() {
                 <option value="success">Успешно</option>
                 <option value="failed">Ошибка</option>
                 <option value="running">Выполняется</option>
+                <option value="quarantined">Карантин</option>
               </select>
             </div>
           }
@@ -171,7 +175,9 @@ export function LogsPage() {
                         ? "success"
                         : log.status === "failed"
                           ? "failed"
-                          : "running"
+                          : log.status === "quarantined"
+                            ? "quarantined"
+                            : "running"
                     }
                   />
                   {log.error_message && (

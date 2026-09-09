@@ -32,6 +32,7 @@ RUN LDFLAGS="-s -w -X github.com/J0es1ick/Scheduler/internal/buildinfo.Version=$
     && CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o /out/scheduler-bot ./cmd/bot \
     && CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o /out/scheduler-admin ./cmd/admin \
     && CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o /out/scheduler-site ./cmd/site \
+    && CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o /out/scheduler-log-reader ./cmd/log-reader \
     && CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o /out/scheduler-migrate ./cmd/migrate \
     && CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o /out/scheduler-preflight ./cmd/preflight \
     && CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o /out/scheduler-sync ./cmd/sync \
@@ -49,6 +50,8 @@ LABEL org.opencontainers.image.title="Scheduler" \
       org.opencontainers.image.created="$BUILD_TIME" \
       org.opencontainers.image.source="https://github.com/J0es1ick/Scheduler"
 RUN apk add --no-cache ca-certificates tzdata
+RUN mkdir -p /run/scheduler-logs /var/lib/scheduler-logs \
+    && chown 65532:65532 /run/scheduler-logs /var/lib/scheduler-logs
 WORKDIR /app
 ENV TZ=Europe/Moscow
 COPY --from=go-builder /out/ /app/

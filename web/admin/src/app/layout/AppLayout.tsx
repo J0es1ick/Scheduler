@@ -56,7 +56,7 @@ const navigation: Array<{
     icon: PlugZap,
     minimumRole: "operator",
   },
-  { id: "logs", label: "Запуски", icon: History, minimumRole: "read_only" },
+  { id: "logs", label: "Логи", icon: History, minimumRole: "read_only" },
   { id: "data", label: "Расписание", icon: Database, minimumRole: "read_only" },
   {
     id: "support",
@@ -106,7 +106,7 @@ const pageCopy: Record<ViewName, { title: string; subtitle: string }> = {
     title: "Интеграции",
     subtitle: "Управляемые парсеры, JSON pull и внешние поставщики",
   },
-  logs: { title: "Запуски", subtitle: "История работы парсеров" },
+  logs: { title: "Логи", subtitle: "Журналы компонентов и запуски парсеров" },
   data: { title: "Справочники", subtitle: "Группы и занятия в базе" },
   support: { title: "Обращения", subtitle: "Горячая линия расписаний" },
   users: { title: "Пользователи", subtitle: "Подписки и права доступа" },

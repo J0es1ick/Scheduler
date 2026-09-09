@@ -1,5 +1,6 @@
 import type {
   AdminIdentity,
+  ServiceLogPage,
   AuditLogView,
   Dashboard,
   EditorSchedule,
@@ -205,6 +206,13 @@ export const api = {
     if (status) query.set("status", status);
     return (await request<{ items: ParseLogView[] }>(`/api/logs?${query}`))
       .items;
+  },
+  serviceLogs: async (filters: Record<string, string>) => {
+    const page = await request<ServiceLogPage>(`/api/service-logs?${new URLSearchParams(filters)}`);
+    if (!page || ![page.entries, page.components, page.modules, page.warnings].every(Array.isArray)) {
+      throw new Error("Сервер вернул некорректный журнал. Повторите загрузку.");
+    }
+    return page;
   },
   universities: async () =>
     (await request<{ items: UniversityOption[] }>("/api/universities")).items,
