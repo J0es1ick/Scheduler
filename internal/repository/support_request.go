@@ -9,6 +9,8 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+var ErrSupportRequestBlocked = errors.New("support requests are blocked for this user")
+
 var ErrSupportRequestLimit = errors.New("support request limit reached")
 
 type SupportRequestRepository struct {
@@ -31,6 +33,13 @@ func (r *SupportRequestRepository) Create(
 
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "support:"+userID); err != nil {
 		return fmt.Errorf("create support request: lock user: %w", err)
+	}
+	var restricted bool
+	if err = tx.GetContext(ctx, &restricted, `SELECT bot_blocked OR support_blocked FROM users WHERE id=$1 FOR SHARE`, userID); err != nil {
+		return fmt.Errorf("create support request: restrictions: %w", err)
+	}
+	if restricted {
+		return ErrSupportRequestBlocked
 	}
 	var open int
 	if err = tx.GetContext(ctx, &open,

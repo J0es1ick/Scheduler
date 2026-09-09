@@ -23,11 +23,11 @@ import (
 )
 
 type runtimeJourney struct {
-	h                    *Handler
-	telegram             *telegramScenario
-	db, botDB, privacyDB *sqlx.DB
-	ctx                  context.Context
-	date                 time.Time
+	h                             *Handler
+	telegram                      *telegramScenario
+	db, botDB, adminDB, privacyDB *sqlx.DB
+	ctx                           context.Context
+	date                          time.Time
 }
 
 func newRuntimeJourney(t *testing.T) *runtimeJourney {
@@ -94,7 +94,7 @@ func newRuntimeJourney(t *testing.T) *runtimeJourney {
 		t.Cleanup(func() { connection.Close() })
 		return connection
 	}
-	botDB, privacyDB := connectRole(roles[0]), connectRole(roles[3])
+	botDB, adminDB, privacyDB := connectRole(roles[0]), connectRole(roles[1]), connectRole(roles[3])
 	schedule := service.NewScheduleService(repository.NewLessonRepository(botDB), repository.NewSemesterRepository(botDB), repository.NewGroupRepository(botDB))
 	h := NewHandler(schedule, service.NewUserService(repository.NewUserRepository(botDB)), service.NewGroupService(repository.NewGroupRepository(botDB)), service.NewUniversityService(repository.NewUniversityRepository(botDB)), state.NewManager(), service.NewSubscriptionService(repository.NewSubscriptionRepository(botDB)), service.NewSupportRequestService(repository.NewSupportRequestRepository(botDB)), service.NewMetricsService(repository.NewMetricsRepository(botDB)), service.NewChatProfileService(repository.NewChatProfileRepository(botDB)), nil, "", "https://example.test/project")
 	location, err := time.LoadLocation("Europe/Moscow")
@@ -119,7 +119,7 @@ func newRuntimeJourney(t *testing.T) *runtimeJourney {
 			}
 		}
 	}
-	return &runtimeJourney{h: h, telegram: newTelegramScenario(t), db: db, botDB: botDB, privacyDB: privacyDB, ctx: ctx, date: date}
+	return &runtimeJourney{h: h, telegram: newTelegramScenario(t), db: db, botDB: botDB, adminDB: adminDB, privacyDB: privacyDB, ctx: ctx, date: date}
 }
 
 func (j *runtimeJourney) message(t *testing.T, handler tele.HandlerFunc, command, payload string) {

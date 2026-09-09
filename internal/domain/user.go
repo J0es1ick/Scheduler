@@ -6,6 +6,7 @@ import (
 )
 
 type User struct {
+	UserRestrictions
 	ID                   string             `db:"id" json:"id"`
 	Username             string             `db:"username" json:"username"`
 	IsAdmin              bool               `db:"is_admin" json:"is_admin"`

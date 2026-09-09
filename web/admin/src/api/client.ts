@@ -19,6 +19,7 @@ import type {
   SupportRequestView,
   UniversityOption,
   UserView,
+  UserRestrictions,
   ConnectorClient,
   ConnectorCredentials,
   ConnectorRun,
@@ -308,6 +309,14 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ admin_role: adminRole }),
     }),
+  updateUserRestrictions: (id: string, patch: Partial<UserRestrictions>) =>
+    request<UserRestrictions>(
+      `/api/users/${encodeURIComponent(id)}/restrictions`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      },
+    ),
   connectors: async () =>
     (await request<{ items: ConnectorClient[] }>("/api/connectors")).items,
   connectorCatalog: async () =>

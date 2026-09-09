@@ -13,17 +13,22 @@ const telegramInteractiveWait = 15 * time.Second
 
 type limitedContext struct {
 	tele.Context
-	parent  context.Context
-	limiter *telegramlimit.Limiter
+	parent       context.Context
+	limiter      *telegramlimit.Limiter
+	restrictions UserRestrictionsReader
 }
 
-func LimitOutboundByRecipient(parent context.Context, limiter *telegramlimit.Limiter) tele.MiddlewareFunc {
+func LimitOutboundByRecipient(parent context.Context, limiter *telegramlimit.Limiter, restrictions ...UserRestrictionsReader) tele.MiddlewareFunc {
+	var reader UserRestrictionsReader
+	if len(restrictions) > 0 {
+		reader = restrictions[0]
+	}
 	return func(next tele.HandlerFunc) tele.HandlerFunc {
 		return func(current tele.Context) error {
-			if limiter == nil {
+			if limiter == nil && reader == nil {
 				return next(current)
 			}
-			return next(&limitedContext{Context: current, parent: parent, limiter: limiter})
+			return next(&limitedContext{Context: current, parent: parent, limiter: limiter, restrictions: reader})
 		}
 	}
 }
@@ -109,11 +114,18 @@ func (current *limitedContext) call(send func() error) error {
 	}
 	waitContext, cancel := context.WithTimeout(parent, telegramInteractiveWait)
 	defer cancel()
-	if err := current.limiter.Wait(waitContext, outboundRecipient(current.Context)); err != nil {
+	if current.limiter != nil {
+		if err := current.limiter.Wait(waitContext, outboundRecipient(current.Context)); err != nil {
+			return err
+		}
+	}
+	if blocked, err := updateRestricted(waitContext, current.Context, current.restrictions, nil); err != nil || blocked {
 		return err
 	}
 	err := send()
-	current.limiter.Observe(err)
+	if current.limiter != nil {
+		current.limiter.Observe(err)
+	}
 	return err
 }
 

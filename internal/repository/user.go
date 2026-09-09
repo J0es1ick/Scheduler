@@ -40,7 +40,7 @@ func (r *UserRepository) GetUserByID(ctx context.Context, id string) (*domain.Us
 	var user domain.User
 	err := r.db.GetContext(ctx, &user,
 		`SELECT id, COALESCE(username, '') AS username, is_admin,
-			COALESCE(default_group_id, '') AS default_group_id, notifications_enabled,
+			COALESCE(default_group_id, '') AS default_group_id, notifications_enabled, bot_blocked, support_blocked,
 			reminder_enabled, reminder_minutes, quiet_hours_enabled,
 			to_char(quiet_hours_start, 'HH24:MI') AS quiet_hours_start,
 			to_char(quiet_hours_end, 'HH24:MI') AS quiet_hours_end,
@@ -60,7 +60,7 @@ func (r *UserRepository) GetUserByUsername(ctx context.Context, username string)
 	var user domain.User
 	err := r.db.GetContext(ctx, &user,
 		`SELECT id, COALESCE(username, '') AS username, is_admin,
-			COALESCE(default_group_id, '') AS default_group_id, notifications_enabled,
+			COALESCE(default_group_id, '') AS default_group_id, notifications_enabled, bot_blocked, support_blocked,
 			reminder_enabled, reminder_minutes, quiet_hours_enabled,
 			to_char(quiet_hours_start, 'HH24:MI') AS quiet_hours_start,
 			to_char(quiet_hours_end, 'HH24:MI') AS quiet_hours_end,
@@ -80,7 +80,7 @@ func (r *UserRepository) GetAllUsers(ctx context.Context) ([]domain.User, error)
 	var users []domain.User
 	err := r.db.SelectContext(ctx, &users,
 		`SELECT id, COALESCE(username, '') AS username, is_admin,
-			COALESCE(default_group_id, '') AS default_group_id, notifications_enabled,
+			COALESCE(default_group_id, '') AS default_group_id, notifications_enabled, bot_blocked, support_blocked,
 			reminder_enabled, reminder_minutes, quiet_hours_enabled,
 			to_char(quiet_hours_start, 'HH24:MI') AS quiet_hours_start,
 			to_char(quiet_hours_end, 'HH24:MI') AS quiet_hours_end,
@@ -106,7 +106,7 @@ func (r *UserRepository) GetUsersPendingMenuSync(
 	if err := r.db.SelectContext(ctx, &users, `
 		SELECT id, COALESCE(username, '') AS username, is_admin
 		FROM users
-		WHERE ($1 = '' OR id > $1)
+		WHERE NOT bot_blocked AND ($1 = '' OR id > $1)
 		  AND telegram_menu_fingerprint IS DISTINCT FROM
 		      CASE WHEN is_admin THEN $3 ELSE $4 END
 		ORDER BY id

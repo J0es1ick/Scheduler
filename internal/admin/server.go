@@ -161,6 +161,7 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService, o
 	server.protected(mux, "PATCH /api/support-requests/{id}", server.handleResolveSupportRequest)
 	server.protected(mux, "GET /api/users", server.handleUsers)
 	server.protected(mux, "PATCH /api/users/{id}", server.handleUpdateUser)
+	server.protected(mux, "PATCH /api/users/{id}/restrictions", server.handleUserRestrictions)
 	server.protected(mux, "GET /api/audit", server.handleAudit)
 	mux.Handle("/", spaHandler(assets, index))
 

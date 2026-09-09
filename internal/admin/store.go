@@ -470,13 +470,13 @@ func (s *Store) Users(ctx context.Context, queryText string, limit int) ([]UserV
 			COUNT(s.id)::int AS subscriptions,
 			COALESCE(u.default_group_id, '') AS default_group_id,
 			COALESCE(dg.name, '') AS default_group_name,
-			u.notifications_enabled, u.created_at, u.updated_at
+			u.notifications_enabled, u.bot_blocked, u.support_blocked, u.created_at, u.updated_at
 		FROM users u
 		LEFT JOIN subscriptions s ON s.user_id=u.id
 		LEFT JOIN groups dg ON dg.id=u.default_group_id
 		WHERE %s
 		GROUP BY u.id, u.username, u.is_admin, u.admin_role, u.default_group_id,
-			dg.name, u.notifications_enabled, u.created_at, u.updated_at
+			dg.name, u.notifications_enabled, u.bot_blocked, u.support_blocked, u.created_at, u.updated_at
 		ORDER BY u.is_admin DESC, u.updated_at DESC LIMIT $%d`, where, len(args))
 	var users []UserView
 	if err := s.db.SelectContext(ctx, &users, query, args...); err != nil {
@@ -695,7 +695,7 @@ func (s *Store) TelegramAdmin(ctx context.Context, userID string) (*UserView, er
 			0 AS subscriptions,
 			COALESCE(u.default_group_id, '') AS default_group_id,
 			COALESCE(g.name, '') AS default_group_name,
-			u.notifications_enabled, u.created_at, u.updated_at
+			u.notifications_enabled, u.bot_blocked, u.support_blocked, u.created_at, u.updated_at
 		FROM users u
 		LEFT JOIN groups g ON g.id=u.default_group_id
 		WHERE u.id=$1`, userID)

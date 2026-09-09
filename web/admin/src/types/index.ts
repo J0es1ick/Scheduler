@@ -388,7 +388,12 @@ export interface LessonMutationPayload {
   expected_updated_at?: string;
 }
 
-export interface UserView {
+export interface UserRestrictions {
+  bot_blocked: boolean;
+  support_blocked: boolean;
+}
+
+export interface UserView extends UserRestrictions {
   id: string;
   username: string;
   is_admin: boolean;

@@ -74,11 +74,13 @@ func main() {
 		telegramlimit.DefaultGlobalInterval,
 		telegramlimit.DefaultRecipientInterval,
 	)
+	userRepo := repository.NewUserRepository(db.DB)
+	stateManager := state.NewManagerWithTTL(time.Duration(cfg.BotStateTTLMinutes) * time.Minute)
 	telegramHTTPClient := newTelegramHTTPClient(telegramLimiter)
 	bot, err := tgbotapi.NewBot(tgbotapi.Settings{
 		URL:     cfg.BotTelegramAPIURL,
 		Token:   cfg.BotToken,
-		OnError: telegramErrorHandler(telegramLimiter),
+		OnError: telegramErrorHandler(telegramLimiter, botpkg.EnforceUserRestrictions(ctx, userRepo, stateManager)),
 		Client:  telegramHTTPClient,
 	})
 	if err != nil {
@@ -93,7 +95,6 @@ func main() {
 	slog.Info("telegram bot identity configured", "username", botUsername)
 
 	// --- Репозитории ---
-	userRepo := repository.NewUserRepository(db.DB)
 	lessonRepo := repository.NewLessonRepository(db.DB)
 	semesterRepo := repository.NewSemesterRepository(db.DB)
 	groupRepo := repository.NewGroupRepository(db.DB)
@@ -116,7 +117,6 @@ func main() {
 	groupService := service.NewGroupService(groupRepo)
 	universityService := service.NewUniversityService(universityRepo)
 	// --- Telegram ---
-	stateManager := state.NewManagerWithTTL(time.Duration(cfg.BotStateTTLMinutes) * time.Minute)
 	stateCleanupDone := stateManager.StartCleanup(ctx, time.Minute)
 	handler := handlers.NewHandler(
 		scheduleService, userService, groupService,
@@ -126,11 +126,13 @@ func main() {
 	handlerTracker := botpkg.NewHandlerTracker()
 	bot.Use(
 		botpkg.RecoverPanics(),
+		botpkg.EnforceUserRestrictions(ctx, userRepo, stateManager),
 		handlerTracker.Middleware(),
 		botpkg.SerializeBySender(cfg.BotMaxPendingPerSender),
 		botpkg.LimitConcurrent(cfg.BotMaxConcurrentHandlers),
+		botpkg.EnforceUserRestrictions(ctx, userRepo, stateManager),
 		botpkg.CommandStatePolicy(stateManager),
-		botpkg.LimitOutboundByRecipient(ctx, telegramLimiter),
+		botpkg.LimitOutboundByRecipient(ctx, telegramLimiter, userRepo),
 	)
 	commandsReady := botpkg.Register(ctx, bot, handler)
 
@@ -356,9 +358,18 @@ func permanentTelegramMenuError(err error) bool {
 		strings.HasSuffix(message, "(404)")
 }
 
-func telegramErrorHandler(limiter *telegramlimit.Limiter) func(error, tgbotapi.Context) {
+func telegramErrorHandler(limiter *telegramlimit.Limiter, guards ...tgbotapi.MiddlewareFunc) func(error, tgbotapi.Context) {
 	return func(err error, ctx tgbotapi.Context) {
 		limiter.Observe(err)
-		botpkg.HandleError(err, ctx, limiter)
+		handler := func(current tgbotapi.Context) error {
+			botpkg.HandleError(err, current, limiter)
+			return nil
+		}
+		for i := len(guards) - 1; i >= 0; i-- {
+			handler = guards[i](handler)
+		}
+		if guardErr := handler(ctx); guardErr != nil {
+			slog.Error("telegram error response suppressed", "err", guardErr)
+		}
 	}
 }

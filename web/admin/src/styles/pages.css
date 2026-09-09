@@ -1838,3 +1838,62 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.user-actions {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.user-restrictions {
+  display: grid;
+  gap: 8px;
+}
+.user-restrictions .button {
+  white-space: normal;
+  min-height: 40px;
+  margin: 0;
+}
+.restriction-status {
+  font-size: 12px;
+  color: var(--muted);
+}
+.restriction-status.is-blocked {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.users-page .user-card {
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: start;
+}
+.user-actions {
+  grid-column: 1 / -1;
+}
+.user-actions .role-select select {
+  min-width: 0;
+  width: 100%;
+}
+.user-restrictions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.user-restrictions > :nth-child(2) {
+  grid-row: 2;
+}
+.user-restrictions > :nth-child(3) {
+  grid-row: 1;
+  grid-column: 2;
+}
+@media (max-width: 420px) {
+  .user-restrictions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .user-restrictions > :nth-child(n) {
+    grid-row: auto;
+    grid-column: auto;
+  }
+}
+
+.user-restrictions .button {
+  font-size: 12px;
+  min-height: 44px;
+}

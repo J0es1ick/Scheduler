@@ -187,6 +187,8 @@ type LessonView struct {
 }
 
 type UserView struct {
+	BotBlocked           bool      `json:"bot_blocked" db:"bot_blocked"`
+	SupportBlocked       bool      `json:"support_blocked" db:"support_blocked"`
 	ID                   string    `json:"id" db:"id"`
 	Username             string    `json:"username" db:"username"`
 	IsAdmin              bool      `json:"is_admin" db:"is_admin"`

@@ -36,7 +36,7 @@ func (r *ReminderRepository) ActiveRecipientsPage(
 		JOIN universities un ON un.id=g.university_id AND un.is_active
 		LEFT JOIN subscriptions s ON s.user_id=u.id
 			AND s.object_id=u.default_group_id AND s.object_type='group'
-		WHERE u.reminder_enabled
+		WHERE u.reminder_enabled AND NOT u.bot_blocked
 			AND u.default_group_id IS NOT NULL
 			AND ($1 = '' OR u.id > $1)
 		ORDER BY u.id

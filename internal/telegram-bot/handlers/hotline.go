@@ -104,6 +104,9 @@ func (h *Handler) HandleHotlineSubmission(c tele.Context, input string) error {
 	ctx, cancel := reqCtx()
 	defer cancel()
 	id, err := h.SupportRequestService.Submit(ctx, fmt.Sprint(c.Sender().ID), state.HotlineType, state.HotlineContext+details)
+	if errors.Is(err, repository.ErrSupportRequestBlocked) {
+		return nil
+	}
 	if errors.Is(err, repository.ErrSupportRequestLimit) {
 		return c.Send("У вас уже есть три открытых обращения. Дождитесь решения администратора.", hotlineCancelButton(state.FlowNonce))
 	}
