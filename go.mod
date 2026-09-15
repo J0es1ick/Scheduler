@@ -5,7 +5,7 @@ go 1.25.13
 require (
 	github.com/PuerkitoBio/goquery v1.12.0
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.10.0
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/spf13/viper v1.21.0
 	golang.org/x/image v0.45.0
