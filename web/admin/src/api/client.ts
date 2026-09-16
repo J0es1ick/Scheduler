@@ -35,7 +35,14 @@ export class APIError extends Error {
   requestID: string;
 
   constructor(status: number, message: string, code = "", requestID = "") {
-    const guidance = status === 401 ? "Сессия истекла. Войдите снова." : status === 403 ? "Нет права на это действие." : status >= 500 ? "Сервис временно недоступен. Повторите попытку." : message;
+    const guidance =
+      status === 401
+        ? "Сессия истекла. Войдите снова."
+        : status === 403
+          ? "Нет права на это действие."
+          : status >= 500
+            ? "Сервис временно недоступен. Повторите попытку."
+            : message;
     super(`${guidance}${requestID ? ` · Запрос ${requestID}` : ""}`);
     this.status = status;
     this.code = code;
@@ -129,7 +136,13 @@ export const api = {
 
   dashboard: async () => {
     const data = await request<Dashboard>("/api/dashboard");
-    return {...data, sources:data.sources ?? [], recent_logs:data.recent_logs ?? [], trend:data.trend ?? [], universities:data.universities ?? []};
+    return {
+      ...data,
+      sources: data.sources ?? [],
+      recent_logs: data.recent_logs ?? [],
+      trend: data.trend ?? [],
+      universities: data.universities ?? [],
+    };
   },
   sources: async () =>
     (await request<{ items: SourceView[] }>("/api/sources")).items,
@@ -209,8 +222,15 @@ export const api = {
       .items;
   },
   serviceLogs: async (filters: Record<string, string>) => {
-    const page = await request<ServiceLogPage>(`/api/service-logs?${new URLSearchParams(filters)}`);
-    if (!page || ![page.entries, page.components, page.modules, page.warnings].every(Array.isArray)) {
+    const page = await request<ServiceLogPage>(
+      `/api/service-logs?${new URLSearchParams(filters)}`,
+    );
+    if (
+      !page ||
+      ![page.entries, page.components, page.modules, page.warnings].every(
+        Array.isArray,
+      )
+    ) {
       throw new Error("Сервер вернул некорректный журнал. Повторите загрузку.");
     }
     return page;
@@ -233,7 +253,8 @@ export const api = {
     if (params.q) query.set("q", params.q);
     if (params.university) query.set("university", params.university);
     if (params.status) query.set("status", params.status);
-    if (params.order && params.order !== "name") query.set("order", params.order);
+    if (params.order && params.order !== "name")
+      query.set("order", params.order);
     if (params.selector) query.set("selector", "true");
     const page = await request<Page<GroupView>>(`/api/groups?${query}`);
     return { ...page, items: page.items ?? [] };
@@ -267,10 +288,20 @@ export const api = {
     request<EditorSchedule>(
       `/api/editor/schedule?group=${encodeURIComponent(groupID)}`,
     ),
-  previewEditorLesson: (lesson: LessonMutationPayload, from: string, days = 112, lessonID?: string) =>
-    request<{ dates: string[] }>("/api/editor/preview", { method: "POST", body: JSON.stringify({ lesson, from, days, lesson_id: lessonID }) }),
+  previewEditorLesson: (
+    lesson: LessonMutationPayload,
+    from: string,
+    days = 112,
+    lessonID?: string,
+  ) =>
+    request<{ dates: string[] }>("/api/editor/preview", {
+      method: "POST",
+      body: JSON.stringify({ lesson, from, days, lesson_id: lessonID }),
+    }),
   editorCalendar: (group: string, from: string, days: number) =>
-    request<{ content: string }>(`/api/editor/calendar?${new URLSearchParams({ group, from, days: String(days) })}`),
+    request<{ content: string }>(
+      `/api/editor/calendar?${new URLSearchParams({ group, from, days: String(days) })}`,
+    ),
   createEditorLesson: (lesson: LessonMutationPayload) =>
     request<{ id: string }>("/api/editor/lessons", {
       method: "POST",
@@ -292,11 +323,12 @@ export const api = {
         group_id: lesson.group_id,
       }),
     }),
-  restoreEditorLesson: (id: string) =>
+  restoreEditorLesson: (lesson: EditorLesson) =>
     request<{ status: string }>(
-      `/api/editor/lessons/${encodeURIComponent(id)}/restore`,
+      `/api/editor/lessons/${encodeURIComponent(lesson.id)}/restore`,
       {
         method: "POST",
+        body: JSON.stringify({ expected_updated_at: lesson.updated_at }),
       },
     ),
   users: async (q = "") => {
@@ -346,10 +378,18 @@ export const api = {
       credentials?: ConnectorCredentials;
       credentials_warning: string;
     }>("/api/connectors", { method: "POST", body: JSON.stringify(payload) }),
-  connectorActivation: (id: string) => request<SnapshotPreview>(`/api/connectors/${encodeURIComponent(id)}/activation`),
+  connectorActivation: (id: string) =>
+    request<SnapshotPreview>(
+      `/api/connectors/${encodeURIComponent(id)}/activation`,
+    ),
   updateConnector: (
     id: string,
-    payload: { status?: ConnectorStatus; quality_policy?: SourceQualityPolicy; snapshot_id?: string; expected_current_snapshot_id?: string },
+    payload: {
+      status?: ConnectorStatus;
+      quality_policy?: SourceQualityPolicy;
+      snapshot_id?: string;
+      expected_current_snapshot_id?: string;
+    },
   ) =>
     request<{ connector: ConnectorClient }>(
       `/api/connectors/${encodeURIComponent(id)}`,

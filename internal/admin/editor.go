@@ -290,7 +290,7 @@ func (s *Store) DeleteEditorLesson(
 	return nil
 }
 
-func (s *Store) RestoreEditorLesson(ctx context.Context, lessonID string) error {
+func (s *Store) RestoreEditorLesson(ctx context.Context, lessonID string, expectedUpdatedAt time.Time) error {
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("editor restore lesson: begin: %w", err)
@@ -298,12 +298,13 @@ func (s *Store) RestoreEditorLesson(ctx context.Context, lessonID string) error 
 	defer tx.Rollback()
 
 	var lesson struct {
-		UniversityID string `db:"university_id"`
-		GroupID      string `db:"group_id"`
-		Subject      string `db:"subject"`
+		UniversityID string    `db:"university_id"`
+		GroupID      string    `db:"group_id"`
+		Subject      string    `db:"subject"`
+		UpdatedAt    time.Time `db:"updated_at"`
 	}
 	err = tx.GetContext(ctx, &lesson, `
-		SELECT university_id, group_id, subject
+		SELECT university_id, group_id, subject, updated_at
 		FROM lesson_overrides
 		WHERE id=$1 AND base_lesson_id IS NOT NULL`, lessonID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -316,7 +317,7 @@ func (s *Store) RestoreEditorLesson(ctx context.Context, lessonID string) error 
 		return err
 	}
 	if err = tx.GetContext(ctx, &lesson, `
-		SELECT university_id, group_id, subject
+		SELECT university_id, group_id, subject, updated_at
 		FROM lesson_overrides
 		WHERE id=$1 AND base_lesson_id IS NOT NULL
 		FOR UPDATE`, lessonID); errors.Is(err, sql.ErrNoRows) {
@@ -324,15 +325,18 @@ func (s *Store) RestoreEditorLesson(ctx context.Context, lessonID string) error 
 	} else if err != nil {
 		return fmt.Errorf("editor restore lesson after publication lock: %w", err)
 	}
+	if !sameInstant(lesson.UpdatedAt, expectedUpdatedAt) {
+		return ErrConflict
+	}
 
 	result, err := tx.ExecContext(ctx, `
 		DELETE FROM lesson_overrides
-		WHERE id=$1 AND base_lesson_id IS NOT NULL`, lessonID)
+		WHERE id=$1 AND base_lesson_id IS NOT NULL AND updated_at=$2`, lessonID, expectedUpdatedAt)
 	if err != nil {
 		return fmt.Errorf("editor restore lesson: %w", err)
 	}
 	if rows, _ := result.RowsAffected(); rows == 0 {
-		return ErrNotFound
+		return ErrConflict
 	}
 	if err = enqueueManualScheduleChange(
 		tx,

@@ -75,8 +75,31 @@ func TestEditorSQLPreservesRecurrenceAcrossOverrideUpdates(t *testing.T) {
 		if !reflect.DeepEqual(expected, after.Lessons[0].Recurrence) || after.Lessons[0].Room != room {
 			t.Fatal("override changed recurrence or lost edit")
 		}
+		if err = store.RestoreEditorLesson(ctx, after.Lessons[0].ID, lesson.UpdatedAt); !errors.Is(err, ErrConflict) {
+			t.Fatalf("stale restore must preserve the newer override: %v", err)
+		}
 		if _, err = store.UpdateEditorLesson(ctx, "synthetic", "missing-"+id, lesson.UpdatedAt, mutation); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("missing lesson must remain not found, got %v", err)
 		}
+	}
+	after, err := store.EditorSchedule(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Lessons[0].Room != "A-202" {
+		t.Fatal("stale restore discarded the newer edit")
+	}
+	if err = store.RestoreEditorLesson(ctx, after.Lessons[0].ID, after.Lessons[0].UpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.RestoreEditorLesson(ctx, after.Lessons[0].ID, after.Lessons[0].UpdatedAt); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("repeated restore: %v", err)
+	}
+	after, err = store.EditorSchedule(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Lessons[0].Origin != "parsed" || !reflect.DeepEqual(expected, after.Lessons[0].Recurrence) {
+		t.Fatal("restore did not return the original recurrence")
 	}
 }

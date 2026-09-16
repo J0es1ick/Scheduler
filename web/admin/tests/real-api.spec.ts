@@ -92,6 +92,52 @@ test("real API: mobile edit preserves cycle, preview, conflict recovery and logo
   );
   expect(calendar.ok()).toBe(true);
   expect((await calendar.json()).content).toContain("20260916");
+  const manual = after.lessons[0];
+  const restoreURL = `/api/editor/lessons/${encodeURIComponent(manual.id)}/restore`;
+  expect(
+    (
+      await page.request.post(restoreURL, {
+        headers: { "X-CSRF-Token": identity.user.csrf_token },
+        data: {},
+      })
+    ).status(),
+  ).toBe(400);
+  await page
+    .getByRole("button", { name: "Вернуть с сайта", exact: true })
+    .click();
+  const changed = await page.request.put(
+    `/api/editor/lessons/${encodeURIComponent(manual.id)}`,
+    {
+      headers: { "X-CSRF-Token": identity.user.csrf_token },
+      data: {
+        ...payload,
+        room: "Правка перед восстановлением",
+        expected_updated_at: manual.updated_at,
+      },
+    },
+  );
+  expect(changed.ok(), await changed.text()).toBe(true);
+  await page.getByRole("button", { name: "Восстановить", exact: true }).click();
+  await expect(
+    page.getByText(
+      "Занятие изменено другим администратором. Проверьте новую версию перед восстановлением.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const kept = await (
+    await page.request.get("/api/editor/schedule?group=release-group")
+  ).json();
+  expect(kept.lessons[0].room).toBe("Правка перед восстановлением");
+  await page
+    .getByRole("button", { name: "Вернуть с сайта", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Восстановить", exact: true }).click();
+  await expect(page.getByText("Версия с сайта восстановлена")).toBeVisible();
+  const restored = await (
+    await page.request.get("/api/editor/schedule?group=release-group")
+  ).json();
+  expect(restored.lessons[0].origin).toBe("parsed");
+  expect(restored.lessons[0].recurrence).toEqual(original.recurrence);
   await page.getByRole("button", { name: "Выйти", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Вход в админку" }),

@@ -121,9 +121,21 @@ func (s *Server) handleDeleteEditorLesson(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleRestoreEditorLesson(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		ExpectedUpdatedAt string `json:"expected_updated_at"`
+	}
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "Некорректный запрос")
+		return
+	}
+	expected, err := parseExpectedTime(request.ExpectedUpdatedAt)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "Запись была загружена некорректно; обновите страницу")
+		return
+	}
 	identity := identityFromContext(r.Context())
 	lessonID := r.PathValue("id")
-	if err := s.store.RestoreEditorLesson(r.Context(), lessonID); err != nil {
+	if err := s.store.RestoreEditorLesson(r.Context(), lessonID, expected); err != nil {
 		writeEditorError(w, err)
 		return
 	}

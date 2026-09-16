@@ -162,11 +162,20 @@ export function useScheduleEditor(
     if (!restoreTarget) return;
     setBusy(true);
     try {
-      await api.restoreEditorLesson(restoreTarget.id);
+      await api.restoreEditorLesson(restoreTarget);
       notify("Версия с сайта восстановлена");
       setRestoreTarget(null);
       await schedule.reload();
     } catch (caught) {
+      if (caught instanceof APIError && caught.status === 409) {
+        setRestoreTarget(null);
+        await schedule.reload();
+        notify(
+          "Занятие изменено другим администратором. Проверьте новую версию перед восстановлением.",
+          "error",
+        );
+        return;
+      }
       notify(
         caught instanceof Error
           ? caught.message
