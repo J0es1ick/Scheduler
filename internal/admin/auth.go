@@ -152,22 +152,37 @@ func (a *AuthManager) IssueSession(w http.ResponseWriter, identity AdminIdentity
 		a.sessions[token] = session{identity: identity, expires: expires}
 		a.mu.Unlock()
 	}
+	partitioned := identity.AuthMethod == "telegram" && a.cookieSecure
+	sameSite := http.SameSiteStrictMode
+	if partitioned {
+		sameSite = http.SameSiteNoneMode
+	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     adminSessionCookie,
-		Value:    token,
-		Path:     "/",
-		MaxAge:   int(a.ttl.Seconds()),
-		HttpOnly: true,
-		Secure:   a.cookieSecure,
-		SameSite: http.SameSiteStrictMode,
+		Name:        adminSessionCookie,
+		Value:       token,
+		Path:        "/",
+		MaxAge:      int(a.ttl.Seconds()),
+		HttpOnly:    true,
+		Secure:      a.cookieSecure,
+		SameSite:    sameSite,
+		Partitioned: partitioned,
 	})
+	if partitioned {
+		http.SetCookie(w, &http.Cookie{
+			Name: adminSessionCookie, Path: "/", MaxAge: -1,
+			HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
+		})
+	}
 	return identity, nil
 }
 
 func (a *AuthManager) Logout(w http.ResponseWriter, r *http.Request) error {
-	if cookie, err := r.Cookie(adminSessionCookie); err == nil {
+	for _, cookie := range r.Cookies() {
+		if cookie.Name != adminSessionCookie {
+			continue
+		}
 		if a.persistence != nil {
-			if err = a.persistence.DeleteAdminSession(r.Context(), tokenHash(cookie.Value)); err != nil {
+			if err := a.persistence.DeleteAdminSession(r.Context(), tokenHash(cookie.Value)); err != nil {
 				return fmt.Errorf("delete admin session: %w", err)
 			}
 		} else {
@@ -185,6 +200,12 @@ func (a *AuthManager) Logout(w http.ResponseWriter, r *http.Request) error {
 		Secure:   a.cookieSecure,
 		SameSite: http.SameSiteStrictMode,
 	})
+	if a.cookieSecure {
+		http.SetCookie(w, &http.Cookie{
+			Name: adminSessionCookie, Path: "/", MaxAge: -1,
+			HttpOnly: true, Secure: true, SameSite: http.SameSiteNoneMode, Partitioned: true,
+		})
+	}
 	return nil
 }
 

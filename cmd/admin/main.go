@@ -102,7 +102,7 @@ func main() {
 		os.Exit(1)
 	}
 	if !auth.AccessKeyEnabled() {
-		logger.Warn("ADMIN_ACCESS_TOKEN is empty; standalone access-key login is disabled")
+		logger.Info("standalone access-key login is disabled")
 	}
 
 	httpServer := &http.Server{

@@ -137,6 +137,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          (cd ../.. && SCHEDULER_BROWSER_TEST=1 go test ./internal/admin -run '^TestTelegramFrameBrowser$' -v)
           (cd ../.. && RELEASE_BROWSER_FIXTURE=1 go test -tags integration ./internal/admin -run '^TestReleaseBrowserFixture$' -v -timeout 20m) > "$RUNNER_TEMP/browser-fixture.log" 2>&1 &
           fixture_pid=$!
           trap 'kill "$fixture_pid" 2>/dev/null || true; cat "$RUNNER_TEMP/browser-fixture.log"' EXIT

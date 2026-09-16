@@ -134,6 +134,53 @@ func TestTelegramSessionRechecksAdminRole(t *testing.T) {
 	}
 }
 
+func TestTelegramCookieSupportsFramesAndRequiresCSRF(t *testing.T) {
+	auth := NewAuthManager("bot-token", "", false, true)
+	checker := &telegramAdminCheckerStub{isAdmin: true}
+	login := httptest.NewRecorder()
+	identity, err := auth.IssueSession(login, AdminIdentity{ID: "42", AuthMethod: "telegram"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := login.Result().Cookies()[0]
+	if !cookie.Secure || !cookie.HttpOnly || !cookie.Partitioned || cookie.SameSite != http.SameSiteNoneMode {
+		t.Fatalf("Telegram iframe cookie policy: %+v", cookie)
+	}
+	cleared := login.Result().Cookies()[1]
+	if cleared.Partitioned || cleared.MaxAge >= 0 || cleared.Name != cookie.Name {
+		t.Fatal("legacy unpartitioned session cookie must be removed on login")
+	}
+	protected := auth.Require(checker, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := auth.Logout(w, r); err != nil {
+			t.Fatal(err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	for _, csrf := range []string{"", "wrong", identity.CSRFToken} {
+		r := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+		r.AddCookie(cookie)
+		r.Header.Set("X-CSRF-Token", csrf)
+		w := httptest.NewRecorder()
+		protected.ServeHTTP(w, r)
+		if csrf != identity.CSRFToken {
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("missing/invalid CSRF accepted: %d", w.Code)
+			}
+			continue
+		}
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("logout status: %d", w.Code)
+		}
+		cookies := w.Result().Cookies()
+		if len(cookies) != 2 || !cookies[1].Partitioned || cookies[1].MaxAge >= 0 {
+			t.Fatalf("partitioned cookie not removed: %+v", cookies)
+		}
+		if _, err := auth.identityForRequest(r); !errors.Is(err, ErrUnauthorized) {
+			t.Fatalf("old cookie accepted: %v", err)
+		}
+	}
+}
+
 func TestSessionStoreIsBounded(t *testing.T) {
 	auth := NewAuthManager("bot-token", "access-key", true, true)
 	auth.maxSessions = 2
