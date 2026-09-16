@@ -86,9 +86,14 @@ func ApplyMigrations(ctx context.Context, db *sqlx.DB) error {
 					return fmt.Errorf("record checksum for legacy migration %s: %w", name, err)
 				}
 			} else if storedChecksum != checksum {
-				return fmt.Errorf(
-					"migration %s checksum mismatch: applied migration was modified", name,
-				)
+				if !appmigration.IsKnownLegacyChecksum(name, checksum, storedChecksum) {
+					return fmt.Errorf("migration %s checksum mismatch: applied migration was modified", name)
+				}
+				if _, err = lockConn.ExecContext(ctx,
+					`UPDATE schema_migrations SET checksum=$2 WHERE name=$1 AND checksum=$3`, name, checksum, storedChecksum,
+				); err != nil {
+					return fmt.Errorf("canonicalize checksum for migration %s: %w", name, err)
+				}
 			}
 			continue
 		}

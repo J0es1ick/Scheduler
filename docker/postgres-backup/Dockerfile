@@ -15,6 +15,10 @@ COPY docker/postgres-bootstrap/bootstrap.sh /usr/local/bin/scheduler-postgres-bo
 COPY docker/postgres-backup/staging-tests.sh /usr/local/bin/scheduler-staging-tests
 COPY migration /app/migrations
 
+RUN if LC_ALL=C grep -l "$(printf '\r')" /app/migrations/*.up.sql; then \
+      echo "SQL migrations must use LF line endings" >&2; exit 1; \
+    fi
+
 RUN chmod 0444 /usr/local/lib/scheduler-backup-generation-lib.sh /usr/local/lib/scheduler-backup-lib.sh /usr/local/lib/scheduler-restore-lib.sh \
     && chmod 0555 /usr/local/bin/scheduler-backup-loop /usr/local/bin/scheduler-backup-tests /usr/local/bin/scheduler-verify-backup /usr/local/bin/scheduler-restore-backup /usr/local/bin/scheduler-backup-health /usr/local/bin/scheduler-backup-preflight /usr/local/bin/scheduler-postgres-bootstrap \
     && find /app/migrations -type d -exec chmod 0555 {} + \

@@ -279,6 +279,46 @@ func TestApplyMigrationsRejectsChecksumMismatch(t *testing.T) {
 	}
 }
 
+func TestApplyMigrationsCanonicalizesKnown054Checksum(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	db, cleanup := isolatedMigrationSchema(t, ctx, os.Getenv("TEST_DATABASE_URL"))
+	defer cleanup()
+	if err := ApplyMigrations(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	const name = "054_user_restrictions.up.sql"
+	const legacy = "0ce162f6aa7c25253e7b294c5e9b438de9e349df9d128ce9930cfb747b370485"
+	var appliedAt time.Time
+	if err := db.GetContext(ctx, &appliedAt, `SELECT applied_at FROM schema_migrations WHERE name=$1`, name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE schema_migrations SET checksum=$2 WHERE name=$1`, name, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyMigrations(ctx, db); err == nil {
+		t.Fatal("runtime must require the migrator before using legacy metadata")
+	}
+	for range 2 {
+		if err := ApplyMigrations(ctx, db); err != nil {
+			t.Fatal(err)
+		}
+		if err := VerifyMigrations(ctx, db); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var unchanged bool
+	if err := db.GetContext(ctx, &unchanged, `SELECT applied_at=$2 FROM schema_migrations WHERE name=$1`, name, appliedAt); err != nil || !unchanged {
+		t.Fatalf("canonicalization reran migration: %t %v", unchanged, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE schema_migrations SET checksum='tampered' WHERE name=$1`, name); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyMigrations(ctx, db); err == nil {
+		t.Fatal("arbitrary 054 drift was accepted")
+	}
+}
+
 func TestApplyMigrationsRejectsPartialLegacyBaseline(t *testing.T) {
 	databaseURL := os.Getenv("TEST_DATABASE_URL")
 	if databaseURL == "" {

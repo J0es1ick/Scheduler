@@ -28,6 +28,7 @@ RUN set -eu; \
 COPY . .
 COPY --from=admin-web-builder /src/internal/adminui/dist ./internal/adminui/dist
 COPY --from=site-web-builder /src/internal/siteui/dist ./internal/siteui/dist
+RUN go test ./migration
 RUN LDFLAGS="-s -w -X github.com/J0es1ick/Scheduler/internal/buildinfo.Version=${VERSION} -X github.com/J0es1ick/Scheduler/internal/buildinfo.Commit=${COMMIT} -X github.com/J0es1ick/Scheduler/internal/buildinfo.BuildTime=${BUILD_TIME}" \
     && CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o /out/scheduler-bot ./cmd/bot \
     && CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o /out/scheduler-admin ./cmd/admin \

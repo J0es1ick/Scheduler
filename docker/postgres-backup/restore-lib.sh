@@ -11,6 +11,7 @@ validate_migration_manifest_files() {
       expected_count++
       expected_name[expected_count] = $1
       expected_checksum[expected_count] = $2
+      legacy_checksum[expected_count] = $3
       next
     }
     {
@@ -23,7 +24,8 @@ validate_migration_manifest_files() {
       if ($1 != expected_name[restored_count]) {
         printf "migration sequence mismatch at position %d: expected %s, restored %s\n", restored_count, expected_name[restored_count], $1 > "/dev/stderr"
         failed = 1
-      } else if (verify_checksums == "true" && $2 != expected_checksum[restored_count]) {
+      } else if (verify_checksums == "true" && $2 != expected_checksum[restored_count] &&
+                 (legacy_checksum[restored_count] == "" || $2 != legacy_checksum[restored_count])) {
         printf "migration checksum mismatch: %s\n", $1 > "/dev/stderr"
         failed = 1
       }
@@ -51,7 +53,11 @@ write_expected_migration_manifest() {
     }
     name="$(basename "$migration")"
     digest="$(sha256sum "$migration" | awk '{print $1}')"
-    printf '%s|%s\n' "$name" "$digest" >> "$temporary"
+    legacy=""
+    if [ -f "$migrations_path/checksum-aliases.txt" ]; then
+      legacy="$(awk -F '|' -v name="$name" -v digest="$digest" '$1 == name && $2 == digest {gsub(/\r/, "", $3); print $3}' "$migrations_path/checksum-aliases.txt")"
+    fi
+    printf '%s|%s|%s\n' "$name" "$digest" "$legacy" >> "$temporary"
   done
   sort "$temporary" > "$output"
   rm -f "$temporary"

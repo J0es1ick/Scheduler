@@ -201,6 +201,14 @@ manifest_work=/tmp/backup-test-manifest
 rm -rf "$manifest_work"
 mkdir -p "$manifest_work/backups"
 . "$restore_library"
+write_expected_migration_manifest /app/migrations "$manifest_work/current"
+awk -F '|' 'BEGIN {OFS="|"} {print $1, $3 == "" ? $2 : $3}' "$manifest_work/current" > "$manifest_work/known-legacy"
+validate_migration_manifest_files "$manifest_work/current" "$manifest_work/known-legacy" true ||
+  fail "known historic CRLF migration checksum was rejected"
+sed 's/0ce162f6aa7c25253e7b294c5e9b438de9e349df9d128ce9930cfb747b370485/tampered/' "$manifest_work/known-legacy" > "$manifest_work/tampered-legacy"
+if validate_migration_manifest_files "$manifest_work/current" "$manifest_work/tampered-legacy" true; then
+  fail "arbitrary legacy migration checksum was accepted"
+fi
 printf '%s\n' '001_first.up.sql|aaa' '002_second.up.sql|bbb' '003_third.up.sql|ccc' > "$manifest_work/expected"
 printf '%s\n' '001_first.up.sql|aaa' '002_second.up.sql|bbb' > "$manifest_work/older"
 validate_migration_manifest_files "$manifest_work/expected" "$manifest_work/older" true ||
