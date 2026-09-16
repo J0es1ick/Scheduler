@@ -235,7 +235,7 @@ test("integration wizard makes the managed parser the serverless default", async
   expect(createdParser).toBe("ivgpu");
 });
 
-test("group search keeps the editor visible and confirms a manual change", async ({
+test("group search preserves unsaved edits on Back and confirms a manual change", async ({
   page,
 }) => {
   await mockAuthenticated(page);
@@ -319,7 +319,9 @@ test("group search keeps the editor visible and confirms a manual change", async
     await json(route, { id: "lesson-0" });
   });
 
-  await page.goto("/#/editor");
+  await page.route("**/api/dashboard", (route) => json(route, dashboard));
+  await page.goto("/#/overview");
+  await page.getByRole("button", { name: "Редактор", exact: true }).click();
   await page.getByPlaceholder("Введите номер или часть названия").fill("3ю");
   await page.getByRole("option", { name: /3ю-1/ }).click();
 
@@ -332,10 +334,30 @@ test("group search keeps the editor visible and confirms a manual change", async
   await page.getByRole("button", { name: "Редактировать" }).first().click();
   await expectViewportDialog(page);
   await page.getByLabel("Предмет").fill("Обновлённый предмет");
+  const rejected = new Promise<void>((resolve) =>
+    page.once("dialog", async (dialog) => {
+      expect(dialog.type()).toBe("confirm");
+      await dialog.dismiss();
+      resolve();
+    }),
+  );
+  await page.goBack();
+  await rejected;
+  await expect(page).toHaveURL(/#\/editor$/);
+  await expect(page.getByLabel("Предмет")).toHaveValue("Обновлённый предмет");
   await page.getByRole("button", { name: "Проверить изменения" }).click();
   await page.getByRole("button", { name: "Подтвердить и применить" }).click();
 
   await expect(page.getByText("Занятие обновлено")).toBeVisible();
+  expect(updateRequests).toBe(1);
+  await page.getByRole("button", { name: "Редактировать" }).first().click();
+  await page
+    .getByRole("textbox", { name: "Предмет", exact: true })
+    .fill("Несохранённое изменение");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.goBack();
+  await expect(page).toHaveURL(/#\/overview$/);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   expect(updateRequests).toBe(1);
 });
 

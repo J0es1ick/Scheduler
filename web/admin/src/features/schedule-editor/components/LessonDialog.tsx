@@ -1,4 +1,5 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
+import { useUnsavedChanges } from "../../../hooks/useUnsavedChanges";
 import { Check, X } from "lucide-react";
 import { api } from "../../../api";
 import { DialogPortal } from "../../../components";
@@ -50,18 +51,7 @@ export function LessonDialog({
   );
   const dirty = JSON.stringify(form) !== initial;
 
-  useEffect(() => {
-    const guard = (event: BeforeUnloadEvent) => {
-      if (!dirty) return;
-      event.preventDefault();
-    };
-    if (dirty) window.Telegram?.WebApp?.enableClosingConfirmation?.();
-    window.addEventListener("beforeunload", guard);
-    return () => {
-      window.removeEventListener("beforeunload", guard);
-      window.Telegram?.WebApp?.disableClosingConfirmation?.();
-    };
-  }, [dirty]);
+  const canClose = useUnsavedChanges(dirty);
 
   function patch<K extends keyof LessonForm>(key: K, value: LessonForm[K]) {
     setPreview(null);
@@ -120,7 +110,7 @@ export function LessonDialog({
     }
   }
   function close() {
-    if (dirty && !window.confirm("Закрыть форму без сохранения?")) return;
+    if (!canClose()) return;
     onClose();
   }
 
