@@ -51,6 +51,7 @@ def validate_snapshot(snapshot: dict) -> None:
     if schedule_url:
         try:
             parsed_url = urlsplit(schedule_url)
+            parsed_url.port
             if parsed_url.scheme not in {"http", "https"} or not parsed_url.hostname or re.search(r"[\s\x00-\x1f]", schedule_url) or re.search(r"%(?![0-9A-Fa-f]{2})", schedule_url):
                 raise ValueError()
         except (ValueError, TypeError):

@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -110,8 +111,12 @@ func validateInstitution(value Institution, add func(string, ...any)) {
 	}
 	if value.ScheduleURL != "" {
 		parsed, err := url.ParseRequestURI(value.ScheduleURL)
-		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		if err != nil || parsed.Hostname() == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 			add("institution.schedule_url must be an absolute HTTP(S) URL")
+		} else if port := parsed.Port(); port != "" {
+			if number, err := strconv.Atoi(port); err != nil || number < 0 || number > 65535 {
+				add("institution.schedule_url port must be between 0 and 65535")
+			}
 		}
 	}
 }
