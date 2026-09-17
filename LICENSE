@@ -1,0 +1,177 @@
+Scheduler Source Review and Contribution License
+Version 1.0, 17 September 2026
+
+Copyright (c) 2026 Yury Kremnev and the respective contributors.
+
+Official repository: https://github.com/J0es1ick/Scheduler
+Original Author: Yury Kremnev (https://github.com/J0es1ick)
+
+This is a custom proprietary license with source code available for review and
+contribution. It is not an Open Source Initiative approved license. All rights
+not expressly granted are reserved, subject to applicable law and the separate
+rights described below.
+
+1. Scope and definitions
+
+"Software" means the original Scheduler code, documentation, SDKs, scripts,
+interfaces, and other materials provided under this license, including covered
+portions of modified versions. It covers only materials that the relevant
+copyright holders have authority to license. Third-party materials are governed
+by Section 7.
+
+"Author" means Yury Kremnev, identified above.
+
+"Official Service" means the Scheduler service operated and controlled by the
+Author, including its bot, website, administrative application, integrations,
+and supporting infrastructure. Multiple components or processes operated for
+that service do not constitute independent services.
+
+"Local Development" means inspecting, modifying, building, and testing the
+Software on computers under your control solely to investigate issues in the
+official project or prepare, review, and propose contributions to it. Test
+instances must be isolated from public access and may not serve as an actual
+scheduling service for you or other end users. Operating a personal schedule
+bot is not Local Development merely because it runs on your computer.
+
+"Contribution" means code, a parser, an integration, documentation, a patch, or
+other material intentionally submitted for inclusion in the official project.
+
+2. Permissions for review and contribution
+
+Subject to this license, you may without payment or individual approval:
+
+(a) read and inspect the Software, including its core, and keep local copies
+    for study and Local Development;
+
+(b) modify, compile, and run local test copies only for Local Development,
+    including developing and testing proposed parsers and integrations;
+
+(c) submit proposals through issues and pull requests in the official
+    repository, and share the source patches and branches necessary for their
+    review through that contribution workflow;
+
+(d) create and maintain source forks on GitHub and exercise the separate
+    platform rights preserved in Section 6. A source fork is not permission
+    to operate an independent service or distribute an operational release.
+
+You may prepare and test a proposal before opening a pull request. Keep this
+license and the applicable copyright and attribution notices in copies and
+submitted changes. Clearly identify changed files and proposed versions. Do
+not present a proposal as an official or approved release, and do not grant
+recipients rights to the Software beyond those you possess.
+
+3. No independent operational use
+
+Except for the Author's rights and the permissions expressly preserved in this
+license, no permission is granted to:
+
+(a) run the Software as a personal, household, educational, organizational,
+    internal, or commercial scheduling tool or service, even locally;
+
+(b) deploy or make available a public, private, hosted, or self-hosted instance,
+    including a separate bot, website, administrative application, or service;
+
+(c) sell, rent, sublicense, or offer the Software as a product or service, or
+    distribute releases, executable builds, container images, installation
+    packages, or source copies for independent operational use;
+
+(d) incorporate covered Software into another operational product or service,
+    or use a modification or parser as a way to operate an independent copy.
+
+These restrictions apply to unchanged and modified copies alike, whether use
+is paid or free, commercial or noncommercial. Local test builds are allowed
+only for the purpose stated in Section 2. Public source forks and contribution
+patches remain subject to Sections 2 and 6.
+
+4. The Author and the Official Service
+
+The Author retains the right to develop, deploy, operate, and commercially
+exploit the Official Service, subject to third-party rights. Under this license,
+operational deployments are reserved to the Author. A person expressly
+authorized in writing to operate infrastructure on the Author's behalf may do
+so solely for the Author-controlled Official Service, not as an independent
+service. No general authorization is given to repository contributors.
+
+The Author alone decides whether to accept a pull request, parser, integration,
+or other change and whether to publish or deploy it. Submission, successful
+automated checks, silence, acceptance, or merging does not give a contributor
+permission to operate a copy for personal or commercial purposes. Acceptance
+is not a promise of deployment, support, payment, or service access.
+
+These restrictions do not prohibit ordinary end users from accessing the
+Official Service under its applicable terms. You may run client-side code
+delivered by that service as needed to use its interfaces. This permission does
+not authorize copying or hosting its server or client application as a separate
+service. Deployment instructions and technical access do not grant operational
+rights under this license.
+
+5. Contributions
+
+You retain copyright in your original Contribution. By intentionally submitting
+it for inclusion, you grant the Author a nonexclusive, worldwide, royalty-free,
+perpetual, and irrevocable copyright license, to the extent you own or may
+license it, to reproduce, modify, make derivative works of, incorporate, and
+distribute it as part of the Software under this license, and to use and operate
+it in the Official Service, including commercially. The Author may permit
+service providers to exercise these rights solely on the Author's behalf for
+that service, subject to the same restrictions on independent use.
+
+This grant does not transfer ownership of your Contribution and does not give
+you additional rights to the rest of the Software. It does not grant a blanket
+right to relicense your Contribution under unrelated terms. Identify third-party
+materials and their licenses when submitting them, and submit only material you
+are entitled to license. A separate written contribution agreement takes
+precedence where applicable. Rights granted to GitHub users remain preserved.
+
+6. Public GitHub repositories and separate permissions
+
+Nothing in this license restricts rights independently granted to GitHub or its
+users under the applicable GitHub Terms of Service. These include viewing and
+forking public repositories and other uses permitted by GitHub's functionality
+under those terms. Public source forks therefore remain possible even though
+this license does not authorize an independently operated Scheduler service.
+
+Rights arising under applicable law, other licenses, or separate agreements
+remain unaffected. This license does not withdraw rights already obtained
+under an earlier license. The Author may grant additional rights in a separate
+written agreement; approval of a pull request is not such an agreement.
+
+7. Third-party rights and attribution
+
+Dependencies, third-party code, fonts, images, and other separately licensed
+materials remain governed by their respective licenses. This license does not
+replace those licenses or restrict rights granted directly by their owners.
+Nor does it restrict your independent rights to code you own or to programs
+that do not copy or derive from covered Software merely because they use a
+compatible interface. No ownership of university schedules or user data is
+claimed here.
+
+Keep applicable license, copyright, and attribution notices. Do not represent
+an unofficial copy or proposal as the Official Service or as endorsed by the
+Author without permission. No trademark rights are granted beyond truthful
+identification permitted by law.
+
+8. Warranty and liability
+
+The Software is provided without promises of fitness, availability, accuracy,
+security, or uninterrupted operation. To the maximum extent permitted by law,
+the copyright holders and contributors disclaim warranties, whether express,
+implied, or statutory, and are not liable for losses or damages arising from
+the Software or its use. This does not exclude liability that applicable law
+does not allow to be excluded.
+
+9. Compliance and revisions
+
+Permissions under this license are conditional on compliance. If the Author
+gives you written notice of a material breach and you do not remedy it within
+30 days of receiving that notice, these permissions terminate. This remedy
+period does not authorize otherwise prohibited use. Termination does not affect
+rights you hold independently under law, other licenses, or platform terms.
+
+Nothing here restricts rights or exceptions that applicable law does not allow
+a license to restrict. If a provision is unenforceable, the remaining provisions
+continue to apply to the extent permitted by law.
+
+A later revision does not retroactively replace the terms for copies received
+under this version. Permissions beyond this license require a separate valid
+grant from a person entitled to provide them.
