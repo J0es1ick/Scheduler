@@ -60,10 +60,12 @@ type parserSnapshotRow struct {
 	ReviewedAt   *time.Time `db:"reviewed_at"`
 }
 
-const parserSnapshotColumns = `
+const parserSnapshotMetadataColumns = `
 	id, data_source_id, parse_log_id, status, publishable,
-	group_count, lesson_count, anomaly_reasons, payload,
+	group_count, lesson_count, anomaly_reasons,
 	reviewed_by, review_note, created_at, published_at, reviewed_at`
+
+const parserSnapshotColumns = parserSnapshotMetadataColumns + ", payload"
 
 func (r *ParserSnapshotRepository) Create(ctx context.Context, snapshot *domain.ParserSnapshot) error {
 	reasons, err := json.Marshal(snapshot.AnomalyReasons)
@@ -128,7 +130,7 @@ func (r *ParserSnapshotRepository) List(
 	query := fmt.Sprintf(`
 		SELECT %s FROM parser_snapshots
 		WHERE %s ORDER BY created_at DESC LIMIT $%d`,
-		parserSnapshotColumns, where, len(args))
+		parserSnapshotMetadataColumns, where, len(args))
 	if err := r.db.SelectContext(ctx, &rows, query, args...); err != nil {
 		return nil, fmt.Errorf("list parser snapshots: %w", err)
 	}
@@ -138,7 +140,6 @@ func (r *ParserSnapshotRepository) List(
 		if err != nil {
 			return nil, err
 		}
-		item.Payload = domain.ScheduleSnapshot{}
 		items = append(items, *item)
 	}
 	return items, nil
