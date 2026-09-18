@@ -55,11 +55,14 @@ export function SourcesPage({
   notify: (text: string, tone?: ToastMessage["tone"]) => void;
   canOperate?: boolean;
 }) {
-  const { data, loading, error, reload } = useRemote(
-    async () => ({
-      sources: await api.sources(),
-      snapshots: await api.parserSnapshots("", ""),
-    }),
+  const { data, loading, error, reload: reloadSources } = useRemote(api.sources, []);
+  const {
+    data: snapshots,
+    loading: snapshotsLoading,
+    error: snapshotsError,
+    reload: reloadSnapshots,
+  } = useRemote(
+    () => api.parserSnapshots("", ""),
     [],
   );
   const [busy, setBusy] = useState("");
@@ -82,7 +85,7 @@ export function SourcesPage({
     "active",
   );
 
-  const allSources = data?.sources ?? [];
+  const allSources = data ?? [];
   const activeSources = allSources.filter(
     (source) => source.lifecycle_status !== "archived",
   );
@@ -91,6 +94,10 @@ export function SourcesPage({
   );
   const visibleSources =
     listView === "archived" ? archivedSources : activeSources;
+
+  async function reload() {
+    await Promise.all([reloadSources(), reloadSnapshots()]);
+  }
 
   async function sync(id: string) {
     setBusy(id);
@@ -191,8 +198,8 @@ export function SourcesPage({
   }
 
   async function publishSnapshot(id: string) {
-    const snapshot = data?.snapshots.find((item) => item.id === id);
-    const source = data?.sources.find(
+    const snapshot = snapshots?.find((item) => item.id === id);
+    const source = data?.find(
       (item) => item.id === snapshot?.data_source_id,
     );
     const approvalOnly = source?.lifecycle_status !== "active";
@@ -363,6 +370,17 @@ export function SourcesPage({
         </button>
       </div>
 
+      {error && <ErrorBlock message={error} retry={reloadSources} />}
+      {snapshotsLoading && !snapshots && (
+        <p role="status">Снимки расписания загружаются…</p>
+      )}
+      {snapshotsError && (
+        <ErrorBlock
+          message={`Снимки расписания: ${snapshotsError}`}
+          retry={reloadSnapshots}
+        />
+      )}
+
       <nav className="lifecycle-tabs" aria-label="Состояние источников">
         <button
           className={listView === "active" ? "is-active" : ""}
@@ -397,7 +415,7 @@ export function SourcesPage({
           const archived = source.lifecycle_status === "archived";
           const externalConnector = source.adapter_type === "external_push";
           const reviewable =
-            data?.snapshots.filter(
+            snapshots?.filter(
               (snapshot) =>
                 snapshot.data_source_id === source.id &&
                 (snapshot.status === "quarantined" ||

@@ -51,6 +51,7 @@ export class APIError extends Error {
 }
 
 let csrfToken = "";
+const requestTimeoutMS = 25_000;
 
 export function getCSRFToken(): string {
   return csrfToken;
@@ -64,34 +65,59 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers.set("X-CSRF-Token", csrfToken);
   }
 
-  const response = await fetch(path, {
-    ...options,
-    headers,
-    credentials: "include",
-  });
-  if (response.status === 401 && !path.startsWith("/api/auth/")) {
-    window.dispatchEvent(new CustomEvent("scheduler:session-expired"));
-  }
-  if (!response.ok) {
-    let message = `Ошибка ${response.status}`;
-    let code = "";
-    let requestID = response.headers.get("X-Request-ID") ?? "";
-    try {
-      const payload = (await response.json()) as {
-        error?: string;
-        code?: string;
-        request_id?: string;
-      };
-      if (payload.error) message = payload.error;
-      if (payload.code) code = payload.code;
-      if (payload.request_id) requestID = payload.request_id;
-    } catch {
-      // Апи всё ещё может возвращать пустой ответ для ошибок уровня прокси.
+  const controller = new AbortController();
+  let timedOut = false;
+  let requestID = "";
+  const abortFromCaller = () => controller.abort();
+  if (options.signal?.aborted) abortFromCaller();
+  else options.signal?.addEventListener("abort", abortFromCaller, { once: true });
+  const timer = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, requestTimeoutMS);
+
+  try {
+    const response = await fetch(path, {
+      ...options,
+      headers,
+      credentials: "include",
+      signal: controller.signal,
+    });
+    requestID = response.headers.get("X-Request-ID") ?? "";
+    if (response.status === 401 && !path.startsWith("/api/auth/")) {
+      window.dispatchEvent(new CustomEvent("scheduler:session-expired"));
     }
-    throw new APIError(response.status, message, code, requestID);
+    if (!response.ok) {
+      let message = `Ошибка ${response.status}`;
+      let code = "";
+      try {
+        const payload = (await response.json()) as {
+          error?: string;
+          code?: string;
+          request_id?: string;
+        };
+        if (payload.error) message = payload.error;
+        if (payload.code) code = payload.code;
+        if (payload.request_id) requestID = payload.request_id;
+      } catch {
+        // Апи всё ещё может возвращать пустой ответ для ошибок уровня прокси.
+      }
+      throw new APIError(response.status, message, code, requestID);
+    }
+    if (response.status === 204) return undefined as T;
+    return (await response.json()) as T;
+  } catch (caught) {
+    if (timedOut) {
+      const recovery = ["GET", "HEAD", "OPTIONS"].includes(method)
+        ? "Повторите загрузку."
+        : "Проверьте результат перед повтором действия.";
+      throw new APIError(408, `Сервер не ответил за 25 секунд. ${recovery}`, "request_timeout", requestID);
+    }
+    throw caught;
+  } finally {
+    window.clearTimeout(timer);
+    options.signal?.removeEventListener("abort", abortFromCaller);
   }
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
 }
 
 function rememberUser(user: AdminIdentity): AdminIdentity {
