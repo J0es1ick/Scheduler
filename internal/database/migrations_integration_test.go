@@ -76,6 +76,9 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 	if _, err = db.ExecContext(ctx, "GRANT SELECT ON lessons TO "+pgx.Identifier{privacyRole}.Sanitize()); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = db.ExecContext(ctx, "GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO PUBLIC"); err != nil {
+		t.Fatal(err)
+	}
 	if err = ApplyRuntimeGrants(ctx, db, botRole, adminRole, parserRole, privacyRole); err != nil {
 		t.Fatal(err)
 	}
@@ -155,6 +158,10 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 		{botRole, "scheduler_lock_privacy_deletion_request(text,text)", false},
 		{adminRole, "scheduler_lock_privacy_deletion_request(text,text)", false},
 		{parserRole, "scheduler_lock_privacy_deletion_request(text,text)", false},
+		{botRole, "execute_privacy_deletion(text,text)", false},
+		{adminRole, "execute_privacy_deletion(text,text)", false},
+		{parserRole, "execute_privacy_deletion(text,text)", false},
+		{botRole, "scheduler_anonymize_audit_json(jsonb,text,text)", false},
 		{adminRole, "enqueue_schedule_change(text,text,text,text)", true},
 		{adminRole, "scheduler_request_notification_cancellation(text,text,text)", true},
 	} {

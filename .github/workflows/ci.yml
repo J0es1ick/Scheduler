@@ -447,6 +447,19 @@ jobs:
           fi
           docker compose exec -T -e PGPASSWORD=ci-bot-database-password postgres \
             psql -h 127.0.0.1 -U scheduler_bot -d "$dr_database" -v ON_ERROR_STOP=1 -c 'SELECT COUNT(*) FROM users'
+          if docker compose exec -T -e PGPASSWORD=ci-bot-database-password postgres \
+            psql -h 127.0.0.1 -U scheduler_bot -d "$dr_database" -v ON_ERROR_STOP=1 \
+              -c "SELECT execute_privacy_deletion('ci-denied-probe','deleted:ci-denied-probe')"; then
+            echo "Bot role can delete profiles directly after restore."
+            exit 1
+          fi
+          definer_check=$(docker compose exec -T postgres psql -U postgres -d "$dr_database" -tAc "
+            SELECT NOT EXISTS (
+              SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+              WHERE n.nspname='public' AND p.prosecdef
+                AND has_function_privilege('scheduler_site',p.oid,'EXECUTE')
+            )")
+          test "$definer_check" = t
           docker compose exec -T -e PGPASSWORD=ci-parser-database-password postgres \
             psql -h 127.0.0.1 -U scheduler_parser -d "$dr_database" -v ON_ERROR_STOP=1 -c 'SELECT COUNT(*) FROM data_sources'
           docker compose exec -T -e PGPASSWORD=ci-privacy-database-password postgres \
