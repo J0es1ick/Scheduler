@@ -37,6 +37,17 @@ func (r *PrivacyDeletionRepository) Enqueue(ctx context.Context, userID string) 
 	return enqueuePrivacyDeletion(ctx, r.db, userID)
 }
 
+func (r *PrivacyDeletionRepository) ExistingRequestIDs(ctx context.Context, ids []string) ([]string, error) {
+	existing := []string{}
+	if len(ids) == 0 {
+		return existing, nil
+	}
+	if err := r.db.SelectContext(ctx, &existing, `SELECT id FROM privacy_deletion_requests WHERE id=ANY($1::text[])`, ids); err != nil {
+		return nil, fmt.Errorf("reconcile privacy deletion requests: %w", err)
+	}
+	return existing, nil
+}
+
 func (r *PrivacyDeletionRepository) ClaimPending(ctx context.Context, limit int) ([]domain.PrivacyDeletionRequest, error) {
 	if limit <= 0 {
 		return []domain.PrivacyDeletionRequest{}, nil
@@ -77,10 +88,8 @@ func (r *PrivacyDeletionRepository) Complete(ctx context.Context, id, claimToken
 	defer tx.Rollback()
 	var userID string
 	err = tx.GetContext(ctx, &userID, `
-		SELECT user_id FROM privacy_deletion_requests
-		WHERE id=$1 AND status='processing' AND claim_token=$2
-		  AND lease_expires_at>clock_timestamp()
-		FOR UPDATE`, id, claimToken)
+		SELECT user_id FROM scheduler_lock_privacy_deletion_request($1, $2) AS request(user_id)
+		WHERE user_id IS NOT NULL`, id, claimToken)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrPrivacyDeletionClaimLost
 	}

@@ -16,6 +16,7 @@ type privacyDeletionQueue interface {
 	Renew(context.Context, string, string) error
 	Complete(context.Context, string, string) error
 	Retry(context.Context, string, string, error) error
+	ExistingRequestIDs(context.Context, []string) ([]string, error)
 }
 
 type PrivacyDeletionWorker struct {
@@ -105,6 +106,25 @@ func (w *PrivacyDeletionWorker) tick(ctx context.Context, monitor *Monitor) {
 	if len(cycleErrors) != 0 {
 		monitor.Record(PrivacyDeletionWorkerName, errors.Join(cycleErrors...))
 		return
+	}
+	if len(w.failed) != 0 {
+		ids := make([]string, 0, len(w.failed))
+		for id := range w.failed {
+			ids = append(ids, id)
+		}
+		existing, reconcileErr := w.queue.ExistingRequestIDs(ctx, ids)
+		if reconcileErr != nil {
+			monitor.Record(PrivacyDeletionWorkerName, reconcileErr)
+			slog.Error("privacy deletion health reconciliation failed", "err", reconcileErr)
+			return
+		}
+		remaining := make(map[string]error, len(existing))
+		for _, id := range existing {
+			if failure, ok := w.failed[id]; ok {
+				remaining[id] = failure
+			}
+		}
+		w.failed = remaining
 	}
 	if len(w.failed) != 0 {
 		unresolved := make([]error, 0, len(w.failed))

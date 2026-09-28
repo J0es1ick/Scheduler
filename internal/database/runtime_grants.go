@@ -139,6 +139,7 @@ func ApplyRuntimeGrants(
 		},
 		privacyRole: {
 			"execute_privacy_deletion(TEXT, TEXT)",
+			"scheduler_lock_privacy_deletion_request(TEXT, TEXT)",
 		},
 	}
 	for role, signatures := range functions {

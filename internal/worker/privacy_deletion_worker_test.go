@@ -14,9 +14,15 @@ type privacyQueueStub struct {
 	claimErrs    []error
 	renewErrs    []error
 	completeErrs []error
+	existing     []string
+	reconcileErr error
 	completed    int
 	retried      int
 	renewed      int
+}
+
+func (s *privacyQueueStub) ExistingRequestIDs(context.Context, []string) ([]string, error) {
+	return s.existing, s.reconcileErr
 }
 
 func (s *privacyQueueStub) Renew(context.Context, string, string) error {
@@ -102,6 +108,7 @@ func TestPrivacyDeletionWorkerKeepsFailedHealthUntilSameRequestSucceeds(t *testi
 	queue.completeErrs = []error{
 		errors.New("database unavailable"), nil, nil, nil,
 	}
+	queue.existing = []string{failedRequest.ID}
 	worker := NewPrivacyDeletionWorker(queue, 0, 2)
 	monitor := NewMonitor()
 	monitor.Register(PrivacyDeletionWorkerName, time.Minute)
@@ -113,6 +120,53 @@ func TestPrivacyDeletionWorkerKeepsFailedHealthUntilSameRequestSucceeds(t *testi
 	assertPrivacyWorkerHealth(t, monitor, false)
 	worker.tick(context.Background(), monitor)
 	assertPrivacyWorkerHealth(t, monitor, false)
+	worker.tick(context.Background(), monitor)
+	assertPrivacyWorkerHealth(t, monitor, true)
+}
+
+func TestPrivacyDeletionWorkerRecoversWhenFailedRequestDisappears(t *testing.T) {
+	for _, renewFailure := range []bool{false, true} {
+		t.Run(map[bool]string{false: "lost commit acknowledgement", true: "completed by another worker"}[renewFailure], func(t *testing.T) {
+			request := domain.PrivacyDeletionRequest{ID: "request", UserID: "user", ClaimToken: "claim"}
+			queue := &privacyQueueStub{batches: [][]domain.PrivacyDeletionRequest{{request}}}
+			if renewFailure {
+				queue.renewErrs = []error{errors.New("claim lost")}
+			} else {
+				queue.completeErrs = []error{errors.New("commit acknowledgement lost")}
+			}
+			worker := NewPrivacyDeletionWorker(queue, 0, 1)
+			monitor := NewMonitor()
+			monitor.Register(PrivacyDeletionWorkerName, time.Minute)
+			monitor.Started(PrivacyDeletionWorkerName)
+			worker.tick(context.Background(), monitor)
+			assertPrivacyWorkerHealth(t, monitor, false)
+			worker.tick(context.Background(), monitor)
+			assertPrivacyWorkerHealth(t, monitor, true)
+			if len(worker.failed) != 0 {
+				t.Fatal("resolved failures retained")
+			}
+		})
+	}
+}
+
+func TestPrivacyDeletionWorkerDoesNotHideFailureWhenReconciliationFails(t *testing.T) {
+	request := domain.PrivacyDeletionRequest{ID: "request", UserID: "user", ClaimToken: "claim"}
+	queue := &privacyQueueStub{
+		batches:      [][]domain.PrivacyDeletionRequest{{request}},
+		completeErrs: []error{errors.New("commit acknowledgement lost")},
+		reconcileErr: errors.New("database unavailable"),
+	}
+	worker := NewPrivacyDeletionWorker(queue, 0, 1)
+	monitor := NewMonitor()
+	monitor.Register(PrivacyDeletionWorkerName, time.Minute)
+	monitor.Started(PrivacyDeletionWorkerName)
+	worker.tick(context.Background(), monitor)
+	worker.tick(context.Background(), monitor)
+	assertPrivacyWorkerHealth(t, monitor, false)
+	if len(worker.failed) != 1 {
+		t.Fatal("unverified failure was discarded")
+	}
+	queue.reconcileErr = nil
 	worker.tick(context.Background(), monitor)
 	assertPrivacyWorkerHealth(t, monitor, true)
 }

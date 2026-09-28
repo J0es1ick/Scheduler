@@ -4,9 +4,40 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"testing"
 )
+
+func TestUpgradePreservesPendingPrivacyDeletion(t *testing.T) {
+	ctx := context.Background()
+	db, cleanup := isolatedMigrationSchema(t, ctx, os.Getenv("TEST_DATABASE_URL"))
+	defer cleanup()
+	if err := applyMigrationsThrough(ctx, db, "054_user_restrictions.up.sql"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO users(id,username) VALUES('upgrade-privacy','Synthetic user');
+		INSERT INTO privacy_deletion_requests(id,user_id,status,claim_token,lease_expires_at)
+		VALUES('upgrade-request','upgrade-privacy','processing','upgrade-claim',clock_timestamp()+INTERVAL '2 minutes')`); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := ApplyMigrations(ctx, db); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := VerifyMigrations(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	var userID string
+	if err := db.Get(&userID, `SELECT scheduler_lock_privacy_deletion_request('upgrade-request','upgrade-claim')`); err != nil || userID != "upgrade-privacy" {
+		t.Fatalf("claim lost during upgrade: user=%q err=%v", userID, err)
+	}
+	var lost sql.NullString
+	if err := db.Get(&lost, `SELECT scheduler_lock_privacy_deletion_request('upgrade-request','wrong-claim')`); err != nil || lost.Valid {
+		t.Fatalf("invalid claim accepted: user=%v err=%v", lost, err)
+	}
+}
 
 func TestUpgradeRepairsOnlyUnambiguousOverrides(t *testing.T) {
 	ctx := context.Background()

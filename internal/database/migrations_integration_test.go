@@ -151,6 +151,10 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 		{parserRole, "scheduler_reconcile_notification_queue()", false},
 		{privacyRole, "enqueue_privacy_deletion(text)", false},
 		{privacyRole, "execute_privacy_deletion(text,text)", true},
+		{privacyRole, "scheduler_lock_privacy_deletion_request(text,text)", true},
+		{botRole, "scheduler_lock_privacy_deletion_request(text,text)", false},
+		{adminRole, "scheduler_lock_privacy_deletion_request(text,text)", false},
+		{parserRole, "scheduler_lock_privacy_deletion_request(text,text)", false},
 		{adminRole, "enqueue_schedule_change(text,text,text,text)", true},
 		{adminRole, "scheduler_request_notification_cancellation(text,text,text)", true},
 	} {
