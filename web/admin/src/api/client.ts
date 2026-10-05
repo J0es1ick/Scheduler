@@ -70,7 +70,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   let requestID = "";
   const abortFromCaller = () => controller.abort();
   if (options.signal?.aborted) abortFromCaller();
-  else options.signal?.addEventListener("abort", abortFromCaller, { once: true });
+  else
+    options.signal?.addEventListener("abort", abortFromCaller, { once: true });
   const timer = window.setTimeout(() => {
     timedOut = true;
     controller.abort();
@@ -111,7 +112,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       const recovery = ["GET", "HEAD", "OPTIONS"].includes(method)
         ? "Повторите загрузку."
         : "Проверьте результат перед повтором действия.";
-      throw new APIError(408, `Сервер не ответил за 25 секунд. ${recovery}`, "request_timeout", requestID);
+      throw new APIError(
+        408,
+        `Сервер не ответил за 25 секунд. ${recovery}`,
+        "request_timeout",
+        requestID,
+      );
     }
     throw caught;
   } finally {

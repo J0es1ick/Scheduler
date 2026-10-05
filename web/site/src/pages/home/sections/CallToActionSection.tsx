@@ -36,7 +36,8 @@ export function CallToActionSection({
           </a>
           <span>
             <Users size={17} />
-            Уже используют: {users === undefined ? "считаем…" : formatNumber.format(users)}
+            Уже используют:{" "}
+            {users === undefined ? "считаем…" : formatNumber.format(users)}
           </span>
         </div>
       </div>

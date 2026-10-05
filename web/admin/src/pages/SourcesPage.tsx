@@ -55,16 +55,18 @@ export function SourcesPage({
   notify: (text: string, tone?: ToastMessage["tone"]) => void;
   canOperate?: boolean;
 }) {
-  const { data, loading, error, reload: reloadSources } = useRemote(api.sources, []);
+  const {
+    data,
+    loading,
+    error,
+    reload: reloadSources,
+  } = useRemote(api.sources, []);
   const {
     data: snapshots,
     loading: snapshotsLoading,
     error: snapshotsError,
     reload: reloadSnapshots,
-  } = useRemote(
-    () => api.parserSnapshots("", ""),
-    [],
-  );
+  } = useRemote(() => api.parserSnapshots("", ""), []);
   const [busy, setBusy] = useState("");
   const [intervalDrafts, setIntervalDrafts] = useState<Record<string, string>>(
     {},
@@ -199,9 +201,7 @@ export function SourcesPage({
 
   async function publishSnapshot(id: string) {
     const snapshot = snapshots?.find((item) => item.id === id);
-    const source = data?.find(
-      (item) => item.id === snapshot?.data_source_id,
-    );
+    const source = data?.find((item) => item.id === snapshot?.data_source_id);
     const approvalOnly = source?.lifecycle_status !== "active";
     if (
       !window.confirm(

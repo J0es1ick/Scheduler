@@ -43,7 +43,11 @@ h2 {
   min-height: 100vh;
   color: #282b25;
   background:
-    radial-gradient(circle at 9% 4%, rgba(181, 135, 67, 0.12), transparent 23rem),
+    radial-gradient(
+      circle at 9% 4%,
+      rgba(181, 135, 67, 0.12),
+      transparent 23rem
+    ),
     #f4f0e6;
 }
 
@@ -55,4 +59,3 @@ h2 {
   width: min(1180px, calc(100% - 48px));
   margin: 0 auto;
 }
-
