@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"sort"
-	"strings"
 
 	"github.com/J0es1ick/Scheduler/internal/searchtext"
 )
@@ -53,24 +52,5 @@ func (s *ScheduleService) FindTeachers(
 }
 
 func uniqueTeacherNames(stored []string) []string {
-	seen := make(map[string]struct{}, len(stored))
-	result := make([]string, 0, len(stored))
-	for _, value := range stored {
-		parts := strings.FieldsFunc(value, func(character rune) bool {
-			return character == ';' || character == '\n' || character == '\r' || character == '|'
-		})
-		for _, part := range parts {
-			name := strings.TrimSpace(part)
-			normalized := searchtext.TokenKey(name)
-			if normalized == "" {
-				continue
-			}
-			if _, ok := seen[normalized]; ok {
-				continue
-			}
-			seen[normalized] = struct{}{}
-			result = append(result, name)
-		}
-	}
-	return result
+	return searchtext.TeacherNames(stored)
 }

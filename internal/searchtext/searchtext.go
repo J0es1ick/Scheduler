@@ -26,7 +26,7 @@ func TokenKey(value string) string {
 }
 
 func MatchTeacher(candidate, query string) (int, bool) {
-	return matchTokens(Tokens(candidate), Tokens(query))
+	return matchTokens(Tokens(candidate), Tokens(query), true)
 }
 
 func MatchDiscipline(candidate, query string) (int, bool) {
@@ -46,7 +46,7 @@ func CloseIdentifier(candidate, query string) bool {
 	return withinOneEdit(candidate, query)
 }
 
-func matchTokens(candidate, query []string) (int, bool) {
+func matchTokens(candidate, query []string, initials ...bool) (int, bool) {
 	if len(candidate) == 0 || len(query) == 0 || len(query) > len(candidate) {
 		return 0, false
 	}
@@ -60,6 +60,11 @@ func matchTokens(candidate, query []string) (int, bool) {
 				continue
 			}
 			score, ok := tokenScore(candidateToken, queryToken)
+			if !ok && len(initials) > 0 && initials[0] {
+				if (utf8.RuneCountInString(queryToken) == 1 && strings.HasPrefix(candidateToken, queryToken)) || (len(query) > 1 && utf8.RuneCountInString(candidateToken) == 1 && strings.HasPrefix(queryToken, candidateToken)) {
+					score, ok = 3, true
+				}
+			}
 			if ok && score < bestScore {
 				bestIndex = index
 				bestScore = score

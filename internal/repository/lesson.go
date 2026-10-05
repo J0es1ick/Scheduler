@@ -153,18 +153,23 @@ func (r *LessonRepository) GetLessonsByTeacher(
 	var lessons []domain.Lesson
 	err := r.db.SelectContext(ctx, &lessons,
 		lessonWithGroupSelect+` WHERE lesson.university_id = $1
-			AND $2<>'' AND STRPOS(REPLACE(LOWER(REGEXP_REPLACE(BTRIM(lesson.teacher), '[[:space:]]+', ' ', 'g')), 'ё', 'е'), $2)>0
 			AND study_group.is_active
 			AND EXISTS (
 				SELECT 1 FROM universities study_university
 				WHERE study_university.id=lesson.university_id AND study_university.is_active
 			)
 			ORDER BY lesson.day_of_week, lesson.time_start, study_group.name`,
-		universityID, searchtext.Normalize(teacher))
+		universityID)
 	if err != nil {
 		return nil, fmt.Errorf("get lessons by university=%s teacher=%q: %w", universityID, teacher, err)
 	}
-	return lessons, nil
+	filtered := lessons[:0]
+	for _, lesson := range lessons {
+		if searchtext.HasTeacher(lesson.Teacher, teacher) {
+			filtered = append(filtered, lesson)
+		}
+	}
+	return filtered, nil
 }
 
 func (r *LessonRepository) GetTeacherNames(
