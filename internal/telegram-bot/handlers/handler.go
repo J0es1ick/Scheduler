@@ -18,6 +18,7 @@ func reqCtx() (context.Context, context.CancelFunc) {
 }
 
 type Handler struct {
+	ProfileService        scheduleProfileService
 	ScheduleService       scheduleService
 	TimeSlotService       timeSlotService
 	StateManager          *state.Manager
@@ -33,6 +34,15 @@ type Handler struct {
 	ProjectURL            string
 	scheduleMessagesMu    sync.Mutex
 	scheduleMessages      map[string]trackedScheduleMessages
+}
+
+type scheduleProfileService interface {
+	GetTeacher(context.Context, string) (*domain.Teacher, error)
+	SetTeacher(context.Context, string, string, string) error
+	SetRole(context.Context, string, domain.UserRole) error
+	SetTeacherView(context.Context, string, domain.ScheduleViewFormat) error
+	SetDailySchedule(context.Context, string, bool, string) error
+	SetDailySetup(context.Context, string, string) error
 }
 
 type trackedScheduleMessages struct {
@@ -110,6 +120,7 @@ func NewHandler(
 	projectURL string,
 ) *Handler {
 	return &Handler{
+		ProfileService:        userService,
 		ScheduleService:       scheduleService,
 		TimeSlotService:       scheduleService,
 		StateManager:          stateManager,

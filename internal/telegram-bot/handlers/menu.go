@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	tele "gopkg.in/telebot.v3"
@@ -21,7 +22,10 @@ func (h *Handler) HandleChangeUniversity(c tele.Context) error {
 		return c.Send("Не удалось загрузить профиль. Попробуйте ещё раз позже.")
 	}
 	if state == nil {
-		state = &dto.UserState{}
+		return h.HandleRole(c)
+	}
+	if state.Role == domain.RoleTeacher {
+		return h.chooseProfileUniversity(ctx, c, state)
 	}
 	state.Step = "choosing_university"
 	state.FlowNonce = newFlowNonce()
@@ -37,10 +41,20 @@ func (h *Handler) HandleChangeUniversity(c tele.Context) error {
 }
 
 func (h *Handler) HandleChangeGroup(c tele.Context) error {
+	if teacher, err := h.teacherProfile(c); err != nil {
+		return err
+	} else if teacher {
+		return h.HandleChangeTeacher(c)
+	}
 	return h.beginGroupChange(c, "main", 0)
 }
 
 func (h *Handler) beginGroupChange(c tele.Context, destination string, page int) error {
+	if teacher, err := h.teacherProfile(c); err != nil {
+		return err
+	} else if teacher {
+		return h.showTeacherSettings(c)
+	}
 	ctx, cancel := reqCtx()
 	defer cancel()
 	state, err := h.readyState(ctx, c.Sender().ID)

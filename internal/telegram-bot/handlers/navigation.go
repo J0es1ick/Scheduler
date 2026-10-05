@@ -16,7 +16,7 @@ func (h *Handler) HandleMenu(c tele.Context) error {
 		slog.Error("finish dialog before main menu failed", "user_id", c.Sender().ID, "err", err)
 		return c.Send("Не удалось восстановить профиль. Попробуйте ещё раз позже.")
 	}
-	return c.Send("Меню расписания:", keyboards.MainMenu())
+	return c.Send("Меню расписания:", h.mainMenu(c))
 }
 
 func (h *Handler) HandleOpenMainMenu(c tele.Context) error {

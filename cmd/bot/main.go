@@ -137,6 +137,7 @@ func main() {
 	commandsReady := botpkg.Register(ctx, bot, handler)
 
 	workerMonitor := worker.NewMonitor()
+	workerMonitor.Register(worker.DailyWorkerName, 2*time.Minute)
 	workerMonitor.Register(worker.ReminderWorkerName, 2*time.Minute)
 	workerMonitor.Register(worker.NotificationWorkerName, 2*time.Minute)
 	health := botpkg.NewHealth(db.DB, workerMonitor)
@@ -165,6 +166,7 @@ func main() {
 		}
 	}()
 
+	dailyDone := worker.NewDailyWorker(repository.NewDailyRepository(db.DB), workerStatusRepo).Start(ctx, workerMonitor)
 	reminderWorker := worker.NewReminderWorker(
 		reminderRepo,
 		workerStatusRepo,
@@ -175,10 +177,11 @@ func main() {
 	notificationWorker := worker.NewNotificationWorker(notificationRepo, bot,
 		time.Duration(cfg.NotificationPollSeconds)*time.Second,
 		worker.NotificationOptions{
-			Schedule:   scheduleService,
-			BatchSize:  cfg.NotificationBatchSize,
-			MaxBatches: cfg.NotificationMaxBatches,
-			Limiter:    telegramLimiter,
+			DailySchedule: handler.PrepareDailySchedule,
+			Schedule:      scheduleService,
+			BatchSize:     cfg.NotificationBatchSize,
+			MaxBatches:    cfg.NotificationMaxBatches,
+			Limiter:       telegramLimiter,
 		})
 	notificationDone := notificationWorker.Start(ctx, workerMonitor)
 	go keepAdminMenusConfigured(ctx, bot, userRepo, cfg.Admin.PublicURL, telegramLimiter)
@@ -210,7 +213,7 @@ func main() {
 	if err := handlerTracker.Wait(shutdownCtx); err != nil {
 		slog.Warn("Telegram handlers did not stop before deadline", "err", err)
 	}
-	if err := waitForBackgroundTasks(shutdownCtx, reminderDone, notificationDone, stateCleanupDone); err != nil {
+	if err := waitForBackgroundTasks(shutdownCtx, reminderDone, notificationDone, dailyDone, stateCleanupDone); err != nil {
 		slog.Warn("background tasks did not stop before deadline", "err", err)
 	}
 	if err := healthServer.Shutdown(shutdownCtx); err != nil {

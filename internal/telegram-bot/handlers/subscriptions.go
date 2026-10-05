@@ -32,6 +32,11 @@ func (h *Handler) HandleSubscriptionPage(c tele.Context) error {
 }
 
 func (h *Handler) HandleOpenSubscription(c tele.Context) error {
+	if teacher, err := h.teacherProfile(c); err != nil {
+		return err
+	} else if teacher {
+		return h.showTeacherSettings(c)
+	}
 	groupID, ok := callbackArgument(c)
 	if !ok {
 		return respondStaleCallback(c)
@@ -71,6 +76,11 @@ func (h *Handler) HandleOpenSubscription(c tele.Context) error {
 }
 
 func (h *Handler) HandleScheduleViewSettings(c tele.Context) error {
+	if teacher, err := h.teacherProfile(c); err != nil {
+		return err
+	} else if teacher {
+		return h.showTeacherSettings(c)
+	}
 	groupID, ok := callbackArgument(c)
 	if !ok {
 		return respondStaleCallback(c)
@@ -98,6 +108,11 @@ func (h *Handler) HandleScheduleViewSettings(c tele.Context) error {
 }
 
 func (h *Handler) HandleSetScheduleView(c tele.Context) error {
+	if teacher, err := h.teacherProfile(c); err != nil {
+		return err
+	} else if teacher {
+		return h.showTeacherSettings(c)
+	}
 	args := callbackArguments(c)
 	if len(args) < 2 {
 		return respondStaleCallback(c)
@@ -140,6 +155,11 @@ func (h *Handler) HandleSetScheduleView(c tele.Context) error {
 }
 
 func (h *Handler) HandleSubgroupSettings(c tele.Context) error {
+	if teacher, err := h.teacherProfile(c); err != nil {
+		return err
+	} else if teacher {
+		return h.showTeacherSettings(c)
+	}
 	groupReference, ok := callbackArgument(c)
 	if !ok {
 		return respondStaleCallback(c)
@@ -167,6 +187,11 @@ func (h *Handler) HandleSubgroupSettings(c tele.Context) error {
 }
 
 func (h *Handler) HandleSetSubscriptionSubgroup(c tele.Context) error {
+	if teacher, err := h.teacherProfile(c); err != nil {
+		return err
+	} else if teacher {
+		return h.showTeacherSettings(c)
+	}
 	args := callbackArguments(c)
 	if len(args) < 2 {
 		return respondStaleCallback(c)
@@ -202,6 +227,11 @@ func (h *Handler) HandleSetSubscriptionSubgroup(c tele.Context) error {
 }
 
 func (h *Handler) HandleSubscriptionSchedule(c tele.Context) error {
+	if teacher, err := h.teacherProfile(c); err != nil {
+		return err
+	} else if teacher {
+		return h.showTeacherSettings(c)
+	}
 	args := callbackArguments(c)
 	if len(args) < 2 {
 		return respondStaleCallback(c)
@@ -252,6 +282,11 @@ func (h *Handler) HandleSubscriptionSchedule(c tele.Context) error {
 }
 
 func (h *Handler) HandleRequestDeleteSubscription(c tele.Context) error {
+	if teacher, err := h.teacherProfile(c); err != nil {
+		return err
+	} else if teacher {
+		return h.showTeacherSettings(c)
+	}
 	groupID, ok := callbackArgument(c)
 	if !ok {
 		return respondStaleCallback(c)
@@ -296,6 +331,11 @@ func (h *Handler) HandleDeleteSubscription(c tele.Context) error {
 }
 
 func (h *Handler) HandleSetDefaultSubscription(c tele.Context) error {
+	if teacher, err := h.teacherProfile(c); err != nil {
+		return err
+	} else if teacher {
+		return h.showTeacherSettings(c)
+	}
 	groupID, ok := callbackArgument(c)
 	if !ok {
 		return respondStaleCallback(c)
@@ -326,6 +366,11 @@ func (h *Handler) HandleSetDefaultSubscription(c tele.Context) error {
 }
 
 func (h *Handler) HandleConfirmDeleteSubscription(c tele.Context) error {
+	if teacher, err := h.teacherProfile(c); err != nil {
+		return err
+	} else if teacher {
+		return h.showTeacherSettings(c)
+	}
 	args := callbackArguments(c)
 	if len(args) < 3 {
 		return respondStaleCallback(c)
@@ -402,6 +447,11 @@ func (h *Handler) HandleToggleNotifications(c tele.Context) error {
 }
 
 func (h *Handler) showSubscriptionSettingsPage(c tele.Context, edit bool, page int) error {
+	if teacher, err := h.teacherProfile(c); err != nil {
+		return err
+	} else if teacher {
+		return h.showTeacherSettings(c)
+	}
 	ctx, cancel := reqCtx()
 	defer cancel()
 	userID := fmt.Sprint(c.Sender().ID)

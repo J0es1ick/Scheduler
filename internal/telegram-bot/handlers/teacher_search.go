@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/J0es1ick/Scheduler/internal/domain"
+	"github.com/J0es1ick/Scheduler/internal/searchtext"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	tele "gopkg.in/telebot.v3"
@@ -32,10 +34,16 @@ func (h *Handler) beginTeacherSearch(
 	state.TeacherCandidates = append([]string(nil), names...)
 	state.FlowNonce = newFlowNonce()
 	if len(names) == 0 {
+		if origin == "profile" {
+			if err := c.Send("Преподаватель не найден. Попробуйте другой вариант ФИО."); err != nil {
+				return err
+			}
+			return h.promptOwnTeacher(c, state)
+		}
 		state.Step = "awaiting_search_query"
 		h.StateManager.Set(c.Sender().ID, state)
 		return c.Send(
-			"В расписании основного вуза такой преподаватель не найден. Проверьте фамилию или введите другой вариант.",
+			"В расписании выбранного вуза такой преподаватель не найден. Проверьте фамилию или введите другой вариант.",
 			keyboards.CancelButton(state.FlowNonce),
 		)
 	}
@@ -46,6 +54,9 @@ func (h *Handler) beginTeacherSearch(
 			fmt.Sprintf("Найдено несколько преподавателей по запросу «%s». Выберите нужного:", query),
 			keyboards.TeacherMatches(names, state.FlowNonce),
 		)
+	}
+	if origin == "profile" {
+		return h.confirmTeacher(c, state, names[0])
 	}
 	return h.openTeacherSchedule(ctx, c, state, names[0])
 }
@@ -63,6 +74,9 @@ func (h *Handler) HandleTeacherSelect(c tele.Context) error {
 	_ = c.Respond()
 	ctx, cancel := reqCtx()
 	defer cancel()
+	if state.TeacherSearchOrigin == "profile" {
+		return h.confirmTeacher(c, state, state.TeacherCandidates[index])
+	}
 	return h.openTeacherSchedule(ctx, c, state, state.TeacherCandidates[index])
 }
 
@@ -73,6 +87,9 @@ func (h *Handler) HandleCancelTeacherSelection(c tele.Context) error {
 		return respondStaleCallback(c)
 	}
 	_ = c.Respond()
+	if state.TeacherSearchOrigin == "profile" {
+		return h.promptOwnTeacher(c, state)
+	}
 	if state.TeacherSearchOrigin == "search" {
 		state.Step = "awaiting_search_query"
 		state.TeacherCandidates = nil
@@ -162,12 +179,22 @@ func (h *Handler) teacherScheduleTarget(
 	if university == nil || !university.IsActive {
 		return nil, fmt.Errorf("university not found")
 	}
+	view := searchScheduleView(user.SearchScheduleView)
+	if user.Role == domain.RoleTeacher && user.TeacherID != "" {
+		bound, loadErr := h.ProfileService.GetTeacher(ctx, user.TeacherID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if bound != nil && bound.UniversityID == universityID && searchtext.TokenKey(bound.Name) == searchtext.TokenKey(teacher) {
+			view = user.TeacherScheduleView
+		}
+	}
 	return &scheduleTarget{
 		UniversityID: university.ID,
 		University:   university.Name,
 		GroupName:    teacher,
 		TeacherName:  teacher,
-		ViewFormat:   searchScheduleView(user.SearchScheduleView),
+		ViewFormat:   view,
 	}, nil
 }
 

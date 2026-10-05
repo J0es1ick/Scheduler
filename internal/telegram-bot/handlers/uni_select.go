@@ -40,6 +40,9 @@ func (h *Handler) HandleUniversitySelect(c tgbotapi.Context) error {
 	state := current
 	state.UniversityID = selected.ID
 	state.University = selected.Name
+	if state.Role == domain.RoleTeacher {
+		return h.promptOwnTeacher(c, state)
+	}
 	state.SearchType = dto.SearchTypeGroup
 	state.Step = "awaiting_query"
 	state.FlowNonce = newFlowNonce()

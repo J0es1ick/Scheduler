@@ -12,7 +12,6 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
-	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	tele "gopkg.in/telebot.v3"
 )
 
@@ -132,16 +131,24 @@ func (h *Handler) handleQuickTextInput(c tele.Context, input string) (bool, erro
 	defer cancel()
 	state, err := h.readyState(ctx, c.Sender().ID)
 	if err != nil {
-		return true, c.Send("Не удалось загрузить основную группу. Попробуйте позже.")
+		return true, c.Send("Не удалось загрузить профиль. Попробуйте позже.")
 	}
 	if state == nil {
-		return true, c.Send("Сначала выберите доступную основную группу: /start")
+		return true, c.Send("Сначала настройте расписание: /start")
 	}
 	if request.kind == quickInputGroup {
+		if state.Role == domain.RoleTeacher {
+			state.SearchType = dto.SearchTypeGroup
+			state.SearchQuery = request.value
+			return true, h.HandleSearchResult(c, state)
+		}
 		return true, h.selectQuickPrimaryGroup(ctx, c, state, request.value)
 	}
+	if request.kind == quickInputTeacher && state.Role == domain.RoleTeacher {
+		return true, h.beginTeacherSearch(ctx, c, state, request.value, "quick")
+	}
 	if !state.GroupActive {
-		return true, c.Send("Основная группа временно недоступна. Выберите другую группу в «Мои группы».")
+		return true, c.Send("Расписание временно недоступно. Привязка сохранена; её можно заменить в настройках.")
 	}
 	target := h.scheduleTarget(ctx, c)
 	if target == nil {
@@ -209,5 +216,5 @@ func (h *Handler) selectQuickPrimaryGroup(
 	if _, _, err = h.restoreProfile(ctx, c.Sender().ID); err != nil {
 		return c.Send("Группа сохранена, но профиль не удалось обновить. Используйте /start.")
 	}
-	return c.Send("Основная группа изменена: "+university.Name+" · "+group.Name, keyboards.MainMenu())
+	return c.Send("Основная группа изменена: "+university.Name+" · "+group.Name, h.mainMenu(c))
 }

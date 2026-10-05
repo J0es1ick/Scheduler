@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
+	"github.com/J0es1ick/Scheduler/internal/searchtext"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 )
 
@@ -16,6 +17,33 @@ func (h *Handler) restoreProfile(
 	user, err := h.UserService.GetUser(ctx, userID)
 	if err != nil || user == nil {
 		return nil, user, err
+	}
+	if user.Role == domain.RoleTeacher {
+		if user.TeacherID == "" {
+			return nil, user, nil
+		}
+		teacher, loadErr := h.ProfileService.GetTeacher(ctx, user.TeacherID)
+		if loadErr != nil || teacher == nil {
+			return nil, user, loadErr
+		}
+		university, loadErr := h.UniversityService.GetByID(ctx, teacher.UniversityID)
+		if loadErr != nil || university == nil {
+			return nil, user, loadErr
+		}
+		names, loadErr := h.ScheduleService.FindTeachers(ctx, teacher.UniversityID, "")
+		if loadErr != nil {
+			return nil, user, loadErr
+		}
+		active := false
+		for _, name := range names {
+			if searchtext.TokenKey(name) == teacher.NameKey {
+				active = true
+				break
+			}
+		}
+		state := &dto.UserState{Role: domain.RoleTeacher, TeacherID: teacher.ID, TeacherName: teacher.Name, UniversityID: university.ID, University: university.Name, Query: teacher.Name, GroupActive: active && university.IsActive, Step: "done"}
+		h.StateManager.Set(telegramID, state)
+		return state, user, nil
 	}
 	if user.DefaultGroupID == "" {
 		return nil, user, nil
@@ -39,6 +67,7 @@ func (h *Handler) restoreProfile(
 	}
 
 	state := &dto.UserState{
+		Role:         domain.RoleStudent,
 		UniversityID: group.UniversityID,
 		University:   university.Name,
 		SearchType:   dto.SearchTypeGroup,

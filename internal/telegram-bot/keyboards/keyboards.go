@@ -3,10 +3,10 @@ package keyboards
 import (
 	"crypto/sha256"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
+	"github.com/J0es1ick/Scheduler/internal/searchtext"
 	tgbotapi "gopkg.in/telebot.v3"
 )
 
@@ -229,7 +229,7 @@ func BackButton(action string, arguments ...string) *tgbotapi.ReplyMarkup {
 	return menu
 }
 
-func MainMenu() *tgbotapi.ReplyMarkup {
+func MainMenu(roles ...domain.UserRole) *tgbotapi.ReplyMarkup {
 	menu := &tgbotapi.ReplyMarkup{ResizeKeyboard: true, IsPersistent: true}
 
 	btnToday := menu.Text("Сегодня")
@@ -238,6 +238,9 @@ func MainMenu() *tgbotapi.ReplyMarkup {
 	btnDate := menu.Text("Выбрать дату")
 	btnSearch := menu.Text("Поиск")
 	btnGroups := menu.Text("Мои группы")
+	if len(roles) > 0 && roles[0] == domain.RoleTeacher {
+		btnGroups = menu.Text("Моё расписание")
+	}
 	btnMore := menu.Text("Ещё")
 
 	menu.Reply(
@@ -342,6 +345,8 @@ func SubscriptionSettings(
 		reminderLabel = fmt.Sprintf("Напоминания: за %d мин.", reminderMinutes)
 	}
 	rows = append(rows, menu.Row(menu.Data(reminderLabel, "show_reminder_settings", fmt.Sprint(page))))
+	rows = append(rows, menu.Row(menu.Data("Ежедневное расписание", "daily_settings")))
+	rows = append(rows, menu.Row(menu.Data("Сменить роль", "role_settings")))
 	rows = append(rows, menu.Row(menu.Data("Добавить группу", "add_subscription", fmt.Sprint(page))))
 	rows = append(rows, menu.Row(menu.Data("Закрыть", "close_inline")))
 	menu.Inline(rows...)
@@ -488,6 +493,8 @@ func HotlineTypeSelector(nonce ...string) *tgbotapi.ReplyMarkup {
 func MoreMenu() *tgbotapi.ReplyMarkup {
 	menu := &tgbotapi.ReplyMarkup{}
 	menu.Inline(
+		menu.Row(menu.Data("Ежедневное расписание", "daily_settings")),
+		menu.Row(menu.Data("Сменить роль", "role_settings")),
 		menu.Row(menu.Data("Формат расписания из поиска", "search_view_settings")),
 		menu.Row(menu.Data("Источники расписания", "show_sources")),
 		menu.Row(menu.Data("Подключить своё расписание", "show_connector")),
@@ -693,7 +700,7 @@ func GroupToken(groupID string) string {
 }
 
 func TeacherToken(universityID, teacherName string) string {
-	value := strings.ToLower(strings.Join(strings.Fields(teacherName), " "))
+	value := searchtext.TokenKey(teacherName)
 	digest := sha256.Sum256([]byte(universityID + "\x00" + value))
 	return "t" + fmt.Sprintf("%x", digest[:8])
 }

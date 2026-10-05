@@ -20,7 +20,7 @@ func privateCommands() []tele.Command {
 		{Text: "twoweeks", Description: "Расписание на две недели"},
 		{Text: "date", Description: "Выбрать дату"},
 		{Text: "search", Description: "Поиск занятий"},
-		{Text: "settings", Description: "Мои группы и уведомления"},
+		{Text: "settings", Description: "Расписание и уведомления"},
 		{Text: "quiet_hours", Description: "Тихие часы для уведомлений"},
 		{Text: "help", Description: "Помощь и остальные команды"},
 	}
@@ -73,6 +73,10 @@ func Register(ctx context.Context, bot *tele.Bot, handler *handlers.Handler) <-c
 	bot.Handle("/change_university", handler.PrivateOnly(handler.HandleChangeUniversity))
 	bot.Handle("/settings", handler.PrivateOnly(handler.HandleSettings))
 	bot.Handle("/subscriptions", handler.PrivateOnly(handler.HandleSettings))
+	bot.Handle(&tele.Btn{Unique: "cancel_profile_binding"}, handler.PrivateOnly(handler.HandleCancelProfileBinding))
+	bot.Handle("/daily", handler.PrivateOnly(handler.HandleDaily))
+	bot.Handle("/role", handler.PrivateOnly(handler.HandleRole))
+	bot.Handle("Моё расписание", handler.PrivateOnly(handler.HandleSettings))
 	bot.Handle("/reminders", handler.PrivateOnly(handler.HandleReminders))
 	bot.Handle("/quiet_hours", handler.PrivateOnly(handler.HandleQuietHours))
 	bot.Handle("/hotline", handler.PrivateOnly(handler.HandleHotline))
@@ -89,6 +93,16 @@ func Register(ctx context.Context, bot *tele.Bot, handler *handlers.Handler) <-c
 	bot.Handle("/unset_chat_group", handler.HandleUnsetChatGroup)
 	bot.Handle(tele.OnQuery, handler.HandleInlineQuery)
 
+	bot.Handle(&tele.Btn{Unique: "select_role"}, handler.PrivateOnly(handler.HandleSelectRole))
+	bot.Handle(&tele.Btn{Unique: "role_settings"}, handler.PrivateOnly(handler.HandleRole))
+	bot.Handle(&tele.Btn{Unique: "cancel_role"}, handler.PrivateOnly(handler.HandleCancelRole))
+	bot.Handle(&tele.Btn{Unique: "confirm_teacher"}, handler.PrivateOnly(handler.HandleConfirmTeacher))
+	bot.Handle(&tele.Btn{Unique: "change_teacher"}, handler.PrivateOnly(handler.HandleChangeTeacher))
+	bot.Handle(&tele.Btn{Unique: "change_profile_university"}, handler.PrivateOnly(handler.HandleChangeUniversity))
+	bot.Handle(&tele.Btn{Unique: "teacher_view"}, handler.PrivateOnly(handler.HandleTeacherView))
+	bot.Handle(&tele.Btn{Unique: "back_profile_university"}, handler.PrivateOnly(handler.HandleBackProfileUniversity))
+	bot.Handle(&tele.Btn{Unique: "daily_settings"}, handler.PrivateOnly(handler.HandleDaily))
+	bot.Handle(&tele.Btn{Unique: "daily_action"}, handler.PrivateOnly(handler.HandleDailyAction))
 	bot.Handle(&tele.Btn{Unique: "select_university"}, handler.HandleUniversitySelect)
 	bot.Handle(&tele.Btn{Unique: "cancel_university_selection"}, handler.HandleCancelUniversitySelection)
 	bot.Handle(&tele.Btn{Unique: "select_search_type"}, handler.HandleSearchTypeSelect)

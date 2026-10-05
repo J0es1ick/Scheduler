@@ -121,7 +121,7 @@ func (h *Handler) HandleHotlineSubmission(c tele.Context, input string) error {
 	}
 	return c.Send(
 		fmt.Sprintf("Обращение принято. Номер заявки: %s\nОтвет администратора придёт в этот чат.", id),
-		keyboards.MainMenu(),
+		h.mainMenu(c),
 	)
 }
 

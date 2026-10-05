@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 
@@ -25,10 +26,15 @@ func (h *Handler) HandleInlineQuery(c tele.Context) error {
 	if err != nil {
 		return c.Answer(inlineUnavailableResponse())
 	}
-	if user == nil || user.DefaultGroupID == "" {
+	if user == nil || (user.DefaultGroupID == "" && user.TeacherID == "") {
 		return c.Answer(inlineSetupResponse())
 	}
-	target, err := h.downloadTarget(ctx, c, keyboards.GroupToken(user.DefaultGroupID))
+	var target *scheduleTarget
+	if user.Role == domain.RoleTeacher {
+		target, err = h.personalScheduleTarget(ctx, user.ID)
+	} else {
+		target, err = h.downloadTarget(ctx, c, keyboards.GroupToken(user.DefaultGroupID))
+	}
 	if err != nil {
 		return c.Answer(inlineUnavailableResponse())
 	}
@@ -76,6 +82,9 @@ func (h *Handler) HandleInlineQuery(c tele.Context) error {
 
 func inlineScheduleText(target *scheduleTarget, day dto.DaySchedule, freshness string) string {
 	header := fmt.Sprintf("%s · Группа: %s", html.EscapeString(target.University), html.EscapeString(target.GroupName))
+	if target.TeacherName != "" {
+		header = html.EscapeString(target.University) + " · " + html.EscapeString(target.displayName())
+	}
 	if target.Subgroup > 0 {
 		header += fmt.Sprintf(" · Подгруппа: %d", target.Subgroup)
 	}
@@ -83,7 +92,7 @@ func inlineScheduleText(target *scheduleTarget, day dto.DaySchedule, freshness s
 	for count := 0; count <= len(day.Lessons); count++ {
 		visible := day
 		visible.Lessons = day.Lessons[:count]
-		body := formatDaySchedule(visible)
+		body := formatDayScheduleWithOptions(visible, target.showGroupNames())
 		tail := freshness
 		if count < len(day.Lessons) {
 			if count == 0 {
@@ -109,7 +118,7 @@ func inlineSetupResponse() *tele.QueryResponse {
 		Results:           tele.Results{},
 		CacheTime:         1,
 		IsPersonal:        true,
-		SwitchPMText:      "Сначала выбрать группу",
+		SwitchPMText:      "Настроить своё расписание",
 		SwitchPMParameter: "setup",
 	}
 }

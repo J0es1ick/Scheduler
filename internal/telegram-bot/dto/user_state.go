@@ -2,7 +2,13 @@ package dto
 
 import "time"
 
+import "github.com/J0es1ick/Scheduler/internal/domain"
+
 type UserState struct {
+	Role                               domain.UserRole
+	TeacherID                          string
+	TeacherName                        string
+	DailyOnboarding                    bool
 	UniversityID                       string
 	University                         string
 	SearchType                         SearchType

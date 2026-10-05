@@ -386,8 +386,16 @@ func (h *Handler) scheduleTarget(
 		return nil
 	}
 	if !state.GroupActive {
-		_ = telegramContext.Send("Основная группа временно неактивна. Выбор сохранён; назначьте другую группу в «Мои группы» или дождитесь нового расписания.")
+		_ = telegramContext.Send("Ваше расписание временно недоступно. Привязка сохранена; её можно заменить в настройках.")
 		return nil
+	}
+	if state.Role == domain.RoleTeacher {
+		user, loadErr := h.UserService.GetUser(requestContext, fmt.Sprint(telegramContext.Sender().ID))
+		if loadErr != nil || user == nil {
+			_ = telegramContext.Send("Не удалось загрузить профиль.")
+			return nil
+		}
+		return &scheduleTarget{TeacherName: state.TeacherName, GroupName: state.TeacherName, UniversityID: state.UniversityID, University: state.University, ViewFormat: user.TeacherScheduleView}
 	}
 	viewFormat := domain.ScheduleViewVisual
 	subgroup := 0

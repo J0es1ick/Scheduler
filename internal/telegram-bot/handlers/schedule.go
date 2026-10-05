@@ -689,6 +689,38 @@ func (h *Handler) sendScheduleView(
 	markup *tgbotapi.ReplyMarkup,
 	header string,
 ) error {
+	if daysCount == 1 && !isGroupChat(c) {
+		messages, err := h.prepareScheduleMessages(ctx, target, days, from, daysCount, markup, header)
+		if err != nil {
+			return err
+		}
+		if len(messages) == 1 && len(messages[0].PNG) > 0 {
+			photo := &tgbotapi.Photo{File: tgbotapi.FromReader(bytes.NewReader(messages[0].PNG)), Caption: messages[0].Text}
+			if c.Callback() != nil {
+				if messageSupportsCaption(c.Message()) {
+					if err = c.Edit(photo, markup, tgbotapi.ModeHTML); err == nil || strings.Contains(err.Error(), "message is not modified") {
+						return nil
+					}
+				}
+				if err = c.Delete(); err != nil {
+					return err
+				}
+				return c.Send(photo, markup, tgbotapi.ModeHTML)
+			}
+			return h.sendScheduleMedia(c, photo, markup)
+		}
+		parts := make([]string, len(messages))
+		for i, message := range messages {
+			parts[i] = message.Text
+		}
+		if len(parts) > 1 || h.hasTrackedScheduleMessages(c) {
+			return h.replaceTrackedScheduleMessages(c, parts, markup)
+		}
+		if c.Callback() != nil {
+			return editOrSendHTML(c, parts[0], markup)
+		}
+		return h.sendScheduleMessage(c, parts[0], markup)
+	}
 	header = target.decorateScheduleHeader(header)
 	if target.ViewFormat != domain.ScheduleViewVisual {
 		return h.sendDaysWithOptions(c, days, target.UniversityID, markup, header, target.showGroupNames(), from, daysCount)
@@ -966,23 +998,26 @@ func (h *Handler) downloadTarget(
 		}, nil
 	}
 	if strings.HasPrefix(groupToken, "t") && len(groupToken) == 17 {
-		user, err := h.UserService.GetUser(ctx, fmt.Sprint(c.Sender().ID))
-		if err != nil || user == nil || user.DefaultGroupID == "" {
+		state, err := h.readyState(ctx, c.Sender().ID)
+		if err != nil || state == nil {
 			return nil, errors.New("teacher search profile not found")
 		}
-		group, err := h.GroupService.GetGroupByID(ctx, user.DefaultGroupID)
-		if err != nil || group == nil || !group.IsActive {
-			return nil, errors.New("teacher search university not found")
-		}
-		names, err := h.ScheduleService.FindTeachers(ctx, group.UniversityID, "")
+		universities, err := h.UniversityService.GetAll(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("load teachers: %w", err)
+			return nil, err
 		}
-		for _, name := range names {
-			if keyboards.TeacherToken(group.UniversityID, name) == groupToken {
-				return h.teacherScheduleTarget(ctx, c, group.UniversityID, name)
+		for _, university := range universities {
+			names, loadErr := h.ScheduleService.FindTeachers(ctx, university.ID, "")
+			if loadErr != nil {
+				return nil, loadErr
+			}
+			for _, name := range names {
+				if keyboards.TeacherToken(university.ID, name) == groupToken {
+					return h.teacherScheduleTarget(ctx, c, university.ID, name)
+				}
 			}
 		}
+
 		return nil, errors.New("teacher not found")
 	}
 	items, err := h.SubscriptionService.GetGroupSubscriptions(ctx, fmt.Sprint(c.Sender().ID))

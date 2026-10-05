@@ -69,6 +69,13 @@ func (h *Handler) HandleTextInput(c tgbotapi.Context) error {
 	}
 
 	switch state.Step {
+	case "daily_time":
+		return h.saveDaily(c, state, input)
+	case "awaiting_own_teacher":
+		ctx, cancel := reqCtx()
+		defer cancel()
+		return h.beginTeacherSearch(ctx, c, state, input, "profile")
+
 	case "awaiting_hotline_submission":
 		return h.HandleHotlineSubmission(c, input)
 
@@ -149,7 +156,7 @@ func (h *Handler) HandleTextInput(c tgbotapi.Context) error {
 			state.University,
 			group.Name,
 		)
-		return c.Send(text, keyboards.MainMenu())
+		return c.Send(text, h.mainMenu(c))
 
 	case "awaiting_search_query":
 		state.SearchQuery = input
@@ -211,6 +218,9 @@ func (h *Handler) HandleConfirmPrimaryGroup(c tgbotapi.Context) error {
 	if err = h.SubscriptionService.SubscribeAndSetDefault(ctx, fmt.Sprint(c.Sender().ID), group.ID); err != nil {
 		slog.Error("save primary group failed", "group", group.ID, "err", err)
 		return c.Send("Не удалось сохранить группу. Попробуйте подтвердить выбор ещё раз.")
+	}
+	if h.ProfileService != nil {
+		return h.finishProfileSetup(c)
 	}
 	current.Step = "done"
 	current.FlowNonce = ""

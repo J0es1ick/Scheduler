@@ -8,6 +8,7 @@ import (
 )
 
 var interruptingTextActions = map[string]struct{}{
+	"моё расписание":  {},
 	"сегодня":         {},
 	"завтра":          {},
 	"неделя":          {},

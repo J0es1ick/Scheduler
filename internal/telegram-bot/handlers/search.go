@@ -24,8 +24,8 @@ func (h *Handler) HandleSearch(c tgbotapi.Context) error {
 	if state == nil || state.Step != "done" {
 		return c.Send("Сначала настройте профиль: /start")
 	}
-	if !state.GroupActive {
-		return c.Send("Основная группа временно недоступна. Выберите другую группу в «Мои группы» и запустите поиск снова.", keyboards.MainMenu())
+	if !state.GroupActive && state.Role != domain.RoleTeacher {
+		return c.Send("Основная группа временно недоступна. Выберите другую группу в «Мои группы» и запустите поиск снова.", h.mainMenu(c))
 	}
 	state.Step = "choosing_search_type"
 	state.SearchQuery = ""
@@ -64,15 +64,15 @@ func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) e
 	ctx, cancel := reqCtx()
 	defer cancel()
 	if state == nil {
-		return c.Send("Поиск устарел. Откройте его снова.", keyboards.MainMenu())
+		return c.Send("Поиск устарел. Откройте его снова.", h.mainMenu(c))
 	}
 	available, err := h.ensureActiveSearchContext(ctx, c.Sender().ID, state)
 	if err != nil {
 		slog.Error("refresh profile before search execution failed", "user_id", c.Sender().ID, "err", err)
-		return c.Send("Не удалось проверить основную группу. Попробуйте позже.", keyboards.MainMenu())
+		return c.Send("Не удалось проверить профиль. Попробуйте позже.", h.mainMenu(c))
 	}
 	if !available {
-		return c.Send("Основная группа изменилась или стала недоступна. Выберите актуальную группу и запустите поиск снова.", keyboards.MainMenu())
+		return c.Send("Профиль изменился или расписание стало недоступно. Запустите поиск снова.", h.mainMenu(c))
 	}
 
 	now := time.Now().In(h.universityLocation(ctx, state.UniversityID))
@@ -118,7 +118,7 @@ func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) e
 			return c.Send("Не удалось загрузить настройки расписания.", keyboards.CancelButton(state.FlowNonce))
 		}
 		for _, subscription := range subscriptions {
-			if subscription.GroupID == group.ID {
+			if state.Role != domain.RoleTeacher && subscription.GroupID == group.ID {
 				target.ViewFormat, target.Subgroup, target.Public = subscription.ScheduleViewFormat, subscription.Subgroup, false
 				break
 			}
@@ -143,12 +143,19 @@ func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) e
 		days = mapToDaySchedule(data)
 
 	case dto.SearchTypeDiscipline:
-		data, err := h.ScheduleService.GetScheduleForGroupRange(ctx, state.GroupID, now, to)
+		var data map[time.Time][]domain.Lesson
+		var err error
+		if state.Role == domain.RoleTeacher {
+			data, err = h.ScheduleService.GetScheduleForTeacherRange(ctx, state.UniversityID, state.TeacherName, now, to)
+			showGroupNames = true
+		} else {
+			data, err = h.ScheduleService.GetScheduleForGroupRange(ctx, state.GroupID, now, to)
+		}
 		if err != nil {
 			return c.Send("Ошибка получения расписания.")
 		}
 		subgroup := 0
-		if h.SubscriptionService != nil {
+		if h.SubscriptionService != nil && state.Role != domain.RoleTeacher {
 			subscriptions, subscriptionErr := h.SubscriptionService.GetGroupSubscriptions(ctx, fmt.Sprint(c.Sender().ID))
 			if subscriptionErr != nil {
 				return c.Send("Не удалось загрузить настройки расписания.")
@@ -219,7 +226,7 @@ func (h *Handler) ensureActiveSearchContext(
 		h.StateManager.Delete(userID)
 		return false, nil
 	}
-	if !fresh.GroupActive || fresh.GroupID != current.GroupID || fresh.UniversityID != current.UniversityID {
+	if (!fresh.GroupActive && fresh.Role != domain.RoleTeacher) || fresh.TeacherID != current.TeacherID || (current.Role != "" && fresh.Role != current.Role) || fresh.GroupID != current.GroupID || fresh.UniversityID != current.UniversityID {
 		return false, nil
 	}
 	h.StateManager.Set(userID, current)

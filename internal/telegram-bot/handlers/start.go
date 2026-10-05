@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/miniapp"
-	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	tele "gopkg.in/telebot.v3"
 )
@@ -50,12 +50,15 @@ func (h *Handler) HandleStart(c tele.Context) error {
 	}
 	greeting := fmt.Sprintf("%s, %s!", timeGreeting(), name)
 
-	state, _, err := h.restoreProfile(ctx, c.Sender().ID)
+	state, profile, err := h.restoreProfile(ctx, c.Sender().ID)
 	if err != nil {
 		slog.Error("restore user profile failed", "user_id", user.ID, "err", err)
-		return c.Send("Не удалось загрузить сохранённую группу. Попробуйте ещё раз позже.")
+		return c.Send("Не удалось загрузить сохранённое расписание. Попробуйте ещё раз позже.")
 	}
 	if state != nil {
+		if profile.DailySetup == "choice" || profile.DailySetup == "time" {
+			return h.showDailySetup(c, profile.DailySetup, true)
+		}
 		payload := ""
 		if len(c.Args()) > 0 {
 			payload = strings.ToLower(strings.TrimSpace(c.Args()[0]))
@@ -69,6 +72,13 @@ func (h *Handler) HandleStart(c tele.Context) error {
 		case "setup":
 			return h.HandleChangeUniversity(c)
 		}
+		if state.Role == domain.RoleTeacher {
+			availability := ""
+			if !state.GroupActive {
+				availability = "\nРасписание временно недоступно; привязка сохранена."
+			}
+			return c.Send(greeting+"\n\nМоё расписание: "+state.University+" · "+state.TeacherName+availability, h.mainMenu(c))
+		}
 		availability := ""
 		if !state.GroupActive {
 			availability = "\nСтатус: группа временно не публикуется. Выбор сохранён; можно переключиться в «Мои группы»."
@@ -79,23 +89,10 @@ func (h *Handler) HandleStart(c tele.Context) error {
 			state.University,
 			state.Query,
 			availability,
-		), keyboards.MainMenu())
+		), h.mainMenu(c))
 	}
 
-	universities, err := h.UniversityService.GetAll(ctx)
-	if err != nil {
-		slog.Error("load universities failed", "err", err)
-		return c.Send("Не удалось загрузить список вузов. Попробуйте ещё раз позже.")
-	}
-	if len(universities) == 0 {
-		return c.Send("В системе пока нет вузов с актуальным расписанием.")
-	}
-	setupState := &dto.UserState{Step: "choosing_university", FlowNonce: newFlowNonce()}
-	h.StateManager.Set(c.Sender().ID, setupState)
-	if err = c.Send(greeting + "\n\nВыберите вуз, чтобы настроить основную группу:"); err != nil {
-		return err
-	}
-	return c.Send("Доступные вузы:", keyboards.UniversitySelector(universities, setupState.FlowNonce))
+	return h.HandleRole(c)
 }
 
 func timeGreeting() string {

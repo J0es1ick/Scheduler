@@ -32,7 +32,7 @@ func (h *Handler) HandleQuietHours(c tele.Context) error {
 	if !user.QuietHoursEnabled {
 		return c.Send("Тихие часы выключены.\n\nВключить: /quiet_hours 22:00-07:00")
 	}
-	return c.Send(fmt.Sprintf("Тихие часы: %s–%s. Уведомления дождутся их окончания.\n\nВыключить: /quiet_hours off", user.QuietHoursStart, user.QuietHoursEnd))
+	return c.Send(fmt.Sprintf("Тихие часы: %s–%s. Уведомления об изменениях дождутся их окончания. Ежедневное расписание придёт в выбранное время.\n\nВыключить: /quiet_hours off", user.QuietHoursStart, user.QuietHoursEnd))
 }
 
 func parseQuietHours(input, currentStart, currentEnd string) (bool, string, string, error) {
