@@ -228,16 +228,16 @@ func (w *ReminderWorker) enqueueRecipientReminders(
 	for offset := 0; offset <= reminderLookaheadDays; offset++ {
 		date := dateOnly(now).AddDate(0, 0, offset)
 		dateKey := date.Format("2006-01-02")
-		groupSchedules := schedules[recipient.GroupID]
+		groupSchedules := schedules[reminderTarget(recipient)]
 		if groupSchedules == nil {
 			groupSchedules = make(map[string][]domain.Lesson)
-			schedules[recipient.GroupID] = groupSchedules
+			schedules[reminderTarget(recipient)] = groupSchedules
 		}
 
 		lessons, loaded := groupSchedules[dateKey]
 		if !loaded {
 			var err error
-			lessons, err = w.scheduleService.GetScheduleForGroup(ctx, recipient.GroupID, date)
+			lessons, err = loadReminderSchedule(ctx, w.scheduleService, recipient, date)
 			if err != nil {
 				slog.Error(
 					"lesson reminder worker: load schedule failed",
@@ -312,7 +312,7 @@ func (w *ReminderWorker) enqueueReminderSlot(
 
 	id := reminderID(
 		recipient.UserID,
-		recipient.GroupID,
+		reminderTarget(recipient),
 		date,
 		slot.TimeStart,
 		slot.TimeEnd,
@@ -324,7 +324,7 @@ func (w *ReminderWorker) enqueueReminderSlot(
 		recipient.UserID,
 		recipient.GroupID,
 		body,
-		domain.ReminderContext{Date: date.Format(time.DateOnly), TimeStart: slot.TimeStart, TimeEnd: slot.TimeEnd, Subgroup: recipient.Subgroup, StartsAt: startsAt},
+		domain.ReminderContext{TeacherID: recipient.TeacherID, Date: date.Format(time.DateOnly), TimeStart: slot.TimeStart, TimeEnd: slot.TimeEnd, Subgroup: recipient.Subgroup, StartsAt: startsAt},
 	); err != nil {
 		slog.Error(
 			"lesson reminder worker: enqueue failed",
@@ -422,6 +422,9 @@ func reminderText(
 	)
 	for _, lesson := range slot.Lessons {
 		fmt.Fprintf(&text, "\n• %s", lesson.Subject)
+		if recipient.TeacherID != "" && lesson.GroupName != "" {
+			fmt.Fprintf(&text, " · группа %s", lesson.GroupName)
+		}
 		if lesson.Subgroup > 0 {
 			fmt.Fprintf(&text, ", подгруппа %d", lesson.Subgroup)
 		}

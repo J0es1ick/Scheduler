@@ -48,6 +48,7 @@ type notificationSender interface {
 }
 
 type NotificationWorker struct {
+	dailySchedule      dailyScheduleProvider
 	reminderSchedule   reminderScheduleProvider
 	reminderRecipient  func(context.Context, string, string) (*domain.ReminderRecipient, error)
 	backgroundLimiter  *telegramlimit.Limiter
@@ -62,10 +63,11 @@ type NotificationWorker struct {
 }
 
 type NotificationOptions struct {
-	Schedule   reminderScheduleProvider
-	BatchSize  int
-	MaxBatches int
-	Limiter    *telegramlimit.Limiter
+	DailySchedule dailyScheduleProvider
+	Schedule      reminderScheduleProvider
+	BatchSize     int
+	MaxBatches    int
+	Limiter       *telegramlimit.Limiter
 }
 
 func NewNotificationWorker(
@@ -89,6 +91,7 @@ func NewNotificationWorker(
 		)
 	}
 	return &NotificationWorker{
+		dailySchedule:    settings.DailySchedule,
 		reminderSchedule: settings.Schedule, reminderRecipient: repository.ReminderRecipient,
 		backgroundLimiter:  telegramlimit.New(time.Second/15, 0),
 		batchSize:          min(1000, max(1, settings.BatchSize)),
@@ -409,13 +412,18 @@ func (w *NotificationWorker) deliverBotOutbox(ctx context.Context, item domain.B
 		item.Body = body
 	}
 	telegramID, err := strconv.ParseInt(item.UserID, 10, 64)
-	if err == nil {
+	if err == nil && item.Kind == "daily_schedule" {
+		err = w.sendDailySchedule(ctx, item)
+	} else if err == nil {
 		_, err = w.bot.Send(&tele.User{ID: telegramID}, item.Body)
 		w.limiter.Observe(err)
 	}
 	rateLimited := false
 	_, rateLimited = telegramlimit.FloodRetryAfter(err)
 	if finishErr := guard.finish(item.ID, func(markCtx context.Context) error {
+		if errors.Is(err, errDailyCancelled) {
+			return w.repository.MarkBotOutboxCancelled(markCtx, item.ID, item.ClaimToken)
+		}
 		if err == nil {
 			return w.repository.MarkBotOutboxDelivered(markCtx, item.ID, item.ClaimToken)
 		}
@@ -612,7 +620,11 @@ func (w *NotificationWorker) refreshReminder(ctx context.Context, item domain.Bo
 	if w.reminderSchedule == nil || w.reminderRecipient == nil {
 		return "", false, fmt.Errorf("reminder delivery provider is unavailable")
 	}
-	recipient, err := w.reminderRecipient(ctx, item.UserID, item.GroupID)
+	reference := item.GroupID
+	if item.TeacherID != "" {
+		reference = "teacher:" + item.TeacherID
+	}
+	recipient, err := w.reminderRecipient(ctx, item.UserID, reference)
 	if err != nil || recipient == nil {
 		return "", false, err
 	}
@@ -634,7 +646,7 @@ func (w *NotificationWorker) refreshReminder(ctx context.Context, item domain.Bo
 	if recipient.ReminderMinutes <= 0 || startsAt.Sub(now) > time.Duration(recipient.ReminderMinutes)*time.Minute {
 		return "", false, nil
 	}
-	lessons, err := w.reminderSchedule.GetScheduleForGroup(ctx, item.GroupID, date)
+	lessons, err := loadReminderSchedule(ctx, w.reminderSchedule, *recipient, date)
 	if err != nil {
 		return "", false, err
 	}
