@@ -101,6 +101,7 @@ type OperationalHealth struct {
 	SnapshotPayloadBytes        int64               `json:"snapshot_payload_bytes" db:"snapshot_payload_bytes"`
 	OldestPendingSeconds        int64               `json:"oldest_pending_seconds" db:"oldest_pending_seconds"`
 	LastSuccessfulParseAt       *time.Time          `json:"last_successful_parse_at" db:"last_successful_parse_at"`
+	DailyWorker                 domain.WorkerStatus `json:"daily_worker"`
 	ReminderWorker              domain.WorkerStatus `json:"reminder_worker"`
 	CheckedAt                   time.Time           `json:"checked_at"`
 }
@@ -187,6 +188,14 @@ type LessonView struct {
 }
 
 type UserView struct {
+	TeacherUniversityName string `json:"teacher_university_name" db:"teacher_university_name"`
+	Role                  string `json:"role" db:"role"`
+	TeacherID             string `json:"teacher_id" db:"teacher_id"`
+	TeacherName           string `json:"teacher_name" db:"teacher_name"`
+	DailyEnabled          bool   `json:"daily_enabled" db:"daily_enabled"`
+	DailyTime             string `json:"daily_time" db:"daily_time"`
+	ScheduleTimezone      string `json:"schedule_timezone" db:"schedule_timezone"`
+
 	BotBlocked           bool      `json:"bot_blocked" db:"bot_blocked"`
 	SupportBlocked       bool      `json:"support_blocked" db:"support_blocked"`
 	ID                   string    `json:"id" db:"id"`

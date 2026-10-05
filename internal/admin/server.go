@@ -429,6 +429,7 @@ scheduler_reminder_worker_cursor_pending %d
 		operations.ReminderWorker.LastFailures,
 		reminderCursorPending,
 	)
+	_, _ = fmt.Fprintf(w, "# TYPE scheduler_daily_worker_last_run_timestamp_seconds gauge\nscheduler_daily_worker_last_run_timestamp_seconds %d\n# TYPE scheduler_daily_worker_last_failures gauge\nscheduler_daily_worker_last_failures %d\n", unixTimestamp(operations.DailyWorker.LastFinishedAt), operations.DailyWorker.LastFailures)
 	_, _ = fmt.Fprintf(w, "scheduler_subscription_integrity_issues %d\n", operations.SubscriptionIntegrityIssues)
 	_, _ = fmt.Fprintf(w, "# TYPE scheduler_expired_pending_reminders gauge\nscheduler_expired_pending_reminders %d\n", operations.ExpiredPendingReminders)
 }

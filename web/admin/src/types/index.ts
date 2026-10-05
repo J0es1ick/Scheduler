@@ -236,6 +236,12 @@ export interface SnapshotScheduleComparison {
 }
 
 export interface OperationalHealth {
+  daily_worker?: {
+    last_finished_at: string | null;
+    last_processed: number;
+    last_failures: number;
+    last_error: string;
+  };
   expired_pending_reminders?: number;
   status: "healthy" | "degraded";
   database: boolean;
@@ -394,6 +400,13 @@ export interface UserRestrictions {
 }
 
 export interface UserView extends UserRestrictions {
+  role?: "student" | "teacher";
+  teacher_id?: string;
+  teacher_name?: string;
+  teacher_university_name?: string;
+  daily_enabled?: boolean;
+  daily_time?: string;
+  schedule_timezone?: string;
   id: string;
   username: string;
   is_admin: boolean;

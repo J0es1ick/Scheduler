@@ -163,3 +163,20 @@ for (const role of ["read_only", "support", "editor", "reviewer", "operator"])
       page.getByRole("button", { name: "Запретить обращения", exact: true }),
     ).toHaveCount(0);
   });
+
+test("teacher card shows personal schedule and daily time", async ({ page }) => {
+  const user = await setup(page);
+  Object.assign(user, {
+    role: "teacher",
+    teacher_name: "Иванов Иван Иванович",
+    teacher_university_name: "Тестовый вуз",
+    daily_enabled: true,
+    daily_time: "06:30",
+    schedule_timezone: "Europe/Moscow",
+  });
+  await page.goto("/#/users");
+  const card = page.getByRole("article", { name: "Пользователь Student" });
+  await expect(card.getByText("Преподаватель: Иванов Иван Иванович · Тестовый вуз")).toBeVisible();
+  await expect(card.getByText("Ежедневное расписание: 06:30 · Europe/Moscow")).toBeVisible();
+  await expect(card.getByText("Студент · основная группа", { exact: false })).toHaveCount(0);
+});

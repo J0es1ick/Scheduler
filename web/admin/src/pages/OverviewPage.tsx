@@ -121,6 +121,22 @@ export function OverviewPage({
         </section>
       )}
 
+      {data.operations.daily_worker && (
+        <section className="operations-warning">
+          <CircleGauge size={20} />
+          <div>
+            <strong>Ежедневная отправка расписания</strong>
+            <span>
+              {data.operations.daily_worker.last_finished_at
+                ? `Последняя проверка: ${new Date(data.operations.daily_worker.last_finished_at).toLocaleString("ru-RU")}. Обработано: ${data.operations.daily_worker.last_processed}.`
+                : "Проверка ещё не выполнялась."}
+              {data.operations.daily_worker.last_error &&
+                ` Ошибка: ${data.operations.daily_worker.last_error}`}
+            </span>
+          </div>
+        </section>
+      )}
+
       <section className="metric-strip">
         <Metric
           icon={BookOpenCheck}

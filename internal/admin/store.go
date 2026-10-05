@@ -226,7 +226,7 @@ func (s *Store) OperationalHealth(ctx context.Context) (*OperationalHealth, erro
 	}
 	if err := s.db.GetContext(ctx, result, `
 		SELECT
-			(SELECT missing_default_subscriptions + orphan_group_subscriptions FROM subscription_integrity) AS subscription_integrity_issues,
+			(SELECT missing_default_subscriptions + orphan_group_subscriptions + teacher_subscriptions FROM subscription_integrity) AS subscription_integrity_issues,
 			(SELECT COUNT(*)::int FROM notification_deliveries WHERE status='pending') AS pending_notifications,
 			(SELECT COUNT(*)::int FROM notification_deliveries WHERE status='failed') AS failed_notifications,
 			(SELECT COUNT(*)::int FROM bot_outbox WHERE status='pending') AS pending_outbox,
@@ -254,11 +254,17 @@ func (s *Store) OperationalHealth(ctx context.Context) (*OperationalHealth, erro
 		return nil, fmt.Errorf("load reminder worker health: %w", err)
 	}
 	result.ReminderWorker = *workerStatus
+	dailyStatus, err := repository.NewWorkerStatusRepository(s.db).Get(ctx, "daily_schedule")
+	if err != nil {
+		return nil, err
+	}
+	result.DailyWorker = *dailyStatus
 	result.Status = "healthy"
 	if result.SubscriptionIntegrityIssues > 0 || result.SourcesStale > 0 || result.SourcesError > 0 ||
 		result.SourcesQuarantined > 0 || result.FailedNotifications > 0 ||
 		result.FailedOutbox > 0 || result.FailedConnectorRuns > 0 || result.OldestPendingSeconds > 300 ||
-		result.ReminderWorker.LastError != "" ||
+		result.DailyWorker.LastError != "" || result.ReminderWorker.LastError != "" ||
+		result.DailyWorker.LastFinishedAt == nil || result.CheckedAt.Sub(*result.DailyWorker.LastFinishedAt) > 3*time.Minute ||
 		result.ReminderWorker.LastFinishedAt == nil ||
 		result.CheckedAt.Sub(*result.ReminderWorker.LastFinishedAt) > 3*time.Minute {
 		result.Status = "degraded"
@@ -467,6 +473,9 @@ func (s *Store) Users(ctx context.Context, queryText string, limit int) ([]UserV
 	args = append(args, limit)
 	query := fmt.Sprintf(`
 		SELECT u.id, COALESCE(u.username, '') AS username, u.is_admin, u.admin_role,
+			u.role,COALESCE(u.teacher_id,'') AS teacher_id,COALESCE((SELECT t.name FROM teachers t WHERE t.id=u.teacher_id),'') AS teacher_name,
+			COALESCE((SELECT un.name FROM teachers t JOIN universities un ON un.id=t.university_id WHERE t.id=u.teacher_id),'') AS teacher_university_name,
+			u.daily_enabled,to_char(u.daily_time,'HH24:MI') AS daily_time,scheduler_profile_timezone(u) AS schedule_timezone,
 			COUNT(s.id)::int AS subscriptions,
 			COALESCE(u.default_group_id, '') AS default_group_id,
 			COALESCE(dg.name, '') AS default_group_name,
@@ -692,6 +701,9 @@ func (s *Store) TelegramAdmin(ctx context.Context, userID string) (*UserView, er
 	var user UserView
 	err := s.db.GetContext(ctx, &user, `
 		SELECT u.id, COALESCE(u.username, '') AS username, u.is_admin, u.admin_role,
+			u.role,COALESCE(u.teacher_id,'') AS teacher_id,COALESCE((SELECT t.name FROM teachers t WHERE t.id=u.teacher_id),'') AS teacher_name,
+			COALESCE((SELECT un.name FROM teachers t JOIN universities un ON un.id=t.university_id WHERE t.id=u.teacher_id),'') AS teacher_university_name,
+			u.daily_enabled,to_char(u.daily_time,'HH24:MI') AS daily_time,scheduler_profile_timezone(u) AS schedule_timezone,
 			0 AS subscriptions,
 			COALESCE(u.default_group_id, '') AS default_group_id,
 			COALESCE(g.name, '') AS default_group_name,
