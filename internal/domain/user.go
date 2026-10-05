@@ -7,6 +7,13 @@ import (
 
 type User struct {
 	UserRestrictions
+	Role                 UserRole           `db:"role" json:"role"`
+	TeacherID            string             `db:"teacher_id" json:"teacher_id"`
+	TeacherScheduleView  ScheduleViewFormat `db:"teacher_schedule_view_format" json:"teacher_schedule_view_format"`
+	DailyEnabled         bool               `db:"daily_enabled" json:"daily_enabled"`
+	DailyTime            string             `db:"daily_time" json:"daily_time"`
+	DailySetup           string             `db:"daily_setup" json:"daily_setup"`
+	DailyNextAt          *time.Time         `db:"daily_next_at" json:"daily_next_at"`
 	ID                   string             `db:"id" json:"id"`
 	Username             string             `db:"username" json:"username"`
 	IsAdmin              bool               `db:"is_admin" json:"is_admin"`
@@ -23,6 +30,7 @@ type User struct {
 }
 
 type UserDataExport struct {
+	Teacher         *Teacher                `json:"teacher,omitempty"`
 	ExportedAt      time.Time               `json:"exported_at"`
 	User            User                    `json:"user"`
 	Subscriptions   []Subscription          `json:"subscriptions"`

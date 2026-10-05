@@ -82,9 +82,10 @@ func ApplyRuntimeGrants(
 			"SELECT, INSERT, UPDATE, DELETE ON subscriptions, chat_schedule_profiles, notification_deliveries, bot_outbox, worker_status",
 			"SELECT, INSERT ON support_requests",
 			"SELECT, DELETE ON schedule_change_events",
-			"SELECT ON users",
+			"SELECT ON users, teachers, schedule_profile_recipients",
+			"INSERT, UPDATE ON teachers",
 			"INSERT (id, username, created_at, updated_at) ON users",
-			"UPDATE (username, default_group_id, notifications_enabled, reminder_enabled, reminder_minutes, quiet_hours_enabled, quiet_hours_start, quiet_hours_end, search_schedule_view_format, telegram_menu_fingerprint, updated_at) ON users",
+			"UPDATE (role, teacher_id, teacher_schedule_view_format, daily_enabled, daily_time, daily_setup, daily_next_at, username, default_group_id, notifications_enabled, reminder_enabled, reminder_minutes, quiet_hours_enabled, quiet_hours_start, quiet_hours_end, search_schedule_view_format, telegram_menu_fingerprint, updated_at) ON users",
 			"SELECT (token_hash, admin_id, name, auth_method, admin_role, expires_at, created_at, last_seen_at) ON admin_sessions",
 		},
 		adminRole: {
@@ -92,6 +93,7 @@ func ApplyRuntimeGrants(
 			"SELECT ON " + readOnly,
 			"SELECT, INSERT, UPDATE, DELETE ON lesson_overrides, connector_clients, connector_request_nonces, admin_sessions, privacy_deletion_requests",
 			"SELECT, UPDATE ON users, support_requests",
+			"SELECT ON teachers, schedule_profile_recipients",
 			"SELECT, DELETE ON subscriptions",
 			"SELECT ON chat_schedule_profiles, worker_status",
 			"SELECT, UPDATE ON operational_maintenance",
@@ -101,7 +103,7 @@ func ApplyRuntimeGrants(
 		parserRole: {
 			"SELECT, INSERT, UPDATE, DELETE ON " + parserTables,
 			"SELECT ON " + readOnly,
-			"SELECT ON lesson_overrides",
+			"SELECT ON lesson_overrides, teachers",
 			"SELECT, UPDATE ON operational_maintenance",
 		},
 		privacyRole: {
@@ -131,10 +133,12 @@ func ApplyRuntimeGrants(
 			"scheduler_request_outbox_cancellation(TEXT, TEXT, TEXT, TEXT)",
 			"scheduler_reconcile_notification_queue()",
 			"enqueue_schedule_change(TEXT, TEXT, TEXT, TEXT)",
+			"enqueue_teacher_change(TEXT, TEXT, TEXT, TEXT)",
 			"enqueue_admin_alert(TEXT, TEXT)",
 		},
 		parserRole: {
 			"enqueue_schedule_change(TEXT, TEXT, TEXT, TEXT)",
+			"enqueue_teacher_change(TEXT, TEXT, TEXT, TEXT)",
 			"enqueue_admin_alert(TEXT, TEXT)",
 		},
 		privacyRole: {

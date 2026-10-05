@@ -94,6 +94,9 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 		{botRole, "users", "DELETE", false},
 		{botRole, "lesson_overrides", "INSERT", false},
 		{botRole, "subscriptions", "INSERT", true},
+		{botRole, "teachers", "INSERT", true},
+		{botRole, "schedule_profile_recipients", "SELECT", true},
+		{parserRole, "schedule_profile_recipients", "SELECT", false},
 		{botRole, "universities", "UPDATE", false},
 		{botRole, "groups", "UPDATE", false},
 		{botRole, "notification_deliveries", "UPDATE", true},
@@ -151,6 +154,9 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 		{botRole, "enqueue_schedule_change(text,text,text,text)", false},
 		{parserRole, "enqueue_schedule_change(text,text,text,text)", true},
 		{parserRole, "enqueue_admin_alert(text,text)", true},
+		{parserRole, "enqueue_teacher_change(text,text,text,text)", true},
+		{adminRole, "enqueue_teacher_change(text,text,text,text)", true},
+		{botRole, "enqueue_teacher_change(text,text,text,text)", false},
 		{parserRole, "scheduler_reconcile_notification_queue()", false},
 		{privacyRole, "enqueue_privacy_deletion(text)", false},
 		{privacyRole, "execute_privacy_deletion(text,text)", true},
@@ -174,6 +180,34 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 		if allowed != test.want {
 			t.Errorf("%s execute %s: %t", test.role, test.function, allowed)
 		}
+	}
+	profileTx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer profileTx.Rollback()
+	profileID := "profile-role-" + uuid.NewString()
+	if _, err = profileTx.ExecContext(ctx, `INSERT INTO universities(id,name) VALUES($1,'Profile grants')`, profileID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = profileTx.ExecContext(ctx, "SET LOCAL ROLE "+pgx.Identifier{botRole}.Sanitize()); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`INSERT INTO users(id) VALUES($1)`,
+		`SELECT is_active FROM universities WHERE id=$1`,
+		`INSERT INTO teachers(id,university_id,name,name_key) VALUES($1,$1,'Synthetic teacher','synthetic teacher')`,
+		`UPDATE users SET role='teacher',teacher_id=$1,daily_enabled=TRUE,daily_time='06:00',daily_setup='done' WHERE id=$1`,
+		`SELECT * FROM schedule_profile_recipients WHERE user_id=$1`,
+		`INSERT INTO bot_outbox(id,user_id,teacher_id,kind,body) VALUES($1,$1,$1,'teacher_change','Synthetic change')`,
+		`UPDATE users SET daily_time='07:00',teacher_schedule_view_format='compact' WHERE id=$1`,
+	} {
+		if _, err = profileTx.ExecContext(ctx, statement, profileID); err != nil {
+			t.Fatalf("bot profile permissions: %v", err)
+		}
+	}
+	if err = profileTx.Rollback(); err != nil {
+		t.Fatal(err)
 	}
 	privacyUserID := "privacy-role-test-" + uuid.NewString()
 	if _, err = db.ExecContext(ctx, `INSERT INTO users(id,username) VALUES ($1,'privacy-role-test')`, privacyUserID); err != nil {

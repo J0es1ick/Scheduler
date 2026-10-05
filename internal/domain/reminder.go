@@ -3,6 +3,8 @@ package domain
 import "time"
 
 type ReminderRecipient struct {
+	TeacherID       string `db:"teacher_id"`
+	UniversityID    string `db:"university_id"`
 	UserID          string `db:"user_id"`
 	GroupID         string `db:"group_id"`
 	GroupName       string `db:"group_name"`
@@ -13,6 +15,7 @@ type ReminderRecipient struct {
 }
 
 type ReminderContext struct {
+	TeacherID string    `json:"teacher_id,omitempty"`
 	Date      string    `json:"date"`
 	TimeStart string    `json:"time_start"`
 	TimeEnd   string    `json:"time_end"`

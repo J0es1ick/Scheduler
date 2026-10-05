@@ -147,10 +147,10 @@ func (r *NotificationRepository) ClaimBotOutbox(ctx context.Context, limit int) 
 				updated_at=NOW()
 			FROM candidates c
 			WHERE o.id=c.id
-			RETURNING o.id, o.user_id, o.request_id, o.kind, o.body, o.attempts, o.group_id, o.expires_at, o.reminder_context,
+			RETURNING o.id, o.user_id, o.request_id, o.kind, o.body, o.attempts, o.group_id, o.expires_at, o.reminder_context, o.teacher_id, o.schedule_context, o.schedule_messages, o.delivered_parts,
 				o.claim_token, o.lease_expires_at
 		)
-		SELECT id, user_id, COALESCE(request_id, '') AS request_id, kind, body, attempts, COALESCE(group_id, '') AS group_id, expires_at, reminder_context,
+		SELECT id, user_id, COALESCE(request_id, '') AS request_id, kind, body, attempts, COALESCE(group_id, '') AS group_id, expires_at, reminder_context, COALESCE(teacher_id,'') AS teacher_id, schedule_context, schedule_messages, delivered_parts,
 			claim_token, lease_expires_at
 		FROM claimed
 		ORDER BY expires_at NULLS LAST, id`, limit, claimToken, int(notificationClaimLease/time.Second))
@@ -580,12 +580,11 @@ func (r *NotificationRepository) requireNotificationClaim(ctx context.Context, r
 
 func (r *NotificationRepository) ReminderRecipient(ctx context.Context, userID, groupID string) (*domain.ReminderRecipient, error) {
 	var recipient domain.ReminderRecipient
-	err := r.db.GetContext(ctx, &recipient, `SELECT u.id AS user_id, g.id AS group_id, g.name AS group_name,
- un.name AS university_name, un.timezone, u.reminder_minutes, COALESCE(s.subgroup,0) AS subgroup
- FROM users u JOIN groups g ON g.id=u.default_group_id AND g.is_active
- JOIN universities un ON un.id=g.university_id AND un.is_active
- LEFT JOIN subscriptions s ON s.user_id=u.id AND s.object_id=g.id AND s.object_type='group'
- WHERE u.id=$1 AND g.id=$2 AND u.reminder_enabled`, userID, groupID)
+	err := r.db.GetContext(ctx, &recipient, `SELECT user_id,CASE WHEN role='student' THEN COALESCE(default_group_id,'') ELSE '' END AS group_id,
+CASE WHEN role='teacher' THEN COALESCE(teacher_id,'') ELSE '' END AS teacher_id,
+university_id,name AS group_name,university_name,timezone,subgroup,reminder_minutes
+FROM schedule_profile_recipients WHERE user_id=$1 AND reminder_enabled AND NOT bot_blocked AND is_active
+AND CASE WHEN role='teacher' THEN 'teacher:'||teacher_id ELSE default_group_id END=$2`, userID, groupID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

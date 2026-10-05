@@ -96,7 +96,7 @@ func (r *SubscriptionRepository) SubscribeAndSetDefault(
 		return fmt.Errorf("subscribe and set default: upsert: %w", err)
 	}
 	if _, err = tx.ExecContext(ctx, `
-		UPDATE users SET default_group_id=$2, updated_at=NOW() WHERE id=$1`, userID, groupID); err != nil {
+		UPDATE users SET default_group_id=$2, role='student', updated_at=NOW() WHERE id=$1`, userID, groupID); err != nil {
 		return fmt.Errorf("subscribe and set default: update user: %w", err)
 	}
 	if previousDefault.Valid && previousDefault.String != groupID {

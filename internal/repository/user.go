@@ -44,7 +44,8 @@ func (r *UserRepository) GetUserByID(ctx context.Context, id string) (*domain.Us
 			reminder_enabled, reminder_minutes, quiet_hours_enabled,
 			to_char(quiet_hours_start, 'HH24:MI') AS quiet_hours_start,
 			to_char(quiet_hours_end, 'HH24:MI') AS quiet_hours_end,
-			search_schedule_view_format,
+			search_schedule_view_format, role, COALESCE(teacher_id, '') AS teacher_id, teacher_schedule_view_format,
+			daily_enabled, to_char(daily_time, 'HH24:MI') AS daily_time, daily_setup, daily_next_at,
 			created_at, updated_at
 		 FROM users WHERE id = $1`, id)
 	if err != nil {
@@ -64,7 +65,8 @@ func (r *UserRepository) GetUserByUsername(ctx context.Context, username string)
 			reminder_enabled, reminder_minutes, quiet_hours_enabled,
 			to_char(quiet_hours_start, 'HH24:MI') AS quiet_hours_start,
 			to_char(quiet_hours_end, 'HH24:MI') AS quiet_hours_end,
-			search_schedule_view_format,
+			search_schedule_view_format, role, COALESCE(teacher_id, '') AS teacher_id, teacher_schedule_view_format,
+			daily_enabled, to_char(daily_time, 'HH24:MI') AS daily_time, daily_setup, daily_next_at,
 			created_at, updated_at
 		 FROM users WHERE username = $1`, username)
 	if err != nil {
@@ -84,7 +86,8 @@ func (r *UserRepository) GetAllUsers(ctx context.Context) ([]domain.User, error)
 			reminder_enabled, reminder_minutes, quiet_hours_enabled,
 			to_char(quiet_hours_start, 'HH24:MI') AS quiet_hours_start,
 			to_char(quiet_hours_end, 'HH24:MI') AS quiet_hours_end,
-			search_schedule_view_format,
+			search_schedule_view_format, role, COALESCE(teacher_id, '') AS teacher_id, teacher_schedule_view_format,
+			daily_enabled, to_char(daily_time, 'HH24:MI') AS daily_time, daily_setup, daily_next_at,
 			created_at, updated_at FROM users`)
 	if err != nil {
 		return nil, fmt.Errorf("get all users: %w", err)
@@ -325,6 +328,12 @@ func (r *UserRepository) ExportUserData(ctx context.Context, id string) (*domain
 		AuditRecords:    []domain.PersonalAuditRecord{},
 		AdminSessions:   []domain.PersonalAdminSession{},
 		References:      []domain.PersonalDataReference{},
+	}
+	if user.TeacherID != "" {
+		result.Teacher, err = r.GetTeacher(ctx, user.TeacherID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err = r.db.SelectContext(ctx, &result.Subscriptions, `
 		SELECT id, user_id, object_id, object_type, schedule_view_format, subgroup,
