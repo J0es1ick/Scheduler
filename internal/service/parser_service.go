@@ -630,6 +630,9 @@ func (s *ParserService) snapshotPublicationHook(
 			if err != nil {
 				return err
 			}
+			if err = publication.EnqueueTeacherChanges(ctx, candidate.Payload.UniversityID, TeacherChanges(beforeLessons, afterLessons)); err != nil {
+				return err
+			}
 			groupIDs := make(map[string]struct{})
 			for _, lesson := range beforeLessons {
 				groupIDs[lesson.GroupID] = struct{}{}

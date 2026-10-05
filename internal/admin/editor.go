@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/J0es1ick/Scheduler/internal/repository"
+	"github.com/J0es1ick/Scheduler/internal/service"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )
@@ -85,6 +87,11 @@ func (s *Store) CreateManualLesson(ctx context.Context, actorID string, lesson L
 	if err = lockEditorUniversity(ctx, tx, universityID); err != nil {
 		return "", err
 	}
+	beforeTeachers, err := repository.EffectiveLessonsForUniversity(ctx, tx, universityID)
+	if err != nil {
+		return "", err
+	}
+
 	if err = resolveEditorRule(ctx, tx, &lesson, nil); err != nil {
 		return "", err
 	}
@@ -113,6 +120,14 @@ func (s *Store) CreateManualLesson(ctx context.Context, actorID string, lesson L
 	); err != nil {
 		return "", err
 	}
+	afterTeachers, err := repository.EffectiveLessonsForUniversity(ctx, tx, universityID)
+	if err != nil {
+		return "", err
+	}
+	if err = repository.EnqueueTeacherChanges(ctx, tx, universityID, service.TeacherChanges(beforeTeachers, afterTeachers)); err != nil {
+		return "", err
+	}
+
 	if err = tx.Commit(); err != nil {
 		return "", fmt.Errorf("editor create lesson: commit: %w", err)
 	}
@@ -139,6 +154,11 @@ func (s *Store) UpdateEditorLesson(
 	if err = lockEditorUniversity(ctx, tx, current.UniversityID); err != nil {
 		return "", err
 	}
+	beforeTeachers, err := repository.EffectiveLessonsForUniversity(ctx, tx, current.UniversityID)
+	if err != nil {
+		return "", err
+	}
+
 	current, err = effectiveLessonForUpdate(tx, ctx, lessonID)
 	if err != nil {
 		return "", err
@@ -203,6 +223,14 @@ func (s *Store) UpdateEditorLesson(
 		return "", err
 	}
 
+	afterTeachers, err := repository.EffectiveLessonsForUniversity(ctx, tx, current.UniversityID)
+	if err != nil {
+		return "", err
+	}
+	if err = repository.EnqueueTeacherChanges(ctx, tx, current.UniversityID, service.TeacherChanges(beforeTeachers, afterTeachers)); err != nil {
+		return "", err
+	}
+
 	if err = tx.Commit(); err != nil {
 		return "", fmt.Errorf("editor update lesson: commit: %w", err)
 	}
@@ -228,6 +256,11 @@ func (s *Store) DeleteEditorLesson(
 	if err = lockEditorUniversity(ctx, tx, current.UniversityID); err != nil {
 		return err
 	}
+	beforeTeachers, err := repository.EffectiveLessonsForUniversity(ctx, tx, current.UniversityID)
+	if err != nil {
+		return err
+	}
+
 	current, err = effectiveLessonForUpdate(tx, ctx, lessonID)
 	if err != nil {
 		return err
@@ -284,6 +317,14 @@ func (s *Store) DeleteEditorLesson(
 		return err
 	}
 
+	afterTeachers, err := repository.EffectiveLessonsForUniversity(ctx, tx, current.UniversityID)
+	if err != nil {
+		return err
+	}
+	if err = repository.EnqueueTeacherChanges(ctx, tx, current.UniversityID, service.TeacherChanges(beforeTeachers, afterTeachers)); err != nil {
+		return err
+	}
+
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("editor delete lesson: commit: %w", err)
 	}
@@ -316,6 +357,11 @@ func (s *Store) RestoreEditorLesson(ctx context.Context, lessonID string, expect
 	if err = lockEditorUniversity(ctx, tx, lesson.UniversityID); err != nil {
 		return err
 	}
+	beforeTeachers, err := repository.EffectiveLessonsForUniversity(ctx, tx, lesson.UniversityID)
+	if err != nil {
+		return err
+	}
+
 	if err = tx.GetContext(ctx, &lesson, `
 		SELECT university_id, group_id, subject, updated_at
 		FROM lesson_overrides
@@ -346,6 +392,14 @@ func (s *Store) RestoreEditorLesson(ctx context.Context, lessonID string, expect
 	); err != nil {
 		return err
 	}
+	afterTeachers, err := repository.EffectiveLessonsForUniversity(ctx, tx, lesson.UniversityID)
+	if err != nil {
+		return err
+	}
+	if err = repository.EnqueueTeacherChanges(ctx, tx, lesson.UniversityID, service.TeacherChanges(beforeTeachers, afterTeachers)); err != nil {
+		return err
+	}
+
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("editor restore lesson: commit: %w", err)
 	}
