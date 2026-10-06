@@ -1,3 +1,4 @@
+@import "../../shared/fonts.css";
 @import "./styles/tokens.css";
 @import "./styles/shell.css";
 @import "./styles/components.css";
@@ -9,4 +10,6 @@
 
 @import "./styles/release.css";
 @import "./styles/themes.css";
+
+@import "./styles/workspace.css";
 @import "./styles/broadcasts.css";

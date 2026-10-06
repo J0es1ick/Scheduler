@@ -9,7 +9,7 @@
   height: min(920px, calc(100vh - 36px));
   overflow: hidden;
   border: 1px solid var(--line-strong);
-  border-radius: 16px;
+  border-radius: 6px;
   background: var(--surface);
   box-shadow: 0 26px 80px var(--shadow-raised, rgba(50, 43, 33, 0.26));
 }
@@ -122,7 +122,7 @@
   min-width: 0;
   padding: 10px 13px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 6px;
   background: var(--surface);
 }
 
@@ -134,7 +134,7 @@
 .snapshot-version-comparison article > span,
 .snapshot-period > span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .snapshot-version-comparison article strong {
@@ -148,7 +148,7 @@
 .snapshot-version-comparison article p {
   margin: 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .snapshot-period {
@@ -168,10 +168,10 @@
   min-height: 27px;
   padding: 4px 9px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 6px;
   background: var(--surface);
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .snapshot-delta-strip .is-changed {
@@ -213,7 +213,7 @@
   margin: 14px 14px 8px;
   padding: 0 11px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 6px;
   background: var(--surface);
   color: var(--muted);
 }
@@ -250,10 +250,10 @@
   min-height: 29px;
   padding: 4px 8px;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: 6px;
   background: transparent;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .snapshot-group-filters button.is-active {
@@ -280,7 +280,7 @@
   width: 100%;
   padding: 10px 9px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
   text-align: left;
 }
@@ -311,7 +311,7 @@
 
 .snapshot-group-item span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .snapshot-group-item.is-added span {
@@ -332,7 +332,7 @@
   gap: 3px;
   margin: 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .snapshot-group-empty {
@@ -351,7 +351,7 @@
 
 .snapshot-group-empty p {
   margin: 4px 0 0;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -377,7 +377,7 @@
 
 .snapshot-comparison-heading span {
   color: var(--rust);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -386,14 +386,14 @@
 .snapshot-comparison-heading h3 {
   margin: 2px 0 0;
   color: var(--ink);
-  font-family: Georgia, serif;
+  font-family: var(--font-ui);
   font-size: 20px;
 }
 
 .snapshot-comparison-heading p {
   margin: 2px 0 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .snapshot-comparison-heading > svg {
@@ -411,7 +411,7 @@
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 11px;
+  border-radius: 6px;
   background: var(--surface);
 }
 
@@ -425,7 +425,7 @@
 
 .snapshot-schedule-panel > header span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .snapshot-schedule-panel > header h4 {
@@ -440,7 +440,7 @@
   min-width: 29px;
   height: 29px;
   padding: 0 7px;
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--surface-muted);
   color: var(--ink);
   font-size: 12px;
@@ -456,7 +456,7 @@
   padding: 0 14px 12px;
   border-bottom: 1px solid var(--line);
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .snapshot-week-sections {
@@ -469,7 +469,7 @@
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 6px;
   background: var(--inset-surface, #fbf8f1);
 }
 
@@ -500,7 +500,7 @@
 
 .snapshot-week-heading span {
   color: var(--muted-light);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -509,14 +509,14 @@
 .snapshot-week-heading h5 {
   margin: 2px 0 0;
   color: var(--ink);
-  font-family: Georgia, serif;
+  font-family: var(--font-ui);
   font-size: 14px;
 }
 
 .snapshot-week-heading p {
   margin: 0;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.35;
   text-align: right;
 }
@@ -528,16 +528,16 @@
   height: 25px;
   padding: 0 6px;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: 6px;
   background: var(--surface);
   color: var(--ink);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .snapshot-week-empty {
   padding: 22px 14px;
   color: var(--muted-light);
-  font-size: 11px;
+  font-size: 12px;
   text-align: center;
 }
 
@@ -553,7 +553,7 @@
 
 .snapshot-schedule-day {
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 6px;
   background: var(--surface-muted);
 }
 
@@ -569,14 +569,14 @@
 .snapshot-schedule-day > header span,
 .snapshot-schedule-day > header em {
   color: var(--muted-light);
-  font-size: 10px;
+  font-size: 12px;
   font-style: normal;
 }
 
 .snapshot-schedule-day h5 {
   margin: 0;
   color: var(--ink);
-  font-family: Georgia, serif;
+  font-family: var(--font-ui);
   font-size: 13px;
 }
 
@@ -592,7 +592,7 @@
   padding: 10px;
   border: 1px solid var(--line);
   border-left: 3px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--surface);
 }
 
@@ -620,13 +620,13 @@
   align-items: center;
   gap: 4px;
   color: var(--ink);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
 .snapshot-lesson-topline em {
   color: var(--rust);
-  font-size: 10px;
+  font-size: 12px;
   font-style: normal;
   font-weight: 700;
   text-transform: uppercase;
@@ -634,7 +634,7 @@
 
 .snapshot-lesson-card > small {
   color: var(--rust);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -657,7 +657,7 @@
   align-items: center;
   gap: 5px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .snapshot-lesson-card footer {
@@ -673,7 +673,7 @@
   border-radius: 5px;
   background: var(--surface-muted);
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .snapshot-schedule-empty {
@@ -696,7 +696,7 @@
   max-width: 260px;
   margin: 4px 0 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -724,7 +724,7 @@
   max-width: 620px;
   margin: 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
 }
 

@@ -3,6 +3,7 @@ WORKDIR /src/web/admin
 COPY web/admin/package.json web/admin/package-lock.json ./
 RUN npm ci
 COPY web/admin/ ./
+COPY web/shared/ /src/web/shared/
 RUN npm run build
 
 FROM node:22.16.0-alpine AS site-web-builder
@@ -10,6 +11,7 @@ WORKDIR /src/web/site
 COPY web/site/package.json web/site/package-lock.json ./
 RUN npm ci
 COPY web/site/ ./
+COPY web/shared/ /src/web/shared/
 RUN npm run build
 
 FROM golang:1.25.13-alpine AS go-builder

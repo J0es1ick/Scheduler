@@ -16,7 +16,7 @@
 .editor-context-copy p {
   margin: 0;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -37,7 +37,7 @@
 .editor-group-controls label > span,
 .field > span {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -49,11 +49,11 @@
   min-height: 41px;
   padding: 0 10px;
   border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: 6px;
   outline: 0;
   background: var(--surface-muted);
   color: var(--ink);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .editor-group-search {
@@ -73,7 +73,7 @@
   outline: 0;
   background: transparent;
   color: var(--ink);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .editor-group-results {
@@ -86,7 +86,7 @@
   overflow-y: auto;
   padding: 6px;
   border: 1px solid var(--line-strong);
-  border-radius: 10px;
+  border-radius: 6px;
   background: var(--surface);
   box-shadow: 0 18px 45px var(--shadow-raised, rgba(50, 43, 33, 0.16));
 }
@@ -97,7 +97,7 @@
   gap: 3px;
   padding: 10px 11px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 6px;
   background: transparent;
   text-align: left;
 }
@@ -115,7 +115,7 @@
 .editor-group-results button span,
 .editor-group-result-state {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .editor-group-result-state {
@@ -174,13 +174,13 @@
   align-items: center;
   gap: 14px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
 .editor-stats strong {
   color: var(--ink);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .editor-workspace {
@@ -200,7 +200,7 @@
 .schedule-week-section.has-title {
   padding: 13px;
   border: 1px solid var(--line);
-  border-radius: 13px;
+  border-radius: 6px;
   background: var(--surface-overlay, rgba(255, 253, 248, 0.48));
 }
 
@@ -214,7 +214,7 @@
 
 .schedule-week-heading span {
   color: var(--rust);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -223,7 +223,7 @@
 .schedule-week-heading h3 {
   margin: 3px 0 0;
   color: var(--ink);
-  font-family: Georgia, serif;
+  font-family: var(--font-ui);
   font-size: 20px;
   font-weight: 600;
 }
@@ -250,7 +250,7 @@
   min-height: 590px;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 11px;
+  border-radius: 6px;
   background: var(--surface-muted);
 }
 
@@ -270,14 +270,14 @@
 
 .day-column > header > div > span {
   color: var(--rust);
-  font-family: Georgia, serif;
-  font-size: 10px;
+  font-family: var(--font-ui);
+  font-size: 12px;
 }
 
 .day-column h3 {
   margin: 5px 0 3px;
   color: var(--ink);
-  font-family: Georgia, serif;
+  font-family: var(--font-ui);
   font-size: 14px;
   font-weight: 600;
 }
@@ -285,7 +285,7 @@
 .day-column header p {
   margin: 0;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .day-add {
@@ -295,7 +295,7 @@
   height: 30px;
   padding: 0;
   border: 1px solid var(--line-strong);
-  border-radius: 7px;
+  border-radius: 6px;
   background: var(--surface);
   color: var(--olive-dark);
 }
@@ -314,7 +314,7 @@
   align-content: center;
   gap: 7px;
   border: 1px dashed var(--line-strong);
-  border-radius: 9px;
+  border-radius: 6px;
   background: transparent;
   color: var(--muted);
   font-size: 12px;
@@ -330,7 +330,7 @@
   padding: 12px;
   border: 1px solid var(--line);
   border-left: 3px solid var(--olive);
-  border-radius: 9px;
+  border-radius: 6px;
   background: var(--surface);
 }
 
@@ -368,7 +368,7 @@
   align-items: center;
   gap: 4px;
   color: var(--olive-dark);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -398,7 +398,7 @@
   display: inline-block;
   margin-top: 10px;
   color: var(--rust);
-  font-size: 7px;
+  font-size: 12px;
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -406,7 +406,7 @@
 .board-lesson h4 {
   margin: 5px 0 10px;
   color: var(--ink);
-  font-family: Georgia, serif;
+  font-family: var(--font-ui);
   font-size: 12px;
   font-weight: 600;
   line-height: 1.35;
@@ -422,7 +422,7 @@
   align-items: center;
   gap: 5px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .board-meta {
@@ -439,7 +439,7 @@
   border-radius: 4px;
   background: var(--paper-deep);
   color: var(--muted);
-  font-size: 6px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -457,7 +457,7 @@
   border: 0;
   background: transparent;
   color: var(--olive-dark);
-  font-size: 7px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -468,7 +468,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--line-strong);
-  border-radius: 14px;
+  border-radius: 6px;
   background: var(--surface);
   box-shadow: 0 22px 70px var(--shadow-raised, rgba(50, 43, 33, 0.22));
 }
@@ -495,14 +495,14 @@
 .change-ledger-head h2 {
   margin: 0;
   color: var(--ink);
-  font-family: Georgia, serif;
+  font-family: var(--font-ui);
   font-size: 22px;
 }
 
 .change-ledger-head p {
   margin: 3px 0 0;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .ledger-empty {
@@ -538,7 +538,7 @@
   border-radius: 4px;
   background: var(--olive-soft);
   color: var(--olive-dark);
-  font-size: 6px;
+  font-size: 12px;
   font-weight: 900;
 }
 
@@ -560,7 +560,7 @@
 .ledger-list strong {
   overflow: hidden;
   color: var(--ink);
-  font-size: 8px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -568,7 +568,7 @@
 .ledger-list article > div span {
   margin-top: 3px;
   color: var(--muted);
-  font-size: 7px;
+  font-size: 12px;
 }
 
 .ledger-list button {
@@ -591,7 +591,7 @@
   margin: 0;
   border-top: 1px solid var(--line);
   color: var(--olive-dark);
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -605,7 +605,7 @@
   gap: 11px;
   padding: 14px;
   border: 1px solid var(--accent-border, #c8cdbd);
-  border-radius: 10px;
+  border-radius: 6px;
   background: var(--olive-soft);
   color: var(--olive-dark);
 }
@@ -657,7 +657,7 @@
   width: min(100%, 560px);
   overflow: hidden;
   border: 1px solid var(--line-strong);
-  border-radius: 14px;
+  border-radius: 6px;
   background: var(--surface);
   box-shadow: 0 22px 70px var(--shadow-raised, rgba(50, 43, 33, 0.22));
 }
@@ -687,7 +687,7 @@
   align-items: center;
   padding: 12px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 6px;
   background: var(--surface-muted);
   text-align: left;
 }
@@ -704,7 +704,7 @@
   width: 40px;
   height: 40px;
   border: 1px solid var(--accent-border, #c8cdbd);
-  border-radius: 9px;
+  border-radius: 6px;
   background: var(--olive-soft);
   color: var(--olive-dark);
 }
@@ -717,7 +717,7 @@
 .export-options p {
   margin: 3px 0 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .export-options > button > svg {
@@ -740,7 +740,7 @@
   max-height: min(92vh, 840px);
   overflow: auto;
   border: 1px solid var(--line-strong);
-  border-radius: 14px;
+  border-radius: 6px;
   background: var(--surface);
   box-shadow: 0 22px 70px var(--shadow-raised, rgba(50, 43, 33, 0.22));
 }
@@ -764,7 +764,7 @@
 .lesson-dialog header p {
   margin: 6px 0 0;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .lesson-dialog form {
@@ -800,7 +800,7 @@
 
 .lesson-dialog footer > span {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .confirm-dialog {
@@ -814,7 +814,7 @@
   width: 40px;
   height: 40px;
   border: 1px solid var(--danger-border, #ddb1a7);
-  border-radius: 9px;
+  border-radius: 6px;
   background: var(--rust-soft);
   color: var(--red);
 }
@@ -825,7 +825,7 @@
   height: 38px;
   place-items: center;
   border: 1px solid var(--warning-border, #d3b07d);
-  border-radius: 9px;
+  border-radius: 6px;
   background: var(--warning-surface, #f8f0e2);
   color: var(--warning-ink, #93562c);
 }
@@ -845,14 +845,14 @@
 .confirm-dialog p {
   margin: 8px 0 0;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.55;
 }
 
 .confirm-dialog .dialog-note {
   padding: 9px 10px;
   background: var(--surface-muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .confirm-dialog .dialog-actions {
@@ -879,7 +879,7 @@
 .eyebrow,
 .login-sheet > header > span,
 .login-sheet > footer {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .sidebar-user span,
@@ -944,7 +944,7 @@
 }
 
 .table-head {
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.04em;
 }
 
@@ -962,13 +962,13 @@
 }
 
 .table-row span {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .lesson-type,
 .admin-label,
 .board-type {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.03em;
 }
 
@@ -981,7 +981,7 @@
 .bar-column > span,
 .board-meta > span,
 .ledger-mark {
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .editor-group-controls label > span,
@@ -989,7 +989,7 @@
 .day-column > header > div > span,
 .board-time,
 .restore-inline {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .editor-stats strong,

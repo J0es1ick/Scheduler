@@ -149,7 +149,7 @@
 
   .topbar-heading > span:not(.mobile-brand) {
     margin-top: 3px;
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .mobile-nav {
@@ -173,7 +173,7 @@
     border: 0;
     background: transparent;
     color: var(--muted);
-    font-size: 10px;
+    font-size: 12px;
   }
 
   .mobile-nav button.is-active {
@@ -447,7 +447,7 @@
     min-height: 0;
     padding: 13px;
     border: 1px solid var(--line);
-    border-radius: 9px;
+    border-radius: 6px;
   }
 
   .table-row > div::before {
@@ -455,7 +455,7 @@
     display: block;
     margin-bottom: 3px;
     color: var(--muted-light);
-    font-size: 10px;
+    font-size: 12px;
     text-transform: uppercase;
   }
 
@@ -592,7 +592,7 @@
   }
 
   .login-sheet-copy > span {
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .login-panel {
@@ -621,7 +621,7 @@
   width: min(560px, 100%);
   padding: 36px;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 6px;
   background: var(--surface);
   box-shadow: var(--shadow);
 }

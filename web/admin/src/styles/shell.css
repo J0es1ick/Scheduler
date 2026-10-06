@@ -28,7 +28,7 @@
 
 .logo-lockup strong {
   color: var(--ink);
-  font-family: Georgia, serif;
+  font-family: var(--font-ui);
   font-size: 18px;
   font-weight: 600;
 }
@@ -36,7 +36,7 @@
 .logo-lockup > div > span {
   margin-top: 3px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .logo-mark {
@@ -45,7 +45,7 @@
   height: 40px;
   overflow: hidden;
   border: 1px solid var(--logo-border, #465044);
-  border-radius: 9px;
+  border-radius: 6px;
   background: var(--olive);
 }
 
@@ -90,7 +90,7 @@
 .nav-caption {
   padding: 0 12px 10px;
   color: var(--muted-light);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -105,7 +105,7 @@
   min-height: 42px;
   padding: 0 12px;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: 6px;
   background: transparent;
   color: var(--nav-ink, #5f6259);
   font-size: 13px;
@@ -144,7 +144,7 @@
   border-top: 1px solid var(--line-strong);
   border-bottom: 1px solid var(--line-strong);
   color: var(--olive-dark);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -181,7 +181,7 @@
 .sidebar-user strong {
   overflow: hidden;
   color: var(--ink);
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -189,7 +189,7 @@
 .sidebar-user span {
   margin-top: 2px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .sidebar-user button,
@@ -202,7 +202,7 @@
   height: 34px;
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--surface-muted);
   color: var(--muted);
 }
@@ -232,7 +232,7 @@
 .topbar p {
   margin: 0 0 6px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   text-transform: capitalize;
 }
 
@@ -248,7 +248,7 @@
   display: block;
   margin-top: 8px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .mobile-brand,

@@ -37,7 +37,7 @@ a:focus-visible {
 .recurrence-summary {
   padding: 16px;
   background: var(--surface-muted);
-  border-radius: 10px;
+  border-radius: 6px;
 }
 .calendar-preview p {
   margin: 12px 0 0;
@@ -58,7 +58,7 @@ a:focus-visible {
 .refresh-warning {
   padding: 14px 18px;
   border: 1px solid var(--rust);
-  border-radius: 12px;
+  border-radius: 6px;
   background: var(--rust-soft);
 }
 .refresh-warning p {
@@ -71,7 +71,7 @@ a:focus-visible {
   padding: 16px;
   background: var(--rust-soft);
   border: 1px solid var(--rust);
-  border-radius: 10px;
+  border-radius: 6px;
 }
 .conflict-comparison td,
 .conflict-comparison th {
@@ -105,7 +105,7 @@ a:focus-visible {
     background: var(--surface);
     color: var(--ink);
     border: 1px solid var(--line);
-    border-radius: 8px;
+    border-radius: 6px;
   }
   .topbar {
     flex-wrap: wrap;

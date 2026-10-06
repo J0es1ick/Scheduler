@@ -1,0 +1,256 @@
+body {
+  font-family: var(--font-ui);
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+textarea {
+  color: var(--ink);
+}
+:where(
+  button,
+  a,
+  input,
+  select,
+  textarea,
+  [contenteditable],
+  summary
+):focus-visible {
+  outline: 2px solid var(--olive);
+  outline-offset: 3px;
+}
+h1,
+h2,
+h3,
+h4,
+.logo-lockup strong {
+  font-family: var(--font-ui);
+  font-weight: 600;
+}
+.card-surface,
+.metric-strip article,
+.stat-card,
+.source-card,
+.user-card {
+  box-shadow: none;
+}
+.page-stack {
+  gap: 20px;
+}
+.page-intro {
+  align-items: center;
+}
+.page-intro h2 {
+  font-size: 22px;
+  line-height: 1.25;
+}
+.page-intro p {
+  font-size: 14px;
+  line-height: 1.5;
+}
+.topbar {
+  min-height: 94px;
+}
+.topbar h1 {
+  font-size: 25px;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+}
+.topbar p {
+  display: none;
+}
+.topbar-heading > span:not(.mobile-brand) {
+  margin-top: 5px;
+  font-size: 13px;
+}
+.button {
+  font-size: 13px;
+  font-weight: 500;
+  min-height: 38px;
+  border-radius: 5px;
+}
+.button:hover {
+  transform: none;
+}
+.text-button {
+  font-size: 13px;
+  font-weight: 500;
+}
+.status-pill {
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.table-row {
+  min-height: 56px;
+  padding: 12px 16px;
+}
+.table-row strong {
+  font-size: 14px;
+  font-weight: 500;
+}
+.table-row span {
+  font-size: 12px;
+}
+.table-head {
+  font-size: 12px;
+  text-transform: none;
+}
+.search-field input {
+  text-transform: none;
+  font-size: 14px;
+}
+.metric-strip {
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.metric-strip article {
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+  padding: 18px 22px;
+  background: transparent;
+}
+.metric-strip article:last-child {
+  border-right: 0;
+}
+.metric-strip strong {
+  font-size: 30px;
+  letter-spacing: -0.03em;
+}
+.metric-strip span {
+  font-size: 13px;
+}
+.source-glyph,
+.avatar,
+.icon-button {
+  border-radius: 5px;
+}
+.logo-mark {
+  border-radius: 5px;
+}
+.login-page {
+  min-height: 100dvh;
+  background: var(--paper);
+}
+.login-sheet {
+  background: var(--paper-deep);
+  color: var(--ink);
+  box-shadow: none;
+  border-right: 1px solid var(--line);
+}
+.login-sheet::before,
+.login-sheet::after {
+  display: none;
+}
+.login-sheet-copy h1 {
+  font-size: clamp(36px, 5vw, 64px);
+  font-family: var(--font-ui);
+  letter-spacing: -0.05em;
+}
+.login-sheet-copy > span {
+  font-size: 17px;
+  line-height: 1.6;
+}
+.login-panel {
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.login-panel h2 {
+  font-size: 26px;
+}
+.login-panel p,
+.login-help,
+.login-panel label {
+  font-size: 14px;
+}
+.login-panel-icon {
+  border-radius: 6px;
+  background: var(--olive-soft);
+  color: var(--olive-dark);
+}
+.login-submit {
+  border-radius: 5px;
+  font-size: 14px;
+  box-shadow: none;
+}
+.dialog,
+.editor-dialog,
+.snapshot-review-dialog {
+  border-radius: 6px;
+}
+@media (min-width: 1101px) {
+  .app-shell {
+    padding-left: 224px;
+  }
+  .sidebar {
+    width: 224px;
+    padding: 24px 14px 16px;
+    background: var(--surface);
+  }
+  .desktop-nav {
+    margin-top: 32px;
+    gap: 2px;
+  }
+  .desktop-nav button {
+    font-size: 14px;
+    font-weight: 400;
+    min-height: 40px;
+    border: 0;
+    border-radius: 4px;
+  }
+  .desktop-nav button.is-active {
+    background: var(--olive-soft);
+    font-weight: 500;
+  }
+  .desktop-nav button.is-active::before {
+    display: none;
+  }
+  .sidebar-status {
+    font-size: 12px;
+    padding: 14px 0;
+    font-weight: 400;
+  }
+  .main-area {
+    padding: 0 28px 40px;
+  }
+}
+@media (max-width: 700px) {
+  .topbar {
+    min-height: 84px;
+  }
+  .topbar h1 {
+    font-size: 22px;
+  }
+  .page-intro h2 {
+    font-size: 20px;
+  }
+  .metric-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .metric-strip article {
+    padding: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .metric-strip article:nth-child(2) {
+    border-right: 0;
+  }
+  .metric-strip article:nth-child(n + 3) {
+    border-bottom: 0;
+  }
+  .table-row {
+    padding: 12px;
+  }
+  .login-sheet {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}
