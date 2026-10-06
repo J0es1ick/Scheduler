@@ -25,19 +25,21 @@ type SupportRequest struct {
 }
 
 type BotOutboxDelivery struct {
-	TeacherID        string          `db:"teacher_id"`
-	ScheduleContext  json.RawMessage `db:"schedule_context"`
-	ScheduleMessages json.RawMessage `db:"schedule_messages"`
-	DeliveredParts   int             `db:"delivered_parts"`
-	GroupID          string          `db:"group_id"`
-	ExpiresAt        *time.Time      `db:"expires_at"`
-	ReminderContext  json.RawMessage `db:"reminder_context"`
-	ID               string          `db:"id"`
-	UserID           string          `db:"user_id"`
-	RequestID        string          `db:"request_id"`
-	Kind             string          `db:"kind"`
-	Body             string          `db:"body"`
-	Attempts         int             `db:"attempts"`
-	ClaimToken       string          `db:"claim_token"`
-	LeaseExpiresAt   *time.Time      `db:"lease_expires_at"`
+	BroadcastID         string          `db:"broadcast_id"`
+	BroadcastMessageIDs json.RawMessage `db:"broadcast_message_ids"`
+	TeacherID           string          `db:"teacher_id"`
+	ScheduleContext     json.RawMessage `db:"schedule_context"`
+	ScheduleMessages    json.RawMessage `db:"schedule_messages"`
+	DeliveredParts      int             `db:"delivered_parts"`
+	GroupID             string          `db:"group_id"`
+	ExpiresAt           *time.Time      `db:"expires_at"`
+	ReminderContext     json.RawMessage `db:"reminder_context"`
+	ID                  string          `db:"id"`
+	UserID              string          `db:"user_id"`
+	RequestID           string          `db:"request_id"`
+	Kind                string          `db:"kind"`
+	Body                string          `db:"body"`
+	Attempts            int             `db:"attempts"`
+	ClaimToken          string          `db:"claim_token"`
+	LeaseExpiresAt      *time.Time      `db:"lease_expires_at"`
 }

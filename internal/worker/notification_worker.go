@@ -12,6 +12,7 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	"github.com/J0es1ick/Scheduler/internal/telegramlimit"
 	tele "gopkg.in/telebot.v3"
 )
@@ -58,6 +59,8 @@ type NotificationWorker struct {
 	repository         notificationDeliveryRepository
 	bot                notificationSender
 	interval           time.Duration
+	wake               chan struct{}
+	promptsQueued      bool
 	claimRenewInterval time.Duration
 	limiter            *telegramlimit.Limiter
 }
@@ -91,6 +94,7 @@ func NewNotificationWorker(
 		)
 	}
 	return &NotificationWorker{
+		wake:             make(chan struct{}, 1),
 		dailySchedule:    settings.DailySchedule,
 		reminderSchedule: settings.Schedule, reminderRecipient: repository.ReminderRecipient,
 		backgroundLimiter:  telegramlimit.New(time.Second/15, 0),
@@ -121,6 +125,26 @@ func (w *NotificationWorker) Start(ctx context.Context, monitors ...*Monitor) <-
 
 func (w *NotificationWorker) run(ctx context.Context, monitor *Monitor) {
 	slog.Info("notification worker started", "interval", w.interval)
+	if listener, ok := w.repository.(interface {
+		ListenOutbox(context.Context, chan<- struct{}) error
+	}); ok {
+		listenCtx, stopListener := context.WithCancel(ctx)
+		listenerDone := make(chan struct{})
+		defer func() { stopListener(); <-listenerDone }()
+		go func() {
+			defer close(listenerDone)
+			for listenCtx.Err() == nil {
+				if err := listener.ListenOutbox(listenCtx, w.wake); err != nil && listenCtx.Err() == nil {
+					slog.Warn("outbox listener disconnected", "err", err)
+				}
+				select {
+				case <-listenCtx.Done():
+					return
+				case <-time.After(time.Second):
+				}
+			}
+		}()
+	}
 	w.prune(ctx)
 	monitor.Record(NotificationWorkerName, w.tick(ctx, monitor))
 	monitor.Heartbeat(NotificationWorkerName)
@@ -134,6 +158,8 @@ func (w *NotificationWorker) run(ctx context.Context, monitor *Monitor) {
 		case <-ctx.Done():
 			slog.Info("notification worker stopped")
 			return
+		case <-w.wake:
+			monitor.Record(NotificationWorkerName, w.tick(ctx, monitor))
 		case <-ticker.C:
 			monitor.Record(NotificationWorkerName, w.tick(ctx, monitor))
 			monitor.Heartbeat(NotificationWorkerName)
@@ -159,6 +185,20 @@ func (w *NotificationWorker) tick(ctx context.Context, monitors ...*Monitor) err
 	var monitor *Monitor
 	if len(monitors) > 0 {
 		monitor = monitors[0]
+	}
+	if repo, ok := w.repository.(interface {
+		EnqueueServiceUpdatesPrompts(context.Context) error
+		CompleteBroadcasts(context.Context) error
+	}); ok {
+		if !w.promptsQueued {
+			if err := repo.EnqueueServiceUpdatesPrompts(ctx); err != nil {
+				return err
+			}
+			w.promptsQueued = true
+		}
+		if err := repo.CompleteBroadcasts(ctx); err != nil {
+			return err
+		}
 	}
 	batchSize := w.batchSize
 	if batchSize <= 0 {
@@ -414,8 +454,16 @@ func (w *NotificationWorker) deliverBotOutbox(ctx context.Context, item domain.B
 	telegramID, err := strconv.ParseInt(item.UserID, 10, 64)
 	if err == nil && item.Kind == "daily_schedule" {
 		err = w.sendDailySchedule(ctx, item)
+	} else if err == nil && item.Kind == "service_update" {
+		err = w.sendBroadcast(ctx, item)
 	} else if err == nil {
-		_, err = w.bot.Send(&tele.User{ID: telegramID}, item.Body)
+		var options []any
+		body := item.Body
+		if item.Kind == "service_updates_prompt" {
+			body = "Хотите получать информацию об обновлениях сервиса?"
+			options = []any{keyboards.ServiceUpdatesPrompt(item.Body)}
+		}
+		_, err = w.bot.Send(&tele.User{ID: telegramID}, body, options...)
 		w.limiter.Observe(err)
 	}
 	rateLimited := false
