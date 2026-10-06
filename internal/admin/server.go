@@ -163,6 +163,18 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService, o
 	server.protected(mux, "PATCH /api/users/{id}", server.handleUpdateUser)
 	server.protected(mux, "PATCH /api/users/{id}/restrictions", server.handleUserRestrictions)
 	server.protected(mux, "GET /api/audit", server.handleAudit)
+	server.protected(mux, "GET /api/broadcasts", server.handleBroadcastList)
+	server.protected(mux, "POST /api/broadcasts", server.handleBroadcastCreate)
+	server.protected(mux, "POST /api/broadcasts/audience", server.handleBroadcastAudience)
+	server.protected(mux, "GET /api/broadcasts/{id}", server.handleBroadcastGet)
+	server.protected(mux, "PUT /api/broadcasts/{id}", server.handleBroadcastSave)
+	server.protected(mux, "DELETE /api/broadcasts/{id}", server.handleBroadcastDelete)
+	server.protected(mux, "POST /api/broadcasts/{id}/preview", server.handleBroadcastPreview)
+	server.protected(mux, "POST /api/broadcasts/{id}/send", server.handleBroadcastSend)
+	server.protected(mux, "POST /api/broadcasts/{id}/stop", server.handleBroadcastStop)
+	server.protected(mux, "POST /api/broadcasts/{id}/attachments", server.handleBroadcastUpload)
+	server.protected(mux, "GET /api/broadcasts/{id}/attachments/{attachment}", server.handleBroadcastAttachment)
+	server.protected(mux, "DELETE /api/broadcasts/{id}/attachments/{attachment}", server.handleBroadcastAttachmentDelete)
 	mux.Handle("/", spaHandler(assets, index))
 
 	server.handler = server.requestContext(server.requestLog(server.recoverPanic(server.securityHeaders(mux))))
@@ -226,6 +238,9 @@ func (s *Server) protected(mux *http.ServeMux, pattern string, handler http.Hand
 }
 
 func roleForPattern(pattern string) string {
+	if strings.Contains(pattern, " /api/broadcasts") {
+		return "owner"
+	}
 	if pattern == "POST /api/auth/logout" {
 		return "read_only"
 	}
@@ -431,6 +446,7 @@ scheduler_reminder_worker_cursor_pending %d
 	)
 	_, _ = fmt.Fprintf(w, "# TYPE scheduler_daily_worker_last_run_timestamp_seconds gauge\nscheduler_daily_worker_last_run_timestamp_seconds %d\n# TYPE scheduler_daily_worker_last_failures gauge\nscheduler_daily_worker_last_failures %d\n", unixTimestamp(operations.DailyWorker.LastFinishedAt), operations.DailyWorker.LastFailures)
 	_, _ = fmt.Fprintf(w, "scheduler_subscription_integrity_issues %d\n", operations.SubscriptionIntegrityIssues)
+	_, _ = fmt.Fprintf(w, "# TYPE scheduler_service_updates_queue gauge\nscheduler_service_updates_queue{status=\"pending\"} %d\nscheduler_service_updates_queue{status=\"failed\"} %d\n# TYPE scheduler_service_updates_prompts_pending gauge\nscheduler_service_updates_prompts_pending %d\n", operations.PendingServiceUpdates, operations.FailedServiceUpdates, operations.PendingServiceUpdatesPrompts)
 	_, _ = fmt.Fprintf(w, "# TYPE scheduler_expired_pending_reminders gauge\nscheduler_expired_pending_reminders %d\n", operations.ExpiredPendingReminders)
 }
 
