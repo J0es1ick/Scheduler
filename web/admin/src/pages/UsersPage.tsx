@@ -157,10 +157,22 @@ export function UsersPage({
                       группы
                     </span>
                     <span>
-                      {item.role === "teacher" ? `Преподаватель: ${item.teacher_name || "не выбран"}${item.teacher_university_name ? ` · ${item.teacher_university_name}` : ""}` : `Студент · основная группа: ${item.default_group_name || "не выбрана"}`}
+                      {item.role === "teacher"
+                        ? `Преподаватель: ${item.teacher_name || "не выбран"}${item.teacher_university_name ? ` · ${item.teacher_university_name}` : ""}`
+                        : `Студент · основная группа: ${item.default_group_name || "не выбрана"}`}
                     </span>
                     <span>
-                      Ежедневное расписание: {item.daily_enabled ? `${item.daily_time} · ${item.schedule_timezone}` : "выключено"}
+                      Обновления сервиса:{" "}
+                      {item.service_updates_consent == null
+                        ? "ответа нет"
+                        : item.service_updates_consent
+                          ? "согласие получено"
+                          : "отказ"}
+                      <br />
+                      Ежедневное расписание:{" "}
+                      {item.daily_enabled
+                        ? `${item.daily_time} · ${item.schedule_timezone}`
+                        : "выключено"}
                     </span>
                     <span>
                       Уведомления:{" "}

@@ -255,6 +255,9 @@ export interface OperationalHealth {
   pending_notifications: number;
   failed_notifications: number;
   pending_outbox: number;
+  pending_service_updates?: number;
+  failed_service_updates?: number;
+  pending_service_updates_prompts?: number;
   failed_outbox: number;
   pending_connector_runs: number;
   failed_connector_runs: number;
@@ -404,6 +407,7 @@ export interface UserView extends UserRestrictions {
   teacher_id?: string;
   teacher_name?: string;
   teacher_university_name?: string;
+  service_updates_consent?: boolean | null;
   daily_enabled?: boolean;
   daily_time?: string;
   schedule_timezone?: string;
@@ -420,17 +424,10 @@ export interface UserView extends UserRestrictions {
 }
 
 export type ConnectorStatus =
-  | "draft"
-  | "testing"
-  | "pending_review"
-  | "active"
-  | "suspended"
-  | "archived";
+  "draft" | "testing" | "pending_review" | "active" | "suspended" | "archived";
 
 export type IntegrationMode =
-  | "managed_parser"
-  | "declarative_pull"
-  | "external_push";
+  "managed_parser" | "declarative_pull" | "external_push";
 
 export interface ConnectorClient {
   id: string;

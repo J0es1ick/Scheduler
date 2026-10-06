@@ -4,9 +4,9 @@ import { useMiniApp } from "./useMiniApp";
 import { useTheme } from "./useTheme";
 import { ThemeSwitch } from "./ThemeSwitch";
 import { clearViewState } from "../hooks/useViewState";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { APIError, api } from "../api";
-import { Toasts, type ToastMessage } from "../components";
+import { LoadingBlock, Toasts, type ToastMessage } from "../components";
 import { AuditPage } from "../pages/AuditPage";
 import { DataPage } from "../pages/DataPage";
 import { ConnectorsPage } from "../pages/ConnectorsPage";
@@ -20,6 +20,8 @@ import { UsersPage } from "../pages/UsersPage";
 import type { AdminIdentity } from "../types";
 import { AppLayout, canAccessView, type ViewName } from "./layout/AppLayout";
 
+const BroadcastsPage = lazy(() => import("../pages/BroadcastsPage").then(module => ({ default: module.BroadcastsPage })));
+
 const knownViews: ViewName[] = [
   "overview",
   "editor",
@@ -30,6 +32,7 @@ const knownViews: ViewName[] = [
   "support",
   "users",
   "audit",
+  "broadcasts",
 ];
 
 function viewFromHash(): ViewName {
@@ -240,6 +243,8 @@ export default function App() {
         return <SupportPage notify={notify} />;
       case "users":
         return user ? <UsersPage user={user} notify={notify} /> : null;
+      case "broadcasts":
+        return <Suspense fallback={<LoadingBlock rows={4} />}><BroadcastsPage notify={notify} /></Suspense>;
       case "audit":
         return <AuditPage />;
       default:

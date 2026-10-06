@@ -110,6 +110,11 @@ export function OverviewPage({
               {data.operations.failed_notifications +
                 data.operations.failed_outbox}
               . Массовая отправка занимает время.
+              <br />
+              Рассылки: {data.operations.pending_service_updates ??
+                0} ожидают, {data.operations.failed_service_updates ?? 0}{" "}
+              ошибок. Запросы согласия:{" "}
+              {data.operations.pending_service_updates_prompts ?? 0}.
             </span>
           </div>
           <button

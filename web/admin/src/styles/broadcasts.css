@@ -1,0 +1,423 @@
+.broadcasts-page {
+  padding-bottom: 24px;
+}
+.broadcast-history {
+  border-block: 1px solid var(--line);
+}
+.broadcast-history-row {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr) 170px;
+  width: 100%;
+  gap: 22px;
+  align-items: center;
+  padding: 20px 16px;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+.broadcast-history-row:hover {
+  background: var(--surface-muted);
+}
+.broadcast-history-row strong,
+.broadcast-history-row small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.broadcast-history-row small,
+.broadcast-history-row time {
+  color: var(--muted);
+  font-size: 12px;
+}
+.broadcast-status {
+  color: var(--muted);
+  font-size: 12px;
+}
+.broadcast-status.status-sending {
+  color: var(--olive-dark);
+}
+.broadcast-empty {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--muted);
+}
+.broadcast-empty h3 {
+  color: var(--ink);
+  margin-top: 16px;
+}
+.broadcast-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  gap: 28px;
+  align-items: start;
+}
+.broadcast-compose,
+.broadcast-preview {
+  min-width: 0;
+}
+.broadcast-preview {
+  position: sticky;
+  top: 24px;
+  border: 1px solid var(--line);
+  padding: 20px;
+  background: var(--surface-muted);
+  border-radius: 6px;
+}
+.broadcasts-page h3 {
+  font-size: 16px;
+  margin-bottom: 12px;
+}
+.broadcasts-page p {
+  color: var(--muted);
+  font-size: 13px;
+}
+.section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.section-heading > span {
+  color: var(--muted);
+  font-size: 13px;
+}
+.field-label {
+  display: block;
+  font-weight: 500;
+  margin-bottom: 10px;
+}
+.message-editor {
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  border-radius: 6px;
+}
+.message-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  align-items: center;
+}
+.message-toolbar > button,
+.attachment-list button {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 4px;
+}
+.message-toolbar > button:hover,
+.message-toolbar > button[aria-pressed="true"],
+.attachment-list button:hover {
+  color: var(--olive-dark);
+  background: var(--olive-soft);
+}
+.message-input {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.message-input .tiptap {
+  min-height: 235px;
+  padding: 20px;
+  outline: none;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+}
+.message-input .tiptap p {
+  margin: 0 0 10px;
+  color: var(--ink);
+  font-size: inherit;
+}
+.message-input .tiptap p:last-child {
+  margin-bottom: 0;
+}
+.message-input a,
+.broadcast-body a {
+  color: var(--olive-dark);
+  text-decoration: underline;
+}
+.message-editor-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+}
+.is-error,
+.broadcast-error {
+  color: var(--red);
+}
+.broadcast-error {
+  border-left: 3px solid var(--red);
+  padding: 12px 16px;
+  background: var(--rust-soft);
+  overflow-wrap: anywhere;
+}
+.message-link {
+  display: flex;
+  flex-wrap: wrap;
+  padding: 10px;
+  gap: 8px;
+}
+.message-link input {
+  min-width: 120px;
+  flex: 1;
+}
+.emoji-picker {
+  position: relative;
+}
+.emoji-picker summary {
+  cursor: pointer;
+  font-size: 23px;
+  list-style: none;
+  padding: 0 8px;
+}
+.emoji-picker > div {
+  position: absolute;
+  z-index: 5;
+  right: 0;
+  top: 40px;
+  display: grid;
+  grid-template-columns: repeat(5, 36px);
+  padding: 8px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  background: var(--surface);
+  border-radius: 6px;
+}
+.emoji-picker button {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  background: transparent;
+  font-size: 21px;
+}
+.broadcast-attachments,
+.broadcast-audience {
+  border-top: 1px solid var(--line);
+  margin-top: 26px;
+  padding-top: 22px;
+}
+.attachment-upload {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.attachment-upload > label {
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+.attachment-upload input[type="file"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.broadcasts-page input[type="url"],
+.broadcasts-page select,
+.broadcasts-page textarea {
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  padding: 9px 12px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.broadcasts-page textarea {
+  width: 100%;
+  min-height: 90px;
+  resize: vertical;
+  margin: 14px 0 10px;
+}
+.attachment-list {
+  list-style: none;
+  padding: 0;
+  margin: 14px 0 0;
+}
+.attachment-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.attachment-list a {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.attachment-list small {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.attachment-list button {
+  flex-shrink: 0;
+}
+.audience-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+.audience-mode label,
+.audience-results label {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+.audience-results {
+  max-height: 260px;
+  overflow: auto;
+  margin: 16px 0;
+}
+.audience-results label {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+.audience-results small {
+  margin-left: auto;
+  color: var(--muted);
+}
+.broadcast-actions {
+  margin-top: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+}
+.broadcast-preview-empty {
+  color: var(--muted);
+  padding: 25px 0;
+}
+.telegram-message,
+.telegram-attachment {
+  margin: 14px 0;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 5px;
+  padding: 14px;
+  overflow-wrap: anywhere;
+}
+.telegram-message-author {
+  color: var(--olive-dark);
+  font-size: 13px;
+}
+.broadcast-body {
+  white-space: pre-wrap;
+  margin: 10px 0;
+  font-size: 14px;
+}
+.telegram-message-unsubscribe {
+  color: var(--olive-dark);
+  border-top: 1px solid var(--line);
+  margin-top: 18px;
+  padding-top: 10px;
+  font-size: 12px;
+  text-align: center;
+}
+.telegram-attachment img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.telegram-attachment a {
+  margin-left: 8px;
+  font-size: 13px;
+}
+.broadcast-confirm {
+  padding-top: 14px;
+  border-top: 1px solid var(--line-strong);
+}
+.broadcast-confirm .button {
+  width: 100%;
+}
+.broadcast-result-counts {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  padding: 0 0 22px;
+}
+.broadcast-result-counts div {
+  display: grid;
+  gap: 3px;
+}
+.broadcast-result-counts strong {
+  font-size: 26px;
+}
+.broadcast-result-counts span {
+  color: var(--muted);
+  font-size: 13px;
+}
+.broadcasts-page .table-wrap {
+  overflow-x: auto;
+}
+.broadcasts-page table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.broadcasts-page th,
+.broadcasts-page td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.broadcasts-page td small {
+  display: block;
+  max-width: 300px;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+.broadcasts-page .table-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+@media (max-width: 1150px) {
+  .broadcast-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .broadcast-preview {
+    position: static;
+    max-width: 580px;
+    width: 100%;
+  }
+}
+@media (max-width: 600px) {
+  .broadcast-history-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 16px 8px;
+  }
+  .broadcasts-page .page-intro {
+    align-items: stretch;
+  }
+  .attachment-list li {
+    flex-wrap: wrap;
+  }
+  .attachment-list a {
+    min-width: 50%;
+  }
+  .message-input .tiptap {
+    padding: 14px;
+  }
+  .emoji-picker > div {
+    left: 0;
+    right: auto;
+  }
+}

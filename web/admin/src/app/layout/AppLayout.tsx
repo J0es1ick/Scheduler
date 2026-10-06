@@ -24,7 +24,8 @@ export type ViewName =
   | "data"
   | "support"
   | "users"
-  | "audit";
+  | "audit"
+  | "broadcasts";
 
 const navigation: Array<{
   id: ViewName;
@@ -64,6 +65,12 @@ const navigation: Array<{
     icon: MessagesSquare,
     minimumRole: "support",
   },
+  {
+    id: "broadcasts",
+    label: "Рассылки",
+    icon: MessagesSquare,
+    minimumRole: "owner",
+  },
   { id: "users", label: "Пользователи", icon: Users, minimumRole: "owner" },
   { id: "audit", label: "Аудит", icon: ShieldCheck, minimumRole: "operator" },
 ];
@@ -93,6 +100,10 @@ export function canAccessView(view: ViewName, role: AdminRole): boolean {
 }
 
 const pageCopy: Record<ViewName, { title: string; subtitle: string }> = {
+  broadcasts: {
+    title: "Рассылки",
+    subtitle: "Сообщения об обновлениях сервиса",
+  },
   overview: {
     title: "Обзор",
     subtitle: "Состояние сервиса и последние обновления",

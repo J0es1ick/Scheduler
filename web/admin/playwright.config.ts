@@ -20,6 +20,7 @@ export default defineConfig({
         "**/release.spec.ts",
         "**/service-logs.spec.ts",
         "**/user-restrictions.spec.ts",
+        "**/broadcasts.spec.ts",
       ],
     },
   ],
