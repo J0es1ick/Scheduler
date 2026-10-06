@@ -18,6 +18,7 @@ func reqCtx() (context.Context, context.CancelFunc) {
 }
 
 type Handler struct {
+	UpdatesService        serviceUpdatesService
 	ProfileService        scheduleProfileService
 	ScheduleService       scheduleService
 	TimeSlotService       timeSlotService
@@ -121,6 +122,7 @@ func NewHandler(
 ) *Handler {
 	return &Handler{
 		ProfileService:        userService,
+		UpdatesService:        userService,
 		ScheduleService:       scheduleService,
 		TimeSlotService:       scheduleService,
 		StateManager:          stateManager,

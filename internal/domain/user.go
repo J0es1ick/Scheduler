@@ -6,6 +6,11 @@ import (
 )
 
 type User struct {
+	ServiceUpdatesConsent           *bool      `db:"service_updates_consent" json:"service_updates_consent"`
+	ServiceUpdatesAnsweredAt        *time.Time `db:"service_updates_answered_at" json:"service_updates_answered_at"`
+	ServiceUpdatesPromptKey         string     `db:"service_updates_prompt_key" json:"-"`
+	ServiceUpdatesPromptDeliveredAt *time.Time `db:"service_updates_prompt_delivered_at" json:"service_updates_prompt_delivered_at"`
+	ServiceUpdatesBackfill          bool       `db:"service_updates_backfill" json:"-"`
 	UserRestrictions
 	Role                 UserRole           `db:"role" json:"role"`
 	TeacherID            string             `db:"teacher_id" json:"teacher_id"`

@@ -59,6 +59,9 @@ func (h *Handler) HandleStart(c tele.Context) error {
 		if profile.DailySetup == "choice" || profile.DailySetup == "time" {
 			return h.showDailySetup(c, profile.DailySetup, true)
 		}
+		if h.UpdatesService != nil && profile.ServiceUpdatesConsent == nil && !profile.ServiceUpdatesBackfill {
+			return h.showUpdatesPrompt(c, profile)
+		}
 		payload := ""
 		if len(c.Args()) > 0 {
 			payload = strings.ToLower(strings.TrimSpace(c.Args()[0]))

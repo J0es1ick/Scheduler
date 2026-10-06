@@ -345,7 +345,7 @@ func SubscriptionSettings(
 		reminderLabel = fmt.Sprintf("Напоминания: за %d мин.", reminderMinutes)
 	}
 	rows = append(rows, menu.Row(menu.Data(reminderLabel, "show_reminder_settings", fmt.Sprint(page))))
-	rows = append(rows, menu.Row(menu.Data("Ежедневное расписание", "daily_settings")))
+	rows = append(rows, menu.Row(menu.Data("Ежедневное расписание", "daily_settings")), menu.Row(menu.Data("Обновления сервиса", "updates_settings")))
 	rows = append(rows, menu.Row(menu.Data("Сменить роль", "role_settings")))
 	rows = append(rows, menu.Row(menu.Data("Добавить группу", "add_subscription", fmt.Sprint(page))))
 	rows = append(rows, menu.Row(menu.Data("Закрыть", "close_inline")))

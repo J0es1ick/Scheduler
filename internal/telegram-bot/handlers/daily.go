@@ -19,6 +19,9 @@ func (h *Handler) finishProfileSetup(c tele.Context) error {
 	if user.DailySetup == "choice" || user.DailySetup == "time" {
 		return h.showDailySetup(c, user.DailySetup, true)
 	}
+	if h.UpdatesService != nil && user.ServiceUpdatesConsent == nil && !user.ServiceUpdatesBackfill {
+		return h.showUpdatesPrompt(c, user)
+	}
 	if err = h.HandleToday(c); err != nil {
 		return err
 	}

@@ -86,6 +86,15 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 		role, table, privilege string
 		want                   bool
 	}{
+		{botRole, "broadcasts", "SELECT", true},
+		{botRole, "broadcasts", "INSERT", false},
+		{botRole, "broadcast_attachments", "UPDATE", true},
+		{botRole, "broadcast_recipients", "SELECT", true},
+		{adminRole, "broadcasts", "INSERT", true},
+		{adminRole, "broadcast_attachments", "DELETE", true},
+		{parserRole, "broadcasts", "SELECT", false},
+		{parserRole, "broadcast_attachments", "SELECT", false},
+		{privacyRole, "broadcast_recipients", "SELECT", false},
 		{botRole, "admin_sessions", "INSERT", false},
 		{botRole, "schema_migrations", "UPDATE", false},
 		{botRole, "lessons", "INSERT", false},
@@ -144,6 +153,8 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 		role, function string
 		want           bool
 	}{
+		{botRole, "scheduler_service_updates_changed()", false},
+		{adminRole, "scheduler_updates_prompt_delivered()", false},
 		{botRole, "enqueue_privacy_deletion(text)", true},
 		{botRole, "scheduler_lock_active_group(text)", true},
 		{botRole, "scheduler_select_replacement_group(text)", true},
@@ -198,6 +209,7 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 		`SELECT is_active FROM universities WHERE id=$1`,
 		`INSERT INTO teachers(id,university_id,name,name_key) VALUES($1,$1,'Synthetic teacher','synthetic teacher')`,
 		`UPDATE users SET role='teacher',teacher_id=$1,daily_enabled=TRUE,daily_time='06:00',daily_setup='done' WHERE id=$1`,
+		`UPDATE users SET service_updates_consent=TRUE,service_updates_answered_at=NOW(),service_updates_prompt_delivered_at=NOW() WHERE id=$1`,
 		`SELECT * FROM schedule_profile_recipients WHERE user_id=$1`,
 		`INSERT INTO bot_outbox(id,user_id,teacher_id,kind,body) VALUES($1,$1,$1,'teacher_change','Synthetic change')`,
 		`UPDATE users SET daily_time='07:00',teacher_schedule_view_format='compact' WHERE id=$1`,

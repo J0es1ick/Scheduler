@@ -172,7 +172,7 @@ func (h *Handler) showTeacherSettings(c tele.Context) error {
 	menu := &tele.ReplyMarkup{}
 	menu.Inline(menu.Row(menu.Data("Заменить ФИО", "change_teacher"), menu.Data("Сменить вуз", "change_profile_university")),
 		menu.Row(menu.Data("Визуальная таблица", "teacher_view", "visual"), menu.Data("Компактный текст", "teacher_view", "compact")),
-		menu.Row(menu.Data("Ежедневное расписание", "daily_settings")), menu.Row(menu.Data("Напоминания перед занятиями", "show_reminder_settings", "0")),
+		menu.Row(menu.Data("Обновления сервиса", "updates_settings")), menu.Row(menu.Data("Ежедневное расписание", "daily_settings")), menu.Row(menu.Data("Напоминания перед занятиями", "show_reminder_settings", "0")),
 		menu.Row(menu.Data("Уведомления об изменениях", "toggle_notifications")), menu.Row(menu.Data("Сменить роль", "role_settings")), menu.Row(menu.Data("Главное меню", "open_main_menu")))
 	status := ""
 	if !state.GroupActive {

@@ -45,6 +45,7 @@ func (r *UserRepository) GetUserByID(ctx context.Context, id string) (*domain.Us
 			to_char(quiet_hours_start, 'HH24:MI') AS quiet_hours_start,
 			to_char(quiet_hours_end, 'HH24:MI') AS quiet_hours_end,
 			search_schedule_view_format, role, COALESCE(teacher_id, '') AS teacher_id, teacher_schedule_view_format,
+			service_updates_consent, service_updates_answered_at, service_updates_prompt_key, service_updates_prompt_delivered_at, service_updates_backfill,
 			daily_enabled, to_char(daily_time, 'HH24:MI') AS daily_time, daily_setup, daily_next_at,
 			created_at, updated_at
 		 FROM users WHERE id = $1`, id)
@@ -66,6 +67,7 @@ func (r *UserRepository) GetUserByUsername(ctx context.Context, username string)
 			to_char(quiet_hours_start, 'HH24:MI') AS quiet_hours_start,
 			to_char(quiet_hours_end, 'HH24:MI') AS quiet_hours_end,
 			search_schedule_view_format, role, COALESCE(teacher_id, '') AS teacher_id, teacher_schedule_view_format,
+			service_updates_consent, service_updates_answered_at, service_updates_prompt_key, service_updates_prompt_delivered_at, service_updates_backfill,
 			daily_enabled, to_char(daily_time, 'HH24:MI') AS daily_time, daily_setup, daily_next_at,
 			created_at, updated_at
 		 FROM users WHERE username = $1`, username)
@@ -87,6 +89,7 @@ func (r *UserRepository) GetAllUsers(ctx context.Context) ([]domain.User, error)
 			to_char(quiet_hours_start, 'HH24:MI') AS quiet_hours_start,
 			to_char(quiet_hours_end, 'HH24:MI') AS quiet_hours_end,
 			search_schedule_view_format, role, COALESCE(teacher_id, '') AS teacher_id, teacher_schedule_view_format,
+			service_updates_consent, service_updates_answered_at, service_updates_prompt_key, service_updates_prompt_delivered_at, service_updates_backfill,
 			daily_enabled, to_char(daily_time, 'HH24:MI') AS daily_time, daily_setup, daily_next_at,
 			created_at, updated_at FROM users`)
 	if err != nil {
@@ -390,6 +393,10 @@ func (r *UserRepository) ExportUserData(ctx context.Context, id string) (*domain
 			UNION ALL
 			SELECT 'parser_snapshot_review', snapshot.id, 'reviewed_by', snapshot.created_at
 			FROM parser_snapshots snapshot WHERE snapshot.reviewed_by=$1
+			UNION ALL
+			SELECT 'broadcast', b.id, 'recipient', b.created_at FROM broadcasts b JOIN broadcast_recipients br ON br.broadcast_id=b.id WHERE br.user_id=$1
+			UNION ALL
+			SELECT 'broadcast', b.id, 'author', b.created_at FROM broadcasts b WHERE b.author_id=$1
 			UNION ALL
 			SELECT 'connector', connector.id, 'created_by', connector.created_at
 			FROM connector_clients connector WHERE connector.created_by=$1

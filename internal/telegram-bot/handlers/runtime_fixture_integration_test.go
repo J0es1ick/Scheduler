@@ -152,6 +152,8 @@ func (j *runtimeJourney) onboard(t *testing.T) {
 	t.Helper()
 	j.message(t, j.h.HandleStart, "/start", "")
 	current := j.h.StateManager.Get(42)
+	j.callback(t, j.h.HandleSelectRole, "student|"+current.FlowNonce)
+	current = j.h.StateManager.Get(42)
 	j.callback(t, j.h.HandleUniversitySelect, "isuct|"+current.FlowNonce)
 	j.message(t, j.h.HandleTextInput, "4/147", "")
 	current = j.h.StateManager.Get(42)
@@ -159,6 +161,8 @@ func (j *runtimeJourney) onboard(t *testing.T) {
 		t.Fatalf("missing confirmation: %+v", current)
 	}
 	j.callback(t, j.h.HandleConfirmPrimaryGroup, "save|"+current.FlowNonce)
+	j.pressAction(t, "daily_action", j.h.HandleDailyAction, func(args string) bool { return strings.HasPrefix(args, "off|") })
+	j.pressAction(t, "updates_choice", j.h.HandleUpdatesChoice, func(args string) bool { return strings.HasPrefix(args, "off|") })
 	user, err := j.h.UserService.GetUser(j.ctx, "42")
 	if err != nil || user == nil || user.DefaultGroupID != "journey-a" || user.ReminderEnabled {
 		t.Fatalf("onboarding result: %+v %v", user, err)

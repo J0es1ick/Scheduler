@@ -79,13 +79,16 @@ func ApplyRuntimeGrants(
 		botRole: {
 			"SELECT ON " + readOnly,
 			"SELECT ON " + botRead,
+			"SELECT, UPDATE, DELETE ON broadcasts",
+			"SELECT, UPDATE ON broadcast_attachments",
+			"SELECT ON broadcast_recipients",
 			"SELECT, INSERT, UPDATE, DELETE ON subscriptions, chat_schedule_profiles, notification_deliveries, bot_outbox, worker_status",
 			"SELECT, INSERT ON support_requests",
 			"SELECT, DELETE ON schedule_change_events",
 			"SELECT ON users, teachers, schedule_profile_recipients",
 			"INSERT, UPDATE ON teachers",
 			"INSERT (id, username, created_at, updated_at) ON users",
-			"UPDATE (role, teacher_id, teacher_schedule_view_format, daily_enabled, daily_time, daily_setup, daily_next_at, username, default_group_id, notifications_enabled, reminder_enabled, reminder_minutes, quiet_hours_enabled, quiet_hours_start, quiet_hours_end, search_schedule_view_format, telegram_menu_fingerprint, updated_at) ON users",
+			"UPDATE (service_updates_consent, service_updates_answered_at, service_updates_prompt_delivered_at, role, teacher_id, teacher_schedule_view_format, daily_enabled, daily_time, daily_setup, daily_next_at, username, default_group_id, notifications_enabled, reminder_enabled, reminder_minutes, quiet_hours_enabled, quiet_hours_start, quiet_hours_end, search_schedule_view_format, telegram_menu_fingerprint, updated_at) ON users",
 			"SELECT (token_hash, admin_id, name, auth_method, admin_role, expires_at, created_at, last_seen_at) ON admin_sessions",
 		},
 		adminRole: {
@@ -93,6 +96,7 @@ func ApplyRuntimeGrants(
 			"SELECT ON " + readOnly,
 			"SELECT, INSERT, UPDATE, DELETE ON lesson_overrides, connector_clients, connector_request_nonces, admin_sessions, privacy_deletion_requests",
 			"SELECT, UPDATE ON users, support_requests",
+			"SELECT, INSERT, UPDATE, DELETE ON broadcasts, broadcast_attachments, broadcast_recipients",
 			"SELECT ON teachers, schedule_profile_recipients",
 			"SELECT, DELETE ON subscriptions",
 			"SELECT ON chat_schedule_profiles, worker_status",
@@ -146,7 +150,7 @@ func ApplyRuntimeGrants(
 			"scheduler_lock_privacy_deletion_request(TEXT, TEXT)",
 		},
 	}
-	if _, err = tx.ExecContext(ctx, "REVOKE ALL ON FUNCTION scheduler_anonymize_audit_json(JSONB, TEXT, TEXT) FROM PUBLIC"); err != nil {
+	if _, err = tx.ExecContext(ctx, "REVOKE ALL ON FUNCTION scheduler_anonymize_audit_json(JSONB, TEXT, TEXT), scheduler_service_updates_changed(), scheduler_updates_prompt_delivered() FROM PUBLIC"); err != nil {
 		return fmt.Errorf("revoke public audit function privileges: %w", err)
 	}
 	for role, signatures := range functions {
