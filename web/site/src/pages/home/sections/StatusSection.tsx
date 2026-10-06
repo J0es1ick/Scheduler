@@ -9,14 +9,13 @@ const stateText: Record<PublicSourceStatus["state"], string> = {
 };
 
 export function StatusSection({ sources }: { sources: PublicSourceStatus[] }) {
-  if (!sources.length) return null;
   return (
     <section className="public-section public-status" id="status">
       <div className="public-container">
         <div className="public-section-heading">
           <div>
             <span className="public-kicker">Состояние данных</span>
-            <h2>Понятно, откуда взялось расписание</h2>
+            <h2>Состояние источников</h2>
           </div>
           <p>
             Для каждого подключённого источника показаны время последнего
@@ -24,6 +23,11 @@ export function StatusSection({ sources }: { sources: PublicSourceStatus[] }) {
           </p>
         </div>
         <div className="public-status-list">
+          {!sources.length && (
+            <p className="public-empty-state">
+              Данные об источниках пока недоступны.
+            </p>
+          )}
           {sources.map((source) => (
             <article
               key={source.university_name}

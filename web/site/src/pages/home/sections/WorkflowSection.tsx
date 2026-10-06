@@ -1,34 +1,41 @@
-import { workflowSteps } from "../content";
-
 export function WorkflowSection() {
   return (
     <section className="public-section public-workflow" id="how-it-works">
       <div className="public-container">
         <div className="public-section-heading">
           <div>
-            <span className="public-kicker">Как это устроено</span>
-            <h2>От страницы вуза до сообщения в Telegram</h2>
+            <span className="public-kicker">Начать пользоваться</span>
+            <h2>Пара минут на настройку.</h2>
           </div>
           <p>
-            Обновление проходит контролируемый путь. Ошибка на сайте источника
-            не должна превращаться в пустое расписание у всех студентов.
+            Дальше расписание всегда под рукой: на сегодня, неделю или выбранную
+            дату.
           </p>
         </div>
-        <div className="public-workflow-grid">
-          {workflowSteps.map((item) => {
-            const Icon = item.icon;
-            return (
-              <article key={item.number} className="public-workflow-card">
-                <div className="public-workflow-card-top">
-                  <span>{item.number}</span>
-                  <Icon size={22} />
-                </div>
-                <h3>{item.title}</h3>
-                <p>{item.text}</p>
-              </article>
-            );
-          })}
-        </div>
+        <ol className="public-workflow-grid">
+          {[
+            {
+              title: "Выберите роль и вуз",
+              text: "Студент или преподаватель — бот предложит подходящий способ найти расписание.",
+            },
+            {
+              title: "Найдите своё расписание",
+              text: "Студент выбирает учебную группу. Преподаватель находит и подтверждает своё ФИО.",
+            },
+            {
+              title: "Настройте сообщения",
+              text: "Выберите время ежедневного расписания. Напоминания, изменения и новости сервиса включаются отдельно.",
+            },
+          ].map((step, index) => (
+            <li key={step.title}>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <div>
+                <h3>{step.title}</h3>
+                <p>{step.text}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
       </div>
     </section>
   );

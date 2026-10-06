@@ -47,8 +47,8 @@ export function Header({ botURL }: HeaderProps) {
           <a href="#how-it-works" onClick={closeMenu}>
             Как работает
           </a>
-          <a href="#technologies" onClick={closeMenu}>
-            Технологии
+          <a href="#universities" onClick={closeMenu}>
+            Вузы
           </a>
           <a href="#connectors" onClick={closeMenu}>
             Разработчикам

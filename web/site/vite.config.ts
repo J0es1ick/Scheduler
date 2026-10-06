@@ -9,6 +9,7 @@ export default defineConfig({
     sourcemap: false,
   },
   server: {
+    fs: { allow: [".", "../shared"] },
     port: 15174,
     proxy: {
       "/api": "http://localhost:18081",

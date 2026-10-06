@@ -1,34 +1,28 @@
-import {
-  ArrowRight,
-  Bot,
-  CalendarCheck2,
-  Check,
-  Github,
-  RefreshCw,
-} from "lucide-react";
+import { useState } from "react";
+import { ArrowUpRight, Bell, Check, Github } from "lucide-react";
 
-interface HeroSectionProps {
+export function HeroSection({
+  botURL,
+  projectURL,
+}: {
   botURL: string;
   projectURL: string;
-}
-
-export function HeroSection({ botURL, projectURL }: HeroSectionProps) {
+}) {
+  const [role, setRole] = useState<"student" | "teacher">("student");
   return (
     <section className="public-hero" id="about">
       <div className="public-container public-hero-grid">
         <div className="public-hero-copy">
-          <div className="public-eyebrow">
-            <span />
-            Открытый проект для студентов
-          </div>
+          <p className="public-kicker">Расписание вузов в Telegram</p>
           <h1>
-            Расписание, которое
-            <em> обновляется само</em>
+            Знайте, какие
+            <br />
+            пары <span>сегодня.</span>
           </h1>
           <p className="public-lead">
-            Scheduler собирает занятия с официальных сайтов вузов, проверяет
-            обновления и доставляет их в Telegram — без ручного переноса пар и
-            постоянной проверки страниц.
+            Для студентов — расписание группы. Для преподавателей — свои
+            занятия. С изменениями, напоминаниями и утренним сообщением в
+            удобное время.
           </p>
           <div className="public-actions">
             <a
@@ -37,9 +31,7 @@ export function HeroSection({ botURL, projectURL }: HeroSectionProps) {
               target="_blank"
               rel="noreferrer"
             >
-              <Bot size={19} />
-              Попробовать в Telegram
-              <ArrowRight size={18} />
+              Открыть Scheduler <ArrowUpRight size={19} />
             </a>
             <a
               className="public-secondary-button"
@@ -47,51 +39,84 @@ export function HeroSection({ botURL, projectURL }: HeroSectionProps) {
               target="_blank"
               rel="noreferrer"
             >
-              <Github size={19} />
-              Исходный код
+              <Github size={18} /> Код проекта
             </a>
           </div>
-          <div className="public-live-note">
-            <span />
-            Статистика загружается из работающего сервиса
-          </div>
+          <p className="public-hero-note">
+            <Check size={15} /> Вы выбираете, какие сообщения получать
+          </p>
         </div>
-
         <div className="public-hero-product" aria-label="Пример расписания">
-          <div className="public-product-top">
-            <div>
-              <span>Пример расписания</span>
-              <strong>Понедельник, 27 июля</strong>
-            </div>
-            <span className="public-product-status">
-              <i />
-              демонстрация
+          <div className="public-product-heading">
+            <span>Внутри бота</span>
+            <small>Пример</small>
+          </div>
+          <div
+            className="public-example-tabs"
+            role="group"
+            aria-label="Пример для роли"
+          >
+            <button
+              type="button"
+              aria-pressed={role === "student"}
+              onClick={() => setRole("student")}
+            >
+              Студент
+            </button>
+            <button
+              type="button"
+              aria-pressed={role === "teacher"}
+              onClick={() => setRole("teacher")}
+            >
+              Преподаватель
+            </button>
+          </div>
+          <div className="public-product-date">
+            <strong>Понедельник</strong>
+            <span>
+              {role === "student" ? "Группа ИВТ-21" : "Павлова Елена Андреевна"}
             </span>
           </div>
-          <div className="public-lesson is-current">
-            <time>09:50</time>
-            <div>
-              <span>Лекция</span>
-              <strong>Информационные технологии</strong>
-              <small>Аудитория А-206 · Павлова Е.А.</small>
-            </div>
-          </div>
-          <div className="public-lesson">
-            <time>12:10</time>
-            <div>
-              <span>Практика</span>
-              <strong>Иностранный язык</strong>
-              <small>Аудитория К-401 · чётная неделя</small>
-            </div>
+          <div className="public-example-lessons" aria-live="polite">
+            {[
+              {
+                time: "09:50",
+                end: "11:20",
+                title: "Информационные технологии",
+                type: "Лекция",
+                room: "А-206",
+                teacher: "Павлова Е.А.",
+                group: "ИВТ-21, ИВТ-22",
+              },
+              {
+                time: "12:10",
+                end: "13:40",
+                title: role === "student" ? "Иностранный язык" : "Базы данных",
+                type: "Практика",
+                room: "К-401",
+                teacher: "Смирнов А.В.",
+                group: "ИВТ-31",
+              },
+            ].map((lesson) => (
+              <article className="public-lesson" key={lesson.time}>
+                <div className="public-lesson-time">
+                  <time>{lesson.time}</time>
+                  <small>{lesson.end}</small>
+                </div>
+                <div>
+                  <span>{lesson.type}</span>
+                  <h3>{lesson.title}</h3>
+                  <p>Ауд. {lesson.room}</p>
+                  <small>
+                    {role === "student" ? lesson.teacher : lesson.group}
+                  </small>
+                </div>
+              </article>
+            ))}
           </div>
           <div className="public-product-footer">
-            <CalendarCheck2 size={18} />
-            <span>Уведомления можно включить в настройках</span>
-            <Check size={17} />
-          </div>
-          <div className="public-product-stamp" aria-hidden="true">
-            <RefreshCw size={22} />
-            <span>auto</span>
+            <Bell size={16} />
+            <span>Каждый день в 07:00 — если захотите</span>
           </div>
         </div>
       </div>

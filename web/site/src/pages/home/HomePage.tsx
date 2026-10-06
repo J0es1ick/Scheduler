@@ -2,7 +2,6 @@ import { usePublicInfo } from "../../features/public-info/usePublicInfo";
 import { projectLinks } from "../../shared/config/project";
 import { Footer } from "../../widgets/Footer";
 import { Header } from "../../widgets/Header";
-import { CallToActionSection } from "./sections/CallToActionSection";
 import { ConnectorSection } from "./sections/ConnectorSection";
 import { HeroSection } from "./sections/HeroSection";
 import { StatisticsSection } from "./sections/StatisticsSection";
@@ -21,16 +20,15 @@ export function HomePage() {
       <Header botURL={botURL} />
       <main>
         <HeroSection botURL={botURL} projectURL={projectURL} />
-        <StatisticsSection info={info} loading={loading} />
         <WorkflowSection />
-        <ConnectorSection projectURL={projectURL} />
-        <StatusSection sources={info?.sources ?? []} />
         <UniversitiesSection
           botURL={botURL}
           universities={info?.university_names ?? []}
         />
+        <StatusSection sources={info?.sources ?? []} />
+        <StatisticsSection info={info} loading={loading} />
+        <ConnectorSection projectURL={projectURL} />
         <TechnologiesSection />
-        <CallToActionSection botURL={botURL} users={info?.users} />
       </main>
       <Footer botURL={botURL} projectURL={projectURL} />
     </div>
