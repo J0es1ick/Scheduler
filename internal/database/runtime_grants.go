@@ -150,8 +150,8 @@ func ApplyRuntimeGrants(
 			"scheduler_lock_privacy_deletion_request(TEXT, TEXT)",
 		},
 	}
-	if _, err = tx.ExecContext(ctx, "REVOKE ALL ON FUNCTION scheduler_anonymize_audit_json(JSONB, TEXT, TEXT), scheduler_service_updates_changed(), scheduler_updates_prompt_delivered() FROM PUBLIC"); err != nil {
-		return fmt.Errorf("revoke public audit function privileges: %w", err)
+	if _, err = tx.ExecContext(ctx, "REVOKE ALL ON FUNCTION scheduler_anonymize_audit_json(JSONB, TEXT, TEXT), scheduler_profile_schedule_changed(), scheduler_service_updates_changed(), scheduler_updates_prompt_delivered() FROM PUBLIC"); err != nil {
+		return fmt.Errorf("revoke public internal function privileges: %w", err)
 	}
 	for role, signatures := range functions {
 		quoted := pgx.Identifier{role}.Sanitize()

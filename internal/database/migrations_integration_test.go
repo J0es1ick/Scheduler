@@ -55,7 +55,8 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 	adminRole := "admin_test_" + replaceHyphens(uuid.NewString())
 	parserRole := "parser_test_" + replaceHyphens(uuid.NewString())
 	privacyRole := "privacy_test_" + replaceHyphens(uuid.NewString())
-	for _, role := range []string{botRole, adminRole, parserRole, privacyRole} {
+	siteRole := "site_test_" + replaceHyphens(uuid.NewString())
+	for _, role := range []string{botRole, adminRole, parserRole, privacyRole, siteRole} {
 		if _, err = db.ExecContext(ctx, "CREATE ROLE "+pgx.Identifier{role}.Sanitize()); err != nil {
 			t.Fatal(err)
 		}
@@ -81,6 +82,18 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 	}
 	if err = ApplyRuntimeGrants(ctx, db, botRole, adminRole, parserRole, privacyRole); err != nil {
 		t.Fatal(err)
+	}
+	var publicDefiners []string
+	if err = db.SelectContext(ctx, &publicDefiners, `
+		SELECT p.oid::regprocedure::text
+		FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+		WHERE n.nspname='public' AND p.prosecdef
+			AND has_function_privilege($1,p.oid,'EXECUTE')
+		ORDER BY p.oid::regprocedure::text`, siteRole); err != nil {
+		t.Fatal(err)
+	}
+	if len(publicDefiners) != 0 {
+		t.Errorf("public can execute security definer functions after grant reconciliation: %v", publicDefiners)
 	}
 	for _, test := range []struct {
 		role, table, privilege string
@@ -153,6 +166,7 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 		role, function string
 		want           bool
 	}{
+		{botRole, "scheduler_profile_schedule_changed()", false},
 		{botRole, "scheduler_service_updates_changed()", false},
 		{adminRole, "scheduler_updates_prompt_delivered()", false},
 		{botRole, "enqueue_privacy_deletion(text)", true},
