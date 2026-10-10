@@ -1,6 +1,6 @@
 import { useViewState } from "../hooks/useViewState";
 import { useState } from "react";
-import { BellRing, Shield, UserRoundCheck } from "lucide-react";
+import { Shield } from "lucide-react";
 import { api } from "../api";
 import {
   EmptyBlock,
@@ -151,38 +151,48 @@ export function UsersPage({
                     )}
                   </div>
                   <p>Telegram ID: {item.id}</p>
-                  <div>
-                    <span>
-                      <BellRing size={14} /> {item.subscriptions} подписок на
-                      группы
-                    </span>
-                    <span>
-                      {item.role === "teacher"
-                        ? `Преподаватель: ${item.teacher_name || "не выбран"}${item.teacher_university_name ? ` · ${item.teacher_university_name}` : ""}`
-                        : `Студент · основная группа: ${item.default_group_name || "не выбрана"}`}
-                    </span>
-                    <span>
-                      Обновления сервиса:{" "}
-                      {item.service_updates_consent == null
-                        ? "ответа нет"
-                        : item.service_updates_consent
-                          ? "согласие получено"
-                          : "отказ"}
-                      <br />
-                      Ежедневное расписание:{" "}
-                      {item.daily_enabled
-                        ? `${item.daily_time} · ${item.schedule_timezone}`
-                        : "выключено"}
-                    </span>
-                    <span>
-                      Уведомления:{" "}
-                      {item.notifications_enabled ? "включены" : "выключены"}
-                    </span>
-                    <span>
-                      <UserRoundCheck size={14} />{" "}
-                      {formatDateTime(item.created_at)}
-                    </span>
-                  </div>
+                  <dl className="user-details">
+                    <div>
+                      <dt>Расписание</dt>
+                      <dd>
+                        {item.role === "teacher"
+                          ? `Преподаватель · ${item.teacher_name || "не выбран"}${item.teacher_university_name ? ` · ${item.teacher_university_name}` : ""}`
+                          : `Студент · ${item.default_group_name || "группа не выбрана"}`}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Подписки на группы</dt>
+                      <dd>{item.subscriptions}</dd>
+                    </div>
+                    <div>
+                      <dt>Обновления сервиса</dt>
+                      <dd>
+                        {item.service_updates_consent == null
+                          ? "Ответа нет"
+                          : item.service_updates_consent
+                            ? "Согласие получено"
+                            : "Отказ"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Ежедневное расписание</dt>
+                      <dd>
+                        {item.daily_enabled
+                          ? `${item.daily_time} · ${item.schedule_timezone}`
+                          : "Выключено"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Уведомления</dt>
+                      <dd>
+                        {item.notifications_enabled ? "Включены" : "Выключены"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Дата регистрации</dt>
+                      <dd>{formatDateTime(item.created_at)}</dd>
+                    </div>
+                  </dl>
                 </div>
                 <div className="user-actions">
                   <label className="role-select">

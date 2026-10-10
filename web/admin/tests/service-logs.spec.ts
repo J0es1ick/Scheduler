@@ -480,3 +480,22 @@ test("console refresh preserves reading position until following is resumed", as
   await expect(consoleView.locator(".log-console-record")).toHaveCount(count);
   await expect.poll(distance).toBeLessThan(2);
 });
+
+for (const width of [390, 1440])
+  test(`compact log search at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await setup(page);
+    await page.route("**/api/service-logs?**", (route) =>
+      route.fulfill({ json: result }),
+    );
+    await page.goto("/#/logs");
+    const button = page.getByRole("button", { name: "Найти", exact: true });
+    await expect(button).toBeVisible();
+    const box = await button.boundingBox();
+    expect(box!.height).toBeLessThanOrEqual(48);
+    expect(box!.width).toBeLessThanOrEqual(180);
+    await page.screenshot({
+      path: testInfo.outputPath("logs.png"),
+      fullPage: true,
+    });
+  });

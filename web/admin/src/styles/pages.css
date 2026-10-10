@@ -1897,3 +1897,24 @@
   font-size: 12px;
   min-height: 44px;
 }
+
+.user-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 24px;
+  margin: 16px 0 4px;
+}
+.user-details > div { min-width: 0; }
+.user-details dt { color: var(--muted); font-size: 12px; margin-bottom: 3px; }
+.user-details dd { color: var(--ink); font-size: 13px; margin: 0; overflow-wrap: anywhere; }
+.service-log-filters > button[type="submit"] {
+  align-self: end;
+  justify-self: start;
+  min-height: 42px;
+  height: 42px;
+  min-width: 120px;
+  padding: 0 24px;
+}
+@media (max-width: 560px) {
+  .user-details { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+}

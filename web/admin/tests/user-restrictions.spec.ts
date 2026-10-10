@@ -164,7 +164,9 @@ for (const role of ["read_only", "support", "editor", "reviewer", "operator"])
     ).toHaveCount(0);
   });
 
-test("teacher card shows personal schedule and daily time", async ({ page }) => {
+test("teacher card shows personal schedule and daily time", async ({
+  page,
+}) => {
   const user = await setup(page);
   Object.assign(user, {
     role: "teacher",
@@ -176,7 +178,31 @@ test("teacher card shows personal schedule and daily time", async ({ page }) => 
   });
   await page.goto("/#/users");
   const card = page.getByRole("article", { name: "Пользователь Student" });
-  await expect(card.getByText("Преподаватель: Иванов Иван Иванович · Тестовый вуз")).toBeVisible();
-  await expect(card.getByText("Ежедневное расписание: 06:30 · Europe/Moscow")).toBeVisible();
-  await expect(card.getByText("Студент · основная группа", { exact: false })).toHaveCount(0);
+  await expect(
+    card.getByText("Преподаватель · Иванов Иван Иванович · Тестовый вуз"),
+  ).toBeVisible();
+  await expect(
+    card
+      .locator(".user-details > div")
+      .filter({
+        has: page.getByText("Ежедневное расписание", { exact: true }),
+      }),
+  ).toContainText("06:30 · Europe/Moscow");
+  await expect(
+    card.getByText("Студент · основная группа", { exact: false }),
+  ).toHaveCount(0);
+});
+
+test("user details have separate labels", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await setup(page);
+  await page.goto("/#/users");
+  await expect(page.locator(".user-details dt")).toHaveCount(6);
+  await expect(page.locator(".user-details")).toContainText(
+    "Ежедневное расписание",
+  );
+  await page.screenshot({
+    path: testInfo.outputPath("users.png"),
+    fullPage: true,
+  });
 });
