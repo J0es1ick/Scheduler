@@ -4,10 +4,13 @@ package repository_test
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/J0es1ick/Scheduler/internal/service"
+	"strings"
 	"testing"
 	"time"
 )
@@ -173,5 +176,103 @@ func TestPersonalScheduleIsolationRecurrenceAndQueue(t *testing.T) {
 	changes, err := repo.List(ctx, "41")
 	if err != nil || len(changes) != 0 {
 		t.Fatalf("deletion retained data: %+v %v", changes, err)
+	}
+}
+
+func TestPersonalPublicationReviewAndSelectedRepeats(t *testing.T) {
+	db, ctx := openOperationalIntegrationDB(t)
+	createRepositoryPublicationFixture(t, ctx, db, "review", "source")
+	start := time.Date(2026, 9, 7, 0, 0, 0, 0, time.UTC)
+	snapshots := repository.NewParserSnapshotRepository(db)
+	publish := func(id, subject string, remove bool) {
+		t.Helper()
+		lessons := []domain.Lesson{}
+		for week := 0; week < 12; week++ {
+			if remove && week == 2 {
+				continue
+			}
+			day := start.AddDate(0, 0, week*7)
+			lessons = append(lessons, domain.Lesson{ID: fmt.Sprintf("%s-%d", id, week), UniversityID: "review", SemesterID: "term", GroupID: "group", SpecialDate: &day, WeekType: domain.WeekTypeDate, TimeStart: "09:00", TimeEnd: "10:30", Subject: subject, Type: domain.LessonTypeLecture, Room: "100"})
+		}
+		if _, err := repository.NewParseLogRepository(db).CreateParseLog(ctx, id+"-log", "source", "running", 0, ""); err != nil {
+			t.Fatal(err)
+		}
+		snapshot := domain.ParserSnapshot{ID: id, DataSourceID: "source", ParseLogID: id + "-log", Status: domain.SnapshotStatusStaged, Publishable: true, GroupCount: 1, LessonCount: len(lessons), Payload: domain.ScheduleSnapshot{UniversityID: "review", SemesterID: "term", StartDate: start, EndDate: start.AddDate(0, 0, 12*7-1), Groups: []domain.SnapshotGroup{{ID: "group", UniversityID: "review", Name: "4/147", Lessons: lessons}}}}
+		if err := snapshots.Create(ctx, &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := snapshots.Publish(ctx, id, "test", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	publish("first", "Physics", false)
+	if _, err := db.Exec(`INSERT INTO users(id) VALUES('review-user'); INSERT INTO subscriptions(id,user_id,object_type,object_id) VALUES('review-sub','review-user','group','group'); UPDATE users SET default_group_id='group' WHERE id='review-user'`); err != nil {
+		t.Fatal(err)
+	}
+	scheduler := service.NewScheduleService(repository.NewLessonRepository(db), repository.NewSemesterRepository(db), repository.NewGroupRepository(db))
+	load := func() *service.PersonalSchedule {
+		t.Helper()
+		v, err := scheduler.PersonalSchedule(ctx, "review-user", "group", start, start)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	schedule := load()
+	if len(schedule.Patterns) != 1 || schedule.Patterns[0].Kind != "weekly" || len(schedule.Days[0].Lessons[0].Repeats) != 12 {
+		t.Fatalf("detection: %+v", schedule)
+	}
+	input := service.PersonalChangeInput{TargetID: "group", LessonID: schedule.Days[0].Lessons[0].Original.PersonalKey, Date: "2026-09-07", Scope: "selected", Dates: []string{"2026-09-07", "2026-09-21"}, Patch: domain.PersonalLessonPatch{Room: new("Personal")}}
+	change, err := scheduler.SavePersonalChange(ctx, "review-user", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.Dates = []string{"2026-09-08"}
+	if _, err = scheduler.SavePersonalChange(ctx, "review-user", input); !errors.Is(err, service.ErrPersonalInput) {
+		t.Fatal("invalid date accepted", err)
+	}
+	publish("identical", "Physics", false)
+	if schedule = load(); schedule.Review != nil || schedule.Days[0].Lessons[0].Lesson.Room != "Personal" {
+		t.Fatal("identical publication suspended edits", schedule.Review)
+	}
+	publish("changed", "Chemistry", true)
+	schedule = load()
+	if schedule.Review == nil || schedule.Review.Kept != 1 || schedule.Review.Dropped != 1 || schedule.Days[0].Lessons[0].Lesson.Room != "100" {
+		t.Fatalf("review: %+v", schedule)
+	}
+	notice, err := repository.NewNotificationRepository(db).PersonalNotification(ctx, "review-user", "group", "Changed")
+	if err != nil || !strings.Contains(notice, "согласовать") {
+		t.Fatal("missing review notice", notice, err)
+	}
+	resolve := service.PersonalReviewInput{TargetID: "group", Publication: schedule.Publication, Action: "keep", Versions: map[string]int64{change.ID: schedule.Review.Items[0].Version}}
+	stale := resolve
+	stale.Publication = "first"
+	if _, err = scheduler.ResolvePersonalReview(ctx, "review-user", stale); !errors.Is(err, repository.ErrPersonalConflict) {
+		t.Fatal("stale publication accepted", err)
+	}
+	if _, err = scheduler.ResolvePersonalReview(ctx, "review-user", resolve); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = scheduler.ResolvePersonalReview(ctx, "review-user", resolve); !errors.Is(err, repository.ErrPersonalConflict) {
+		t.Fatal("double confirmation", err)
+	}
+	schedule = load()
+	if schedule.Review != nil || schedule.Days[0].Lessons[0].Lesson.Room != "Personal" || schedule.Days[0].Lessons[0].Lesson.Subject != "Chemistry" {
+		t.Fatal("remap failed", schedule)
+	}
+	var occurrences []domain.PersonalOccurrence
+	if err = json.Unmarshal(schedule.Changes[0].Occurrences, &occurrences); err != nil || len(occurrences) != 1 {
+		t.Fatal("lost selected dates", occurrences, err)
+	}
+	publish("again", "New subject", false)
+	schedule = load()
+	resolve.Publication = schedule.Publication
+	resolve.Action = "discard"
+	resolve.Versions[change.ID] = schedule.Review.Items[0].Version
+	if _, err = scheduler.ResolvePersonalReview(ctx, "review-user", resolve); err != nil {
+		t.Fatal(err)
+	}
+	if schedule = load(); len(schedule.Changes) != 0 || schedule.Review != nil {
+		t.Fatal("discard failed", schedule)
 	}
 }

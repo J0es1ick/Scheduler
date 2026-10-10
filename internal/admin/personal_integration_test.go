@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/J0es1ick/Scheduler/internal/database"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	"github.com/J0es1ick/Scheduler/internal/service"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"net/http"
@@ -144,6 +145,46 @@ func TestPersonalAPIWithRuntimePrivileges(t *testing.T) {
 	response = request("GET", "/api/personal/schedule?target=foreign&from=2026-09-07&to=2026-09-07", "", false)
 	if response.Code != 403 {
 		t.Fatalf("foreign target: %d", response.Code)
+	}
+	dsn.User = url.UserPassword(roles[2], password)
+	parserDB, err := sqlx.Connect("pgx", dsn.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parserDB.Close()
+	if _, err = parserDB.Exec(`SELECT scheduler_personal_publication_changed($1,ARRAY[$1]::text[])`, suffix); err != nil {
+		t.Fatal("parser review privilege", err)
+	}
+	response = request("GET", "/api/personal/schedule?target="+suffix+"&from=2026-09-07&to=2026-09-07", "", false)
+	var personal service.PersonalSchedule
+	if err = json.Unmarshal(response.Body.Bytes(), &personal); err != nil || personal.Review == nil {
+		t.Fatal("review response", response.Body, err)
+	}
+	decision, _ := json.Marshal(service.PersonalReviewInput{TargetID: suffix, Publication: personal.Publication, Action: "keep", Versions: map[string]int64{personal.Review.Items[0].ID: personal.Review.Items[0].Version}})
+	response = request("POST", "/api/personal/review", string(decision), false)
+	if response.Code != 403 {
+		t.Fatal("review without CSRF", response.Code)
+	}
+	response = request("POST", "/api/personal/review", string(decision), true)
+	if response.Code != 200 {
+		t.Fatal("review with runtime privileges", response.Code, response.Body)
+	}
+	response = request("POST", "/api/personal/review", string(decision), true)
+	if response.Code != 409 {
+		t.Fatal("duplicate review", response.Code)
+	}
+	users, err := NewStore(limited).Users(ctx, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, item := range users {
+		if item.ID == user {
+			found = item.DefaultGroupUniversityName == "Personal API"
+		}
+	}
+	if !found {
+		t.Fatal("student university missing")
 	}
 	dsn.User = url.UserPassword(roles[0], password)
 	botDB, err := sqlx.Connect("pgx", dsn.String())

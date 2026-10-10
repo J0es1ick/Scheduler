@@ -138,11 +138,13 @@ func ApplyRuntimeGrants(
 			"scheduler_request_notification_cancellation(TEXT, TEXT, TEXT)",
 			"scheduler_request_outbox_cancellation(TEXT, TEXT, TEXT, TEXT)",
 			"scheduler_reconcile_notification_queue()",
+			"scheduler_personal_publication_changed(TEXT, TEXT[])",
 			"enqueue_schedule_change(TEXT, TEXT, TEXT, TEXT)",
 			"enqueue_teacher_change(TEXT, TEXT, TEXT, TEXT)",
 			"enqueue_admin_alert(TEXT, TEXT)",
 		},
 		parserRole: {
+			"scheduler_personal_publication_changed(TEXT, TEXT[])",
 			"enqueue_schedule_change(TEXT, TEXT, TEXT, TEXT)",
 			"enqueue_teacher_change(TEXT, TEXT, TEXT, TEXT)",
 			"enqueue_admin_alert(TEXT, TEXT)",

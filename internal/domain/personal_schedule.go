@@ -48,6 +48,9 @@ func (p PersonalLessonPatch) Apply(lesson Lesson) Lesson {
 }
 
 type PersonalOverride struct {
+	Basis        json.RawMessage `db:"basis" json:"basis"`
+	Occurrences  json.RawMessage `db:"occurrences" json:"occurrences"`
+	NeedsReview  bool            `db:"needs_review" json:"needs_review"`
 	ID           string          `db:"id" json:"id"`
 	UserID       string          `db:"user_id" json:"-"`
 	Role         UserRole        `db:"role" json:"role"`
@@ -66,10 +69,30 @@ type PersonalOverride struct {
 }
 
 func (o PersonalOverride) Matches(lesson Lesson, date time.Time) bool {
+	if o.NeedsReview {
+		return false
+	}
 	key := lesson.PersonalKey
 	if key == "" {
 		key = lesson.ID
 	}
 	day := date.Format(time.DateOnly)
+	if len(o.Occurrences) > 2 {
+		var occurrences []PersonalOccurrence
+		if json.Unmarshal(o.Occurrences, &occurrences) != nil {
+			return false
+		}
+		for _, occurrence := range occurrences {
+			if occurrence.LessonID == key && occurrence.Date == day && o.SemesterID == lesson.SemesterID {
+				return true
+			}
+		}
+		return false
+	}
 	return o.LessonID == key && o.SemesterID == lesson.SemesterID && day >= o.ValidFrom.Format(time.DateOnly) && day <= o.ValidTo.Format(time.DateOnly)
+}
+
+type PersonalOccurrence struct {
+	LessonID string `json:"lesson_id"`
+	Date     string `json:"date"`
 }

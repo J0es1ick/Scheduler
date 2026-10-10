@@ -12,17 +12,20 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/helpers"
+	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/J0es1ick/Scheduler/internal/searchtext"
 )
 
 type PersonalLesson struct {
-	Lesson      domain.Lesson             `json:"lesson"`
-	Original    domain.Lesson             `json:"original"`
-	Cancelled   bool                      `json:"cancelled"`
-	Changes     []domain.PersonalOverride `json:"changes"`
-	SemesterEnd string                    `json:"semester_end"`
-	GroupName   string                    `json:"group_name"`
-	CanRepeat   bool                      `json:"can_repeat"`
+	Repeats     []domain.PersonalOccurrence `json:"repeats"`
+	Pattern     string                      `json:"pattern"`
+	Lesson      domain.Lesson               `json:"lesson"`
+	Original    domain.Lesson               `json:"original"`
+	Cancelled   bool                        `json:"cancelled"`
+	Changes     []domain.PersonalOverride   `json:"changes"`
+	SemesterEnd string                      `json:"semester_end"`
+	GroupName   string                      `json:"group_name"`
+	CanRepeat   bool                        `json:"can_repeat"`
 }
 
 type PersonalDay struct {
@@ -30,9 +33,12 @@ type PersonalDay struct {
 	Lessons []PersonalLesson `json:"lessons"`
 }
 type PersonalSchedule struct {
-	Target  domain.PersonalTarget     `json:"target"`
-	Days    []PersonalDay             `json:"days"`
-	Changes []domain.PersonalOverride `json:"changes"`
+	Publication string                    `json:"publication"`
+	Patterns    []PersonalPattern         `json:"patterns"`
+	Review      *PersonalReview           `json:"review,omitempty"`
+	Target      domain.PersonalTarget     `json:"target"`
+	Days        []PersonalDay             `json:"days"`
+	Changes     []domain.PersonalOverride `json:"changes"`
 }
 
 func (s *ScheduleService) PersonalTargets(ctx context.Context, userID string) ([]domain.PersonalTarget, error) {
@@ -54,12 +60,15 @@ func (s *ScheduleService) PersonalSchedule(ctx context.Context, userID, targetID
 	if target == nil {
 		return nil, sql.ErrNoRows
 	}
-	var data map[time.Time][]domain.Lesson
-	if target.Role == domain.RoleTeacher {
-		data, err = s.GetScheduleForTeacherRange(ctx, target.UniversityID, target.Name, from, to)
-	} else {
-		data, err = s.GetScheduleForGroupRange(ctx, target.ID, from, to)
+	revision, err := s.personalRepo.PublicationRevision(ctx, target.UniversityID)
+	if err != nil {
+		return nil, err
 	}
+	lessons, err := s.targetLessons(ctx, *target)
+	if err != nil {
+		return nil, err
+	}
+	data, err := s.lessonsForRange(ctx, lessons, from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -72,6 +81,16 @@ func (s *ScheduleService) PersonalSchedule(ctx context.Context, userID, targetID
 		if change.Role == target.Role && change.TargetID == target.ID {
 			result.Changes = append(result.Changes, change)
 		}
+	}
+	result.Publication = revision
+	patterns, err := s.personalPatterns(ctx, *target, from, to)
+	if err != nil {
+		return nil, err
+	}
+	result.Patterns = patterns
+	result.Review, err = s.personalReview(ctx, *target, result.Changes)
+	if err != nil {
+		return nil, err
 	}
 	semesters := map[string]*domain.Semester{}
 	for date := helpers.NormalizeDate(from); !date.After(helpers.NormalizeDate(to)); date = date.AddDate(0, 0, 1) {
@@ -94,10 +113,23 @@ func (s *ScheduleService) PersonalSchedule(ctx context.Context, userID, targetID
 			}
 			item.GroupName = lesson.GroupName
 			item.SemesterEnd = semester.EndDate.Format(time.DateOnly)
-			item.CanRepeat = repeatablePersonalLesson(lesson) && !semester.EndDate.Before(date)
+			for _, pattern := range patterns {
+				if pattern.GroupID == lesson.GroupID && pattern.SemesterID == lesson.SemesterID {
+					item.Pattern = pattern.Kind
+					item.Repeats = pattern.Repeats(lesson, date)
+					item.CanRepeat = len(item.Repeats) > 1
+				}
+			}
 			day.Lessons = append(day.Lessons, item)
 		}
 		result.Days = append(result.Days, day)
+	}
+	current, err := s.personalRepo.PublicationRevision(ctx, target.UniversityID)
+	if err != nil {
+		return nil, err
+	}
+	if current != revision {
+		return nil, repository.ErrPersonalConflict
 	}
 	return result, nil
 }
@@ -166,19 +198,17 @@ func (s *ScheduleService) PersonalizeSchedule(ctx context.Context, userID, group
 	return result, nil
 }
 
-func repeatablePersonalLesson(lesson domain.Lesson) bool {
-	return lesson.SpecialDate == nil && lesson.WeekType != domain.WeekTypeDate && lesson.Recurrence.CycleLength <= 2
-}
-
 type PersonalChangeInput struct {
-	ID        string                     `json:"id"`
-	Version   int64                      `json:"version"`
-	TargetID  string                     `json:"target_id"`
-	LessonID  string                     `json:"lesson_id"`
-	Date      string                     `json:"date"`
-	Scope     string                     `json:"scope"`
-	Patch     domain.PersonalLessonPatch `json:"patch"`
-	Cancelled bool                       `json:"cancelled"`
+	Dates       []string                   `json:"dates"`
+	Publication *string                    `json:"publication"`
+	ID          string                     `json:"id"`
+	Version     int64                      `json:"version"`
+	TargetID    string                     `json:"target_id"`
+	LessonID    string                     `json:"lesson_id"`
+	Date        string                     `json:"date"`
+	Scope       string                     `json:"scope"`
+	Patch       domain.PersonalLessonPatch `json:"patch"`
+	Cancelled   bool                       `json:"cancelled"`
 }
 
 var ErrPersonalInput = errors.New("invalid personal schedule input")
@@ -190,18 +220,26 @@ func (s *ScheduleService) SavePersonalChange(ctx context.Context, userID string,
 	if err != nil || len(input.Date) != 10 {
 		return nil, personalInput("Укажите дату занятия")
 	}
-	if input.Scope != "day" && input.Scope != "semester" {
+	if input.Scope != "day" && input.Scope != "semester" && input.Scope != "selected" {
 		return nil, personalInput("Выберите срок действия правки")
 	}
 	schedule, err := s.PersonalSchedule(ctx, userID, input.TargetID, date, date)
 	if err != nil {
 		return nil, err
 	}
+	if input.Publication != nil && *input.Publication != schedule.Publication {
+		return nil, repository.ErrPersonalConflict
+	}
+	if schedule.Review != nil {
+		return nil, personalInput("Сначала согласуйте правки после обновления вуза")
+	}
+	var selected *PersonalLesson
 	var lesson *domain.Lesson
 	for _, item := range schedule.Days[0].Lessons {
 		if item.Original.ID == input.LessonID || item.Original.PersonalKey == input.LessonID {
 			base := item.Original
 			lesson = &base
+			selected = &item
 			break
 		}
 	}
@@ -212,18 +250,35 @@ func (s *ScheduleService) SavePersonalChange(ctx context.Context, userID string,
 		return nil, err
 	}
 	until := date
-	if input.Scope == "semester" {
-		if !repeatablePersonalLesson(*lesson) {
-			return nil, personalInput("Для этого занятия доступна только правка конкретной даты")
+	occurrences := []domain.PersonalOccurrence{{LessonID: lesson.PersonalKey, Date: input.Date}}
+	if occurrences[0].LessonID == "" {
+		occurrences[0].LessonID = lesson.ID
+	}
+	if input.Scope != "day" {
+		if !selected.CanRepeat {
+			return nil, personalInput("Недостаточно подтверждённых повторов. Выберите конкретную дату")
 		}
-		semester, loadErr := s.personalRepo.Semester(ctx, lesson.SemesterID)
-		if loadErr != nil {
-			return nil, loadErr
+		occurrences = selected.Repeats
+		if input.Scope == "selected" {
+			wanted := map[string]bool{}
+			for _, d := range input.Dates {
+				wanted[d] = true
+			}
+			if len(wanted) == 0 || len(wanted) != len(input.Dates) {
+				return nil, personalInput("Выберите даты без повторов")
+			}
+			occurrences = []domain.PersonalOccurrence{}
+			for _, occurrence := range selected.Repeats {
+				if wanted[occurrence.Date] {
+					occurrences = append(occurrences, occurrence)
+					delete(wanted, occurrence.Date)
+				}
+			}
+			if len(wanted) > 0 {
+				return nil, personalInput("Выбраны даты вне подтверждённых повторов")
+			}
 		}
-		until = semester.EndDate
-		if until.Before(date) || date.Before(semester.StartDate) {
-			return nil, personalInput("Дата находится за пределами семестра")
-		}
+		until, _ = time.Parse(time.DateOnly, occurrences[len(occurrences)-1].Date)
 	}
 	raw, err := json.Marshal(input.Patch)
 	if err != nil {
@@ -238,7 +293,15 @@ func (s *ScheduleService) SavePersonalChange(ctx context.Context, userID string,
 		key = lesson.ID
 	}
 	item := domain.PersonalOverride{ID: input.ID, UserID: userID, Role: schedule.Target.Role, TargetID: input.TargetID, LessonID: key, UniversityID: lesson.UniversityID, SemesterID: lesson.SemesterID, Scope: input.Scope, ValidFrom: date, ValidTo: until, Patch: raw, Cancelled: input.Cancelled}
-	return s.personalRepo.Save(ctx, item, input.Version)
+	item.Basis, err = json.Marshal(lesson)
+	if err != nil {
+		return nil, err
+	}
+	item.Occurrences, err = json.Marshal(occurrences)
+	if err != nil {
+		return nil, err
+	}
+	return s.personalRepo.Save(ctx, item, input.Version, schedule.Publication)
 }
 
 func validatePersonalPatch(p domain.PersonalLessonPatch) error {

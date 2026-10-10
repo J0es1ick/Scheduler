@@ -65,6 +65,7 @@ func (s *Server) registerPersonalRoutes(mux *http.ServeMux) {
 	})
 	s.personalRoute(mux, "GET /api/personal/schedule", s.handlePersonalSchedule)
 	s.personalRoute(mux, "POST /api/personal/changes", s.handlePersonalSave)
+	s.personalRoute(mux, "POST /api/personal/review", s.handlePersonalReview)
 	s.personalRoute(mux, "DELETE /api/personal/changes/{id}", s.handlePersonalDelete)
 }
 
@@ -213,4 +214,18 @@ func (s *Server) personalError(w http.ResponseWriter, err error) {
 		slog.Error("personal schedule request failed", "err", err)
 		writeAPIError(w, http.StatusInternalServerError, "Не удалось сохранить или загрузить личное расписание")
 	}
+}
+
+func (s *Server) handlePersonalReview(w http.ResponseWriter, r *http.Request) {
+	var input service.PersonalReviewInput
+	if err := decodeJSON(w, r, &input); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "Некорректное решение")
+		return
+	}
+	result, err := s.personalSchedule.ResolvePersonalReview(r.Context(), identityFromContext(r.Context()).ID, input)
+	if err != nil {
+		s.personalError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }

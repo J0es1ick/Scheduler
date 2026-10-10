@@ -449,6 +449,10 @@ func applyPublicationSnapshot(
 	); err != nil {
 		return nil, fmt.Errorf("publish snapshot: capture notification baseline: %w", err)
 	}
+	var beforeSemesters []domain.Semester
+	if err = tx.SelectContext(ctx, &beforeSemesters, `SELECT * FROM semesters WHERE university_id=$1`, universityID); err != nil {
+		return nil, err
+	}
 	canonicalPayload, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("publish snapshot: encode canonical payload: %w", err)
@@ -541,6 +545,9 @@ func applyPublicationSnapshot(
 				return nil, fmt.Errorf("publish snapshot: parse log %s has invalid status %s", row.ParseLogID, existingStatus)
 			}
 		}
+	}
+	if err = markPersonalPublicationChanges(ctx, tx, universityID, beforeLessons, beforeSemesters); err != nil {
+		return nil, err
 	}
 	if hook != nil {
 		if err = hook(ctx, &SnapshotPublication{tx: tx, beforeLessons: beforeLessons}); err != nil {
