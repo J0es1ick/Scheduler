@@ -102,7 +102,7 @@ export default function PersonalApp() {
                 ← К выбору сервиса
               </button>
             )}
-            <h1>Ваши занятия. Ваши правки.</h1>
+            <h1>Ваши правки</h1>
             <p>
               Измените аудиторию, преподавателя или отмените пару. Правки видны
               только вам — в приложении и в боте.
@@ -159,6 +159,7 @@ function Calendar({ target }: { target: Target }) {
     date: string;
     item: PersonalLesson;
   }>();
+  const [reviewing, setReviewing] = useState(false);
   const [removing, setRemoving] = useState("");
   const [actionError, setActionError] = useState("");
   const [notice, setNotice] = useState("");
@@ -205,6 +206,43 @@ function Calendar({ target }: { target: Target }) {
       );
     } finally {
       setRemoving("");
+    }
+  }
+  async function resolveReview(action: "keep" | "discard") {
+    const schedule = current?.data;
+    if (!schedule?.review) return;
+    if (
+      action === "discard" &&
+      !window.confirm(
+        "Сбросить правки, затронутые обновлением? После этого вы сможете настроить занятия заново.",
+      )
+    )
+      return;
+    setReviewing(true);
+    setActionError("");
+    try {
+      await request("review", "POST", {
+        target_id: target.id,
+        publication: schedule.publication,
+        action,
+        versions: Object.fromEntries(
+          schedule.review.items.map((item) => [item.id, item.version]),
+        ),
+      });
+      setRevision((n) => n + 1);
+      setNotice(
+        action === "keep"
+          ? "Правки перенесены на совпавшие слоты. Несовпавшие правки сброшены."
+          : "Правки сброшены. Можно настроить занятия заново.",
+      );
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "Не удалось согласовать правки",
+      );
+    } finally {
+      setReviewing(false);
     }
   }
   return (
@@ -268,6 +306,71 @@ function Calendar({ target }: { target: Target }) {
         </p>
       ) : (
         <>
+          <div className="personal-patterns">
+            {current.data?.patterns?.map((pattern) => (
+              <p
+                className="personal-note"
+                key={`${pattern.group_id}:${pattern.semester_id}`}
+              >
+                <strong>
+                  {target.role === "teacher" ? `${pattern.group_name} · ` : ""}
+                  {{
+                    weekly: "Недельное",
+                    biweekly: "Двухнедельное",
+                    individual: "Индивидуальное",
+                  }[pattern.kind] || "Индивидуальное"}{" "}
+                  расписание
+                </strong>
+                {pattern.from && pattern.to
+                  ? ` · повторы подтверждены с ${dateLabel(pattern.from)} по ${dateLabel(pattern.to)}`
+                  : " · длительный повтор недель не подтверждён"}
+                {pattern.exceptions
+                  ? ` · недель с отличиями: ${pattern.exceptions}`
+                  : ""}
+              </p>
+            ))}
+          </div>
+          {current.data?.review && (
+            <section
+              className="personal-review"
+              aria-label="Согласование правок"
+            >
+              <h2>Вуз обновил расписание</h2>
+              <p>
+                Ваши правки приостановлены. Можно перенести их на занятия в тех
+                же слотах: группа, день, время и подгруппа должны совпасть.
+                Предмет и преподаватель в новом расписании могут отличаться.
+              </p>
+              <p>
+                Совпало занятий: {current.data.review.kept}. Нет однозначного
+                совпадения: {current.data.review.dropped}.
+              </p>
+              <ul>
+                {current.data.review.items.map((item) => (
+                  <li key={item.id}>
+                    {item.subject || "Занятие"} · перенести: {item.kept},
+                    сбросить: {item.dropped}
+                  </li>
+                ))}
+              </ul>
+              <div className="personal-review-actions">
+                <button
+                  className="button button-primary"
+                  disabled={reviewing || !!removing}
+                  onClick={() => void resolveReview("keep")}
+                >
+                  Сохранить в совпавших слотах
+                </button>
+                <button
+                  className="button button-ghost"
+                  disabled={reviewing || !!removing}
+                  onClick={() => void resolveReview("discard")}
+                >
+                  Сбросить затронутые правки
+                </button>
+              </div>
+            </section>
+          )}
           <div className="personal-days">
             {current.data?.days.map((day) => (
               <section key={day.date} className="personal-day">
@@ -327,6 +430,7 @@ function Calendar({ target }: { target: Target }) {
                           <button
                             className="button button-ghost personal-edit"
                             aria-label={`Изменить ${item.lesson.Subject}, ${dateLabel(day.date)}`}
+                            disabled={!!current.data?.review || reviewing}
                             onClick={() => setEditing({ date: day.date, item })}
                           >
                             <Pencil size={16} />
@@ -364,9 +468,13 @@ function Calendar({ target }: { target: Target }) {
                     </strong>
                     <p>
                       {dateLabel(change.valid_from)}
-                      {change.scope === "semester"
+                      {change.scope !== "day"
                         ? ` — ${dateLabel(change.valid_to)}`
                         : ""}{" "}
+                      {change.needs_review ? " · ожидает согласования" : ""}
+                      {change.scope === "selected"
+                        ? ` · выбранных дат: ${change.occurrences?.length || 0}`
+                        : ""}
                       ·{" "}
                       {change.cancelled
                         ? "Отмена"
@@ -387,7 +495,7 @@ function Calendar({ target }: { target: Target }) {
                   </div>
                   <button
                     className="button button-ghost"
-                    disabled={!!removing}
+                    disabled={!!removing || reviewing}
                     aria-label={`Удалить правку ${dateLabel(change.valid_from)}`}
                     onClick={() => void remove(change)}
                   >
@@ -405,6 +513,7 @@ function Calendar({ target }: { target: Target }) {
           key={`${editing.date}:${editing.item.original.ID}`}
           {...editing}
           target={target.id}
+          publication={current?.data?.publication || ""}
           onClose={() => setEditing(undefined)}
           onSaved={() => {
             setEditing(undefined);

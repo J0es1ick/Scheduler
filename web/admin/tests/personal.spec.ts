@@ -27,6 +27,8 @@ async function setup(page: Page, admin = false) {
     cancelled: false,
     room: original.Room,
     conflict: false,
+    review: false,
+    reviewRequests: [] as Record<string, unknown>[],
   };
   await page.route("**/api/personal/**", async (route) => {
     const url = new URL(route.request().url());
@@ -43,6 +45,36 @@ async function setup(page: Page, admin = false) {
       const date = url.searchParams.get("from") || "2026-10-05";
       body = {
         target,
+        publication: "snapshot-2",
+        patterns: [
+          {
+            group_id: "group",
+            semester_id: "term",
+            group_name: "4/147",
+            kind: "biweekly",
+            weeks: 12,
+            period: 2,
+            from: "2026-09-01",
+            to: "2026-12-20",
+          },
+        ],
+        ...(state.review
+          ? {
+              review: {
+                kept: 2,
+                dropped: 1,
+                items: [
+                  {
+                    id: "change",
+                    version: 2,
+                    subject: "Теоретическая механика",
+                    kept: 2,
+                    dropped: 1,
+                  },
+                ],
+              },
+            }
+          : {}),
         days: [
           {
             date,
@@ -55,12 +87,22 @@ async function setup(page: Page, admin = false) {
                 changes: state.changes,
                 semester_end: "2026-12-31",
                 can_repeat: true,
+                repeats: [
+                  { lesson_id: "stable", date: "2026-10-05" },
+                  { lesson_id: "second", date: "2026-10-19" },
+                  { lesson_id: "third", date: "2026-11-02" },
+                ],
               },
             ],
           },
         ],
         changes: state.changes,
       };
+    } else if (url.pathname.endsWith("/review")) {
+      expect(route.request().headers()["x-csrf-token"]).toBe("personal-csrf");
+      state.reviewRequests.push(route.request().postDataJSON());
+      state.review = false;
+      body = { ok: true };
     } else if (route.request().method() === "POST") {
       expect(route.request().headers()["x-csrf-token"]).toBe("personal-csrf");
       const input = route.request().postDataJSON();
@@ -100,7 +142,7 @@ test("ordinary user edits one day and resets it", async ({ page }) => {
   const state = await setup(page);
   await page.goto("/app");
   await expect(
-    page.getByRole("heading", { name: "Ваши занятия. Ваши правки." }),
+    page.getByRole("heading", { name: "Ваши правки" }),
   ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Куда перейдём?" }),
@@ -203,5 +245,102 @@ test("session expiry tells user how to reopen", async ({ page }) => {
   await page.goto("/app");
   await expect(
     page.getByText("Откройте приложение кнопкой «Расписание» в Telegram-боте."),
+  ).toBeVisible();
+});
+
+test("select individual repeats", async ({ page }) => {
+  const state = await setup(page);
+  await page.goto("/app");
+  await expect(
+    page.getByText("Двухнедельное расписание", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /Изменить Теоретическая/ }).click();
+  await page.getByLabel("Применить", { exact: true }).selectOption("selected");
+  await page.getByLabel("5 октября", { exact: true }).uncheck();
+  await expect(
+    page.getByRole("button", { name: "Сохранить", exact: true }),
+  ).toBeDisabled();
+  await page.getByLabel("19 октября", { exact: true }).check();
+  await page.getByLabel("Аудитория", { exact: true }).fill("Д-1");
+  await page.getByRole("button", { name: "Сохранить", exact: true }).click();
+  expect(state.requests[0]).toMatchObject({
+    scope: "selected",
+    dates: ["2026-10-19"],
+    publication: "snapshot-2",
+  });
+});
+
+for (const action of ["keep", "discard"])
+  test(`review updated publication: ${action}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 360, height: 950 });
+    const state = await setup(page);
+    state.review = true;
+    await page.goto("/app");
+    await expect(
+      page.getByRole("heading", { name: "Вуз обновил расписание" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Изменить Теоретическая/ }),
+    ).toBeDisabled();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: testInfo.outputPath("review.png"),
+      fullPage: true,
+    });
+    if (action === "discard") page.once("dialog", (dialog) => dialog.accept());
+    await page
+      .getByRole("button", {
+        name:
+          action === "keep"
+            ? "Сохранить в совпавших слотах"
+            : "Сбросить затронутые правки",
+      })
+      .click();
+    await expect(
+      page.getByRole("button", { name: /Изменить Теоретическая/ }),
+    ).toBeEnabled();
+    expect(state.reviewRequests[0]).toMatchObject({
+      action,
+      target_id: "group",
+      publication: "snapshot-2",
+      versions: { change: 2 },
+    });
+  });
+
+test("administrator returns from admin to service chooser", async ({
+  page,
+}) => {
+  await page.route("**/api/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (!path.startsWith("/api/")) return route.continue();
+    return route.fulfill({
+      json:
+        path === "/api/auth/me"
+          ? {
+              user: {
+                id: "42",
+                name: "Иван",
+                role: "owner",
+                auth_method: "telegram",
+                csrf_token: "admin-csrf",
+              },
+            }
+          : path === "/api/auth/config"
+            ? { access_key_enabled: false }
+            : { items: [] },
+    });
+  });
+  await setup(page, true);
+  await page.goto("/#/users");
+  await page.getByRole("link", { name: "К выбору сервиса" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Куда перейдём?" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Личное расписание/ }),
   ).toBeVisible();
 });

@@ -348,3 +348,28 @@
   display: grid;
   gap: 12px;
 }
+
+.personal-review {
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--olive);
+  padding: 20px;
+  margin-bottom: 24px;
+}
+.personal-review h2 {
+  margin-top: 0;
+}
+.personal-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.personal-review-actions .button {
+  white-space: normal;
+}
+.personal-repeat-dates {
+  max-height: 220px;
+  overflow: auto;
+}
+.personal-repeat-dates .personal-check {
+  margin: 8px 0;
+}

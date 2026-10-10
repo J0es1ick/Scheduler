@@ -11,17 +11,20 @@ export function LessonEditor({
   item,
   date,
   target,
+  publication,
   onClose,
   onSaved,
 }: {
   item: PersonalLesson;
   date: string;
   target: string;
+  publication: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [scope, setScope] = useState<"day" | "semester">("day");
+  const [scope, setScope] = useState<"day" | "semester" | "selected">("day");
+  const [dates, setDates] = useState<string[]>([date]);
   const [cancelled, setCancelled] = useState(item.cancelled);
   const [form, setForm] = useState(item.lesson);
   const [busy, setBusy] = useState(false);
@@ -72,6 +75,8 @@ export function LessonEditor({
         id: existing?.id || "",
         version: existing?.version || 0,
         target_id: target,
+        publication,
+        dates: scope === "selected" ? dates : [],
         lesson_id: item.original.personal_key || item.original.ID,
         date,
         scope,
@@ -189,18 +194,48 @@ export function LessonEditor({
             <select
               aria-label="Применить"
               value={scope}
-              onChange={(e) => setScope(e.target.value as "day" | "semester")}
+              onChange={(e) =>
+                setScope(e.target.value as "day" | "semester" | "selected")
+              }
             >
               <option value="day">Только {dateLabel(date)}</option>
               {item.can_repeat && (
-                <option value="semester">С этой даты до конца семестра</option>
+                <>
+                  <option value="semester">
+                    Все подтверждённые повторы с этой даты
+                  </option>
+                  <option value="selected">Выбрать даты повторов</option>
+                </>
               )}
             </select>
           </label>
+          {scope === "selected" && (
+            <fieldset className="personal-repeat-dates">
+              <legend>Даты повторов</legend>
+              {(item.repeats || []).map((repeat) => (
+                <label className="personal-check" key={repeat.date}>
+                  <input
+                    type="checkbox"
+                    checked={dates.includes(repeat.date)}
+                    onChange={(e) =>
+                      setDates(
+                        e.target.checked
+                          ? [...dates, repeat.date]
+                          : dates.filter((value) => value !== repeat.date),
+                      )
+                    }
+                  />
+                  {dateLabel(repeat.date)}
+                </label>
+              ))}
+            </fieldset>
+          )}
           <p className="personal-note">
-            {scope === "semester"
-              ? `До ${dateLabel(item.semester_end)}. Сохраняется исходное чередование недель. Правки отдельных дат имеют приоритет.`
-              : "Другие даты останутся без изменений."}{" "}
+            {scope === "selected"
+              ? `Выбрано дат: ${dates.length}.`
+              : scope === "semester"
+                ? `Подтверждено повторов: ${item.repeats?.length || 0}. До ${dateLabel(item.repeats?.at(-1)?.date || item.semester_end)}. Правки отдельных дат имеют приоритет.`
+                : "Другие даты останутся без изменений."}{" "}
             Правки учитываются в боте, экспорте, ежедневной отправке и
             напоминаниях.
           </p>
@@ -232,7 +267,7 @@ export function LessonEditor({
           <button
             className="button button-primary"
             type="submit"
-            disabled={busy}
+            disabled={busy || (scope === "selected" && !dates.length)}
           >
             {busy ? "Сохранение…" : "Сохранить"}
           </button>

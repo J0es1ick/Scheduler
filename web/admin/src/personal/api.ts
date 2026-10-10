@@ -36,7 +36,9 @@ export interface Change {
   id: string;
   version: number;
   lesson_id: string;
-  scope: "day" | "semester";
+  scope: "day" | "semester" | "selected";
+  needs_review?: boolean;
+  occurrences?: { lesson_id: string; date: string }[];
   valid_from: string;
   valid_to: string;
   patch: Patch;
@@ -49,9 +51,35 @@ export interface PersonalLesson {
   changes: Change[];
   semester_end: string;
   can_repeat: boolean;
+  repeats?: { lesson_id: string; date: string }[];
+  pattern?: string;
   group_name: string;
 }
+export interface Review {
+  items: {
+    id: string;
+    version: number;
+    subject: string;
+    kept: number;
+    dropped: number;
+  }[];
+  kept: number;
+  dropped: number;
+}
 export interface Schedule {
+  publication: string;
+  patterns?: {
+    group_id: string;
+    semester_id: string;
+    group_name: string;
+    kind: string;
+    from?: string;
+    to?: string;
+    weeks: number;
+    period: number;
+    exceptions?: number;
+  }[];
+  review?: Review;
   target: Target;
   days: { date: string; lessons: PersonalLesson[] }[];
   changes: Change[];
