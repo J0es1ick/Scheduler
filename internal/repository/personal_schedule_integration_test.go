@@ -152,7 +152,15 @@ func TestPersonalScheduleIsolationRecurrenceAndQueue(t *testing.T) {
 		t.Fatal(err)
 	}
 	daily := repository.NewDailyRepository(db)
-	if _, err = daily.EnqueueDue(ctx, time.Now(), 10); err != nil {
+	queueTime := func() time.Time {
+		t.Helper()
+		var now time.Time
+		if err := db.Get(&now, `SELECT clock_timestamp()+INTERVAL '1 minute'`); err != nil {
+			t.Fatal(err)
+		}
+		return now
+	}
+	if _, err = daily.EnqueueDue(ctx, queueTime(), 10); err != nil {
 		t.Fatal(err)
 	}
 	save("41", "weekly", "2026-09-28", "day", domain.PersonalLessonPatch{Room: &room}, false)
@@ -160,7 +168,7 @@ func TestPersonalScheduleIsolationRecurrenceAndQueue(t *testing.T) {
 	if err = db.Get(&stale, `SELECT count(*) FROM bot_outbox WHERE user_id='41' AND kind='daily_schedule' AND status='pending' AND cancel_requested_at IS NULL`); err != nil || stale != 0 {
 		t.Fatalf("stale queue: %d %v", stale, err)
 	}
-	if _, err = daily.EnqueueDue(ctx, time.Now(), 10); err != nil {
+	if _, err = daily.EnqueueDue(ctx, queueTime(), 10); err != nil {
 		t.Fatal(err)
 	}
 	if err = db.Get(&stale, `SELECT count(*) FROM bot_outbox WHERE user_id='41' AND kind='daily_schedule' AND status='pending' AND cancel_requested_at IS NULL`); err != nil || stale != 1 {

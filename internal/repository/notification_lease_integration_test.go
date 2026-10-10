@@ -142,7 +142,7 @@ func createNotificationLeaseFixture(t *testing.T, db *sqlx.DB, ctx context.Conte
 		if table == "notification_deliveries" {
 			err = repository.NewNotificationRepository(db).EnqueueScheduleChange(ctx, id, groupID, "parser", "test update")
 		} else {
-			_, err = db.ExecContext(ctx, `INSERT INTO bot_outbox(id,user_id,kind,body) VALUES ($1,$2,'support_resolution','test response')`, id, userID)
+			_, err = db.ExecContext(ctx, `INSERT INTO bot_outbox(id,user_id,kind,body,next_attempt_at) VALUES ($1,$2,'support_resolution','test response',clock_timestamp()-INTERVAL '1 minute')`, id, userID)
 		}
 		if err != nil {
 			t.Fatal(err)
