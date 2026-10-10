@@ -248,6 +248,7 @@ func (h *Handler) HandleSubscriptionSchedule(c tele.Context) error {
 	}
 	_ = c.Respond()
 	target := &scheduleTarget{
+		UserID:  fmt.Sprint(c.Sender().ID),
 		GroupID: item.GroupID, GroupName: item.GroupName,
 		UniversityID: item.UniversityID, University: item.UniversityName,
 		ViewFormat: item.ScheduleViewFormat, Subgroup: item.Subgroup,

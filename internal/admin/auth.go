@@ -51,6 +51,7 @@ type adminSessionStore interface {
 }
 
 type AuthManager struct {
+	sessionCookie  string
 	botToken       string
 	accessToken    string
 	accessKeyLogin bool
@@ -158,7 +159,7 @@ func (a *AuthManager) IssueSession(w http.ResponseWriter, identity AdminIdentity
 		sameSite = http.SameSiteNoneMode
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:        adminSessionCookie,
+		Name:        a.cookieName(),
 		Value:       token,
 		Path:        "/",
 		MaxAge:      int(a.ttl.Seconds()),
@@ -169,7 +170,7 @@ func (a *AuthManager) IssueSession(w http.ResponseWriter, identity AdminIdentity
 	})
 	if partitioned {
 		http.SetCookie(w, &http.Cookie{
-			Name: adminSessionCookie, Path: "/", MaxAge: -1,
+			Name: a.cookieName(), Path: "/", MaxAge: -1,
 			HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
 		})
 	}
@@ -178,7 +179,7 @@ func (a *AuthManager) IssueSession(w http.ResponseWriter, identity AdminIdentity
 
 func (a *AuthManager) Logout(w http.ResponseWriter, r *http.Request) error {
 	for _, cookie := range r.Cookies() {
-		if cookie.Name != adminSessionCookie {
+		if cookie.Name != a.cookieName() {
 			continue
 		}
 		if a.persistence != nil {
@@ -192,7 +193,7 @@ func (a *AuthManager) Logout(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     adminSessionCookie,
+		Name:     a.cookieName(),
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
@@ -202,7 +203,7 @@ func (a *AuthManager) Logout(w http.ResponseWriter, r *http.Request) error {
 	})
 	if a.cookieSecure {
 		http.SetCookie(w, &http.Cookie{
-			Name: adminSessionCookie, Path: "/", MaxAge: -1,
+			Name: a.cookieName(), Path: "/", MaxAge: -1,
 			HttpOnly: true, Secure: true, SameSite: http.SameSiteNoneMode, Partitioned: true,
 		})
 	}
@@ -250,7 +251,7 @@ func (a *AuthManager) Require(store telegramAdminChecker, next http.Handler) htt
 }
 
 func (a *AuthManager) identityForRequest(r *http.Request) (AdminIdentity, error) {
-	cookie, err := r.Cookie(adminSessionCookie)
+	cookie, err := r.Cookie(a.cookieName())
 	if err != nil || cookie.Value == "" {
 		return AdminIdentity{}, ErrUnauthorized
 	}
@@ -365,4 +366,11 @@ func randomToken(size int) (string, error) {
 		return "", fmt.Errorf("generate secure token: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(buffer), nil
+}
+
+func (a *AuthManager) cookieName() string {
+	if a.sessionCookie != "" {
+		return a.sessionCookie
+	}
+	return adminSessionCookie
 }

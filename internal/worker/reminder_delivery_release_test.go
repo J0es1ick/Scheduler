@@ -51,3 +51,47 @@ func TestReminderUsesLiveSlotAndExpiresAtStart(t *testing.T) {
 		t.Fatal("legacy reminder still sends")
 	}
 }
+
+type personalReminderProvider struct{ staticScheduleProvider }
+
+func (p personalReminderProvider) PersonalizeSchedule(_ context.Context, userID, _, _, _ string, data map[time.Time][]domain.Lesson) (map[time.Time][]domain.Lesson, error) {
+	result := map[time.Time][]domain.Lesson{}
+	for date, lessons := range data {
+		if userID == "cancelled" {
+			result[date] = nil
+			continue
+		}
+		result[date] = append([]domain.Lesson(nil), lessons...)
+		if userID == "edited" {
+			for i := range result[date] {
+				result[date][i].Room = "Personal room"
+			}
+		}
+	}
+	return result, nil
+}
+func TestPersonalReminderCacheAndLastMinuteCancellation(t *testing.T) {
+	provider := personalReminderProvider{staticScheduleProvider{lessons: []domain.Lesson{{Subject: "Physics", Room: "Original", TimeStart: "09:00", TimeEnd: "10:30"}}}}
+	repo := &fakeReminderRepository{}
+	w := ReminderWorker{repository: repo, scheduleService: provider}
+	now := time.Date(2026, 10, 5, 8, 50, 0, 0, time.UTC)
+	cache := make(reminderScheduleCache)
+	for _, user := range []string{"cancelled", "edited", "ordinary"} {
+		recipient := domain.ReminderRecipient{UserID: user, GroupID: "group", GroupName: "Group", Timezone: "UTC", ReminderMinutes: 15}
+		if err := w.enqueueRecipientReminders(context.Background(), recipient, now, cache); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(repo.enqueued) != 2 || repo.enqueued[0].userID != "edited" || !strings.Contains(repo.enqueued[0].body, "Personal room") || !strings.Contains(repo.enqueued[1].body, "Original") {
+		t.Fatalf("personal cache isolation: %+v", repo.enqueued)
+	}
+	starts := now.Add(10 * time.Minute)
+	raw, _ := json.Marshal(domain.ReminderContext{Date: "2026-10-05", TimeStart: "09:00", TimeEnd: "10:30", StartsAt: starts})
+	item := domain.BotOutboxDelivery{UserID: "cancelled", GroupID: "group", ExpiresAt: &starts, ReminderContext: raw}
+	delivery := NotificationWorker{reminderSchedule: provider, reminderRecipient: func(context.Context, string, string) (*domain.ReminderRecipient, error) {
+		return &domain.ReminderRecipient{UserID: "cancelled", GroupID: "group", Timezone: "UTC", ReminderMinutes: 15}, nil
+	}}
+	if _, send, err := delivery.refreshReminder(context.Background(), item, now); err != nil || send {
+		t.Fatalf("cancelled personal lesson sent: %t %v", send, err)
+	}
+}

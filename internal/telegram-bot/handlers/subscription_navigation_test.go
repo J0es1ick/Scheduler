@@ -355,3 +355,7 @@ func TestGroupSearchUsesFullNavigationWithoutSubscribing(t *testing.T) {
 		t.Fatal("disabled public group is still visible")
 	}
 }
+
+func (s *scheduleScenarioService) PersonalizeSchedule(_ context.Context, _, _, _, _ string, data map[time.Time][]domain.Lesson) (map[time.Time][]domain.Lesson, error) {
+	return data, nil
+}

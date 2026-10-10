@@ -27,3 +27,21 @@ func loadReminderSchedule(ctx context.Context, provider reminderScheduleProvider
 	}
 	return teachers.GetScheduleForTeacher(ctx, recipient.UniversityID, recipient.GroupName, date)
 }
+
+func personalizeReminderSchedule(ctx context.Context, provider reminderScheduleProvider, recipient domain.ReminderRecipient, date time.Time, lessons []domain.Lesson) ([]domain.Lesson, error) {
+	personal, ok := provider.(interface {
+		PersonalizeSchedule(context.Context, string, string, string, string, map[time.Time][]domain.Lesson) (map[time.Time][]domain.Lesson, error)
+	})
+	if !ok {
+		return lessons, nil
+	}
+	teacher := ""
+	if recipient.TeacherID != "" {
+		teacher = recipient.GroupName
+	}
+	data, err := personal.PersonalizeSchedule(ctx, recipient.UserID, recipient.GroupID, recipient.UniversityID, teacher, map[time.Time][]domain.Lesson{date: lessons})
+	if err != nil {
+		return nil, err
+	}
+	return data[date], nil
+}

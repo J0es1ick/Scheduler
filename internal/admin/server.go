@@ -43,16 +43,18 @@ type ServerOptions struct {
 }
 
 type Server struct {
-	serviceLogs     serviceLogReader
-	store           *Store
-	auth            *AuthManager
-	parser          *service.ParserService
-	logins          *loginGuard
-	globalLogins    *loginGuard
-	metricsToken    string
-	trustedProxies  []*net.IPNet
-	managedParsers  map[string]managed.Manifest
-	workerReadiness interface{ Checks() map[string]bool }
+	personalAuth     *AuthManager
+	personalSchedule *service.ScheduleService
+	serviceLogs      serviceLogReader
+	store            *Store
+	auth             *AuthManager
+	parser           *service.ParserService
+	logins           *loginGuard
+	globalLogins     *loginGuard
+	metricsToken     string
+	trustedProxies   []*net.IPNet
+	managedParsers   map[string]managed.Manifest
+	workerReadiness  interface{ Checks() map[string]bool }
 
 	runningMu     sync.RWMutex
 	running       map[string]bool
@@ -105,6 +107,13 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService, o
 	}
 
 	mux := http.NewServeMux()
+	if store != nil && store.db != nil {
+		server.personalAuth = NewAuthManager(auth.botToken, "", false, auth.cookieSecure)
+		server.personalAuth.sessionCookie = "scheduler_personal_session"
+		server.personalAuth.UseSessionStore(&personalSessionStore{store: store})
+		server.personalSchedule = service.NewScheduleService(repository.NewLessonRepository(store.db), repository.NewSemesterRepository(store.db), repository.NewGroupRepository(store.db))
+		server.registerPersonalRoutes(mux)
+	}
 	mux.HandleFunc("GET /api/health", server.handleHealth)
 	mux.HandleFunc("GET /api/ready", server.handleReady)
 	mux.HandleFunc("GET /metrics", server.handleMetrics)

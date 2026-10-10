@@ -501,33 +501,25 @@ func (h *Handler) getScheduleForTarget(
 	from time.Time,
 	to time.Time,
 ) ([]dto.DaySchedule, error) {
+	var data map[time.Time][]domain.Lesson
+	var err error
 	if target.TeacherName != "" {
-		data, err := h.ScheduleService.GetScheduleForTeacherRange(
-			ctx,
-			target.UniversityID,
-			target.TeacherName,
-			from,
-			to,
-		)
-		if err != nil {
-			slog.Error("GetScheduleForTeacherRange failed", "teacher", target.TeacherName, "err", err)
-			return nil, err
-		}
-		return mapToDaySchedule(data), nil
+		data, err = h.ScheduleService.GetScheduleForTeacherRange(ctx, target.UniversityID, target.TeacherName, from, to)
+	} else {
+		data, err = h.ScheduleService.GetScheduleForGroupRange(ctx, target.GroupID, from, to)
 	}
-	data, err := h.ScheduleService.GetScheduleForGroupRange(
-		ctx,
-		target.GroupID,
-		from,
-		to,
-	)
 	if err != nil {
-		slog.Error(
-			"GetScheduleForGroupRange failed",
-			"groupID", target.GroupID,
-			"err", err,
-		)
 		return nil, err
+	}
+	if target.UserID != "" && !target.Public {
+		if personal, ok := h.ScheduleService.(interface {
+			PersonalizeSchedule(context.Context, string, string, string, string, map[time.Time][]domain.Lesson) (map[time.Time][]domain.Lesson, error)
+		}); ok {
+			data, err = personal.PersonalizeSchedule(ctx, target.UserID, target.GroupID, target.UniversityID, target.TeacherName, data)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	if target.Subgroup > 0 {
 		for date, dayLessons := range data {
@@ -1027,6 +1019,7 @@ func (h *Handler) downloadTarget(
 	for _, item := range items {
 		if keyboards.GroupToken(item.GroupID) == groupToken && item.IsActive {
 			return &scheduleTarget{
+				UserID:       fmt.Sprint(c.Sender().ID),
 				GroupID:      item.GroupID,
 				GroupName:    item.GroupName,
 				UniversityID: item.UniversityID,

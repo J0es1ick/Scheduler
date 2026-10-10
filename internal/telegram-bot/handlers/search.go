@@ -110,6 +110,7 @@ func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) e
 			return c.Send(qualifiedGroupSuggestionsText(university.Name, groups), keyboards.CancelButton(state.FlowNonce))
 		}
 		target := &scheduleTarget{
+			UserID:  fmt.Sprint(c.Sender().ID),
 			GroupID: group.ID, GroupName: group.Name, UniversityID: university.ID, University: university.Name,
 			ViewFormat: domain.ScheduleViewVisual, Public: true,
 		}
@@ -153,6 +154,18 @@ func (h *Handler) HandleSearchResult(c tgbotapi.Context, state *dto.UserState) e
 		}
 		if err != nil {
 			return c.Send("Ошибка получения расписания.")
+		}
+		if personal, ok := h.ScheduleService.(interface {
+			PersonalizeSchedule(context.Context, string, string, string, string, map[time.Time][]domain.Lesson) (map[time.Time][]domain.Lesson, error)
+		}); ok {
+			teacher := ""
+			if state.Role == domain.RoleTeacher {
+				teacher = state.TeacherName
+			}
+			data, err = personal.PersonalizeSchedule(ctx, fmt.Sprint(c.Sender().ID), state.GroupID, state.UniversityID, teacher, data)
+			if err != nil {
+				return c.Send("Не удалось загрузить личное расписание.")
+			}
 		}
 		subgroup := 0
 		if h.SubscriptionService != nil && state.Role != domain.RoleTeacher {

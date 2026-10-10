@@ -254,6 +254,14 @@ func (w *ReminderWorker) enqueueRecipientReminders(
 			groupSchedules[dateKey] = lessons
 		}
 
+		var personalErr error
+		lessons, personalErr = personalizeReminderSchedule(ctx, w.scheduleService, recipient, date, lessons)
+		if personalErr != nil {
+			if firstErr == nil {
+				firstErr = personalErr
+			}
+			continue
+		}
 		if recipient.Subgroup > 0 {
 			filtered := make([]domain.Lesson, 0, len(lessons))
 			for _, lesson := range lessons {

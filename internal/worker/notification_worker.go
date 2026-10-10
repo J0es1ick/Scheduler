@@ -329,6 +329,13 @@ func (w *NotificationWorker) deliverScheduleBatch(
 			return err
 		}
 		group := byUser[userID]
+		for i := range group {
+			summary, personalErr := w.personalNotification(ctx, userID, group[i].GroupID, group[i].Summary)
+			if personalErr != nil {
+				return personalErr
+			}
+			group[i].Summary = summary
+		}
 		batches := notificationDigestBatches(group)
 		telegramID, err := strconv.ParseInt(userID, 10, 64)
 		for batchIndex, batch := range batches {
@@ -448,6 +455,13 @@ func (w *NotificationWorker) deliverBotOutbox(ctx context.Context, item domain.B
 			return guard.finish(item.ID, func(markCtx context.Context) error {
 				return w.repository.MarkBotOutboxCancelled(markCtx, item.ID, item.ClaimToken)
 			})
+		}
+		item.Body = body
+	}
+	if item.Kind == "teacher_change" {
+		body, personalErr := w.personalNotification(ctx, item.UserID, "", item.Body)
+		if personalErr != nil {
+			return guard.finish(item.ID, func(markCtx context.Context) error { return w.recordBotOutboxFailure(markCtx, item, personalErr) })
 		}
 		item.Body = body
 	}
@@ -698,6 +712,10 @@ func (w *NotificationWorker) refreshReminder(ctx context.Context, item domain.Bo
 	if err != nil {
 		return "", false, err
 	}
+	lessons, err = personalizeReminderSchedule(ctx, w.reminderSchedule, *recipient, date, lessons)
+	if err != nil {
+		return "", false, err
+	}
 	current := reminderSlot{TimeStart: slot.TimeStart, TimeEnd: slot.TimeEnd}
 	for _, lesson := range lessons {
 		if lesson.TimeStart == slot.TimeStart && lesson.TimeEnd == slot.TimeEnd && (recipient.Subgroup == 0 || lesson.Subgroup == 0 || lesson.Subgroup == recipient.Subgroup) {
@@ -708,4 +726,13 @@ func (w *NotificationWorker) refreshReminder(ctx context.Context, item domain.Bo
 		return "", false, nil
 	}
 	return reminderText(*recipient, date, current, startsAt.Sub(now)), true, nil
+}
+
+func (w *NotificationWorker) personalNotification(ctx context.Context, userID, groupID, body string) (string, error) {
+	if personal, ok := w.repository.(interface {
+		PersonalNotification(context.Context, string, string, string) (string, error)
+	}); ok {
+		return personal.PersonalNotification(ctx, userID, groupID, body)
+	}
+	return body, nil
 }

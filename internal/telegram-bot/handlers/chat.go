@@ -17,6 +17,7 @@ import (
 )
 
 type scheduleTarget struct {
+	UserID       string
 	GroupID      string
 	GroupName    string
 	TeacherName  string
@@ -395,7 +396,7 @@ func (h *Handler) scheduleTarget(
 			_ = telegramContext.Send("Не удалось загрузить профиль.")
 			return nil
 		}
-		return &scheduleTarget{TeacherName: state.TeacherName, GroupName: state.TeacherName, UniversityID: state.UniversityID, University: state.University, ViewFormat: user.TeacherScheduleView}
+		return &scheduleTarget{UserID: fmt.Sprint(telegramContext.Sender().ID), TeacherName: state.TeacherName, GroupName: state.TeacherName, UniversityID: state.UniversityID, University: state.University, ViewFormat: user.TeacherScheduleView}
 	}
 	viewFormat := domain.ScheduleViewVisual
 	subgroup := 0
@@ -414,6 +415,7 @@ func (h *Handler) scheduleTarget(
 		}
 	}
 	return &scheduleTarget{
+		UserID:       fmt.Sprint(telegramContext.Sender().ID),
 		GroupID:      state.GroupID,
 		GroupName:    state.Query,
 		UniversityID: state.UniversityID,

@@ -101,3 +101,7 @@ func slicesContain(values []string, target string) bool {
 	}
 	return false
 }
+
+func (s *teacherScheduleScenarioService) PersonalizeSchedule(_ context.Context, _, _, _, _ string, data map[time.Time][]domain.Lesson) (map[time.Time][]domain.Lesson, error) {
+	return data, nil
+}

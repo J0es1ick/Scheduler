@@ -1,0 +1,350 @@
+.personal-app {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: max(24px, env(safe-area-inset-top))
+    max(20px, env(safe-area-inset-right)) max(48px, env(safe-area-inset-bottom))
+    max(20px, env(safe-area-inset-left));
+}
+.personal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--line);
+}
+.personal-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 600;
+}
+.personal-brand svg {
+  color: var(--olive);
+}
+.personal-welcome {
+  padding: 70px 0;
+}
+.personal-welcome h1,
+.personal-intro h1 {
+  font-size: clamp(26px, 4vw, 38px);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.7px;
+}
+.personal-welcome p,
+.personal-intro p {
+  color: var(--muted);
+  max-width: 620px;
+}
+.personal-intro {
+  margin: 32px 0;
+}
+.personal-eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  font-size: 12px;
+}
+.personal-destinations {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 36px;
+}
+.personal-destinations > * {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: 12px;
+  padding: 26px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  text-align: left;
+  text-decoration: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+.personal-destinations > *:hover {
+  border-color: var(--olive);
+}
+.personal-destinations svg {
+  color: var(--olive);
+}
+.personal-destinations strong {
+  font-size: 20px;
+  font-weight: 500;
+}
+.personal-destinations span {
+  color: var(--muted);
+}
+.personal-app label,
+.personal-dialog label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.personal-app input,
+.personal-app select,
+.personal-dialog input,
+.personal-dialog select {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 9px 11px;
+  font: inherit;
+}
+.personal-target {
+  max-width: 450px;
+}
+.personal-note {
+  color: var(--muted);
+  font-size: 13px;
+}
+.personal-date-nav {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+  margin: 24px 0 8px;
+  flex-wrap: wrap;
+}
+.personal-date-nav .button {
+  min-height: 42px;
+}
+.personal-date-nav label {
+  flex: 1;
+  max-width: 210px;
+}
+.personal-days {
+  border-top: 1px solid var(--line);
+}
+.personal-day {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  padding: 24px 0;
+  border-bottom: 1px solid var(--line);
+  gap: 12px 24px;
+}
+.personal-day > h2 {
+  font-size: 17px;
+  margin: 0;
+  font-weight: 500;
+}
+.personal-day > h2 span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 5px;
+}
+.personal-lesson {
+  display: flex;
+  align-items: start;
+  gap: 16px;
+  padding: 18px;
+  background: var(--surface);
+  border-left: 3px solid var(--line-strong);
+  border-radius: 0 4px 4px 0;
+}
+.personal-lesson:has(.personal-tag) {
+  border-left-color: var(--olive);
+}
+.personal-time {
+  display: grid;
+  gap: 3px;
+  min-width: 44px;
+  font-size: 14px;
+}
+.personal-time span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.personal-lesson-copy {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.personal-lesson-copy h3 {
+  font-size: 17px;
+  margin: 3px 0 8px;
+  font-weight: 500;
+}
+.personal-lesson-copy p {
+  margin: 2px 0;
+  font-size: 13px;
+}
+.personal-lesson-copy small {
+  color: var(--muted);
+}
+.personal-edit {
+  padding: 8px;
+  min-width: 36px;
+}
+.personal-edit span {
+  font-size: 12px;
+}
+.personal-tag {
+  display: inline-block;
+  color: var(--olive-dark);
+  background: var(--olive-soft);
+  padding: 3px 7px;
+  font-size: 11px;
+  margin-top: 10px;
+  border-radius: 3px;
+}
+.personal-lesson.is-cancelled h3 {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.personal-empty-day {
+  color: var(--muted);
+  margin: 0;
+  padding: 10px 0;
+}
+.personal-changes {
+  margin-top: 32px;
+}
+.personal-changes summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.personal-changes article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+.personal-changes p {
+  margin: 3px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.personal-dialog {
+  width: min(560px, calc(100% - 24px));
+  max-height: calc(100dvh - 32px);
+  padding: 24px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.personal-dialog::backdrop {
+  background: var(--backdrop);
+}
+.personal-dialog header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+.personal-dialog h2 {
+  margin: 4px 0 20px;
+  font-size: 23px;
+  font-weight: 500;
+}
+.personal-dialog small {
+  color: var(--muted);
+}
+.personal-dialog fieldset {
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.personal-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.personal-dialog .personal-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+}
+.personal-check input {
+  width: 18px;
+  min-height: 18px;
+  accent-color: var(--olive);
+}
+.personal-dialog footer {
+  display: flex;
+  justify-content: end;
+  gap: 10px;
+  margin-top: 24px;
+}
+.personal-dialog details {
+  font-size: 13px;
+  color: var(--muted);
+}
+.personal-error {
+  padding: 12px;
+  border: 1px solid var(--danger-border);
+  background: var(--removed-surface);
+  color: var(--red);
+}
+@media (max-width: 620px) {
+  .personal-app {
+    padding: 16px 14px 40px;
+  }
+  .personal-header .theme-control-caption,
+  .personal-header .theme-device-button {
+    display: none;
+  }
+  .personal-header {
+    gap: 8px;
+  }
+  .personal-brand {
+    font-size: 14px;
+  }
+  .personal-destinations {
+    grid-template-columns: 1fr;
+  }
+  .personal-welcome {
+    padding: 36px 0;
+  }
+  .personal-day {
+    display: block;
+    padding: 20px 0;
+  }
+  .personal-day > h2 {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    margin-bottom: 14px;
+  }
+  .personal-day > h2 span {
+    margin: 0;
+  }
+  .personal-lesson {
+    padding: 14px 10px;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .personal-edit span {
+    display: none;
+  }
+  .personal-changes article {
+    align-items: start;
+  }
+  .personal-dialog {
+    padding: 18px;
+  }
+}
+
+.personal-day-lessons {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+}

@@ -190,6 +190,7 @@ func (h *Handler) teacherScheduleTarget(
 		}
 	}
 	return &scheduleTarget{
+		UserID:       fmt.Sprint(c.Sender().ID),
 		UniversityID: university.ID,
 		University:   university.Name,
 		GroupName:    teacher,

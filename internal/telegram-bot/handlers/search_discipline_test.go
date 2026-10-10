@@ -131,3 +131,7 @@ func TestSearchAvailabilityIsRefreshedAtEntryAndExecution(t *testing.T) {
 		})
 	}
 }
+
+func (s *disciplineScheduleService) PersonalizeSchedule(_ context.Context, _, _, _, _ string, data map[time.Time][]domain.Lesson) (map[time.Time][]domain.Lesson, error) {
+	return data, nil
+}

@@ -25,7 +25,7 @@ func (h *Handler) personalScheduleTarget(ctx context.Context, userID string) (*s
 	if user == nil {
 		return nil, errScheduleUnavailable
 	}
-	target := &scheduleTarget{ViewFormat: domain.ScheduleViewVisual}
+	target := &scheduleTarget{UserID: userID, ViewFormat: domain.ScheduleViewVisual}
 	if user.Role == domain.RoleTeacher {
 		teacher, loadErr := h.ProfileService.GetTeacher(ctx, user.TeacherID)
 		if loadErr != nil {
