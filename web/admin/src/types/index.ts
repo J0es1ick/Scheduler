@@ -418,6 +418,7 @@ export interface UserView extends UserRestrictions {
   subscriptions: number;
   default_group_id: string;
   default_group_name: string;
+  default_group_university_name?: string;
   notifications_enabled: boolean;
   created_at: string;
   updated_at: string;

@@ -185,6 +185,7 @@ textarea::placeholder {
   .topbar-actions {
     width: 100%;
     justify-content: space-between;
+    flex-wrap: wrap;
   }
   .topbar-actions .theme-control-caption {
     display: grid;

@@ -8,6 +8,7 @@ async function setup(page: Page, role = "owner") {
     admin_role: "none",
     subscriptions: 2,
     default_group_name: "4/147",
+    default_group_university_name: "ИГХТУ",
     notifications_enabled: true,
     bot_blocked: false,
     support_blocked: false,
@@ -60,6 +61,12 @@ for (const width of [320, 390, 768, 1440])
       });
     });
     await page.goto("/#/users");
+    await expect(
+      page.getByText("Студент · 4/147 · ИГХТУ", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "К выбору сервиса" }),
+    ).toHaveAttribute("href", "/app");
     const card = page.getByRole("article", { name: "Пользователь Student" });
     await card
       .getByRole("button", { name: "Запретить обращения", exact: true })
@@ -182,11 +189,9 @@ test("teacher card shows personal schedule and daily time", async ({
     card.getByText("Преподаватель · Иванов Иван Иванович · Тестовый вуз"),
   ).toBeVisible();
   await expect(
-    card
-      .locator(".user-details > div")
-      .filter({
-        has: page.getByText("Ежедневное расписание", { exact: true }),
-      }),
+    card.locator(".user-details > div").filter({
+      has: page.getByText("Ежедневное расписание", { exact: true }),
+    }),
   ).toContainText("06:30 · Europe/Moscow");
   await expect(
     card.getByText("Студент · основная группа", { exact: false }),

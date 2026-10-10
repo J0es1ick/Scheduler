@@ -201,6 +201,9 @@ export function AppLayout({
             <span>{current.subtitle}</span>
           </div>
           <div className="topbar-actions">
+            <a className="button button-ghost" href="/app">
+              К выбору сервиса
+            </a>
             {themeControl}
             {canAccessView("audit", user.role) && (
               <button

@@ -477,6 +477,7 @@ func (s *Store) Users(ctx context.Context, queryText string, limit int) ([]UserV
 	query := fmt.Sprintf(`
 		SELECT u.id, COALESCE(u.username, '') AS username, u.is_admin, u.admin_role,
 			u.role,COALESCE(u.teacher_id,'') AS teacher_id,COALESCE((SELECT t.name FROM teachers t WHERE t.id=u.teacher_id),'') AS teacher_name,
+			COALESCE((SELECT un.name FROM groups gr JOIN universities un ON un.id=gr.university_id WHERE gr.id=u.default_group_id),'') AS default_group_university_name,
 			COALESCE((SELECT un.name FROM teachers t JOIN universities un ON un.id=t.university_id WHERE t.id=u.teacher_id),'') AS teacher_university_name,
 			u.service_updates_consent,u.daily_enabled,to_char(u.daily_time,'HH24:MI') AS daily_time,scheduler_profile_timezone(u) AS schedule_timezone,
 			COUNT(s.id)::int AS subscriptions,
@@ -705,6 +706,7 @@ func (s *Store) TelegramAdmin(ctx context.Context, userID string) (*UserView, er
 	err := s.db.GetContext(ctx, &user, `
 		SELECT u.id, COALESCE(u.username, '') AS username, u.is_admin, u.admin_role,
 			u.role,COALESCE(u.teacher_id,'') AS teacher_id,COALESCE((SELECT t.name FROM teachers t WHERE t.id=u.teacher_id),'') AS teacher_name,
+			COALESCE((SELECT un.name FROM groups gr JOIN universities un ON un.id=gr.university_id WHERE gr.id=u.default_group_id),'') AS default_group_university_name,
 			COALESCE((SELECT un.name FROM teachers t JOIN universities un ON un.id=t.university_id WHERE t.id=u.teacher_id),'') AS teacher_university_name,
 			u.service_updates_consent,u.daily_enabled,to_char(u.daily_time,'HH24:MI') AS daily_time,scheduler_profile_timezone(u) AS schedule_timezone,
 			0 AS subscriptions,

@@ -200,18 +200,19 @@ type UserView struct {
 	DailyTime             string `json:"daily_time" db:"daily_time"`
 	ScheduleTimezone      string `json:"schedule_timezone" db:"schedule_timezone"`
 
-	BotBlocked           bool      `json:"bot_blocked" db:"bot_blocked"`
-	SupportBlocked       bool      `json:"support_blocked" db:"support_blocked"`
-	ID                   string    `json:"id" db:"id"`
-	Username             string    `json:"username" db:"username"`
-	IsAdmin              bool      `json:"is_admin" db:"is_admin"`
-	AdminRole            string    `json:"admin_role" db:"admin_role"`
-	Subscriptions        int       `json:"subscriptions" db:"subscriptions"`
-	DefaultGroupID       string    `json:"default_group_id" db:"default_group_id"`
-	DefaultGroupName     string    `json:"default_group_name" db:"default_group_name"`
-	NotificationsEnabled bool      `json:"notifications_enabled" db:"notifications_enabled"`
-	CreatedAt            time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at" db:"updated_at"`
+	BotBlocked                 bool      `json:"bot_blocked" db:"bot_blocked"`
+	SupportBlocked             bool      `json:"support_blocked" db:"support_blocked"`
+	ID                         string    `json:"id" db:"id"`
+	Username                   string    `json:"username" db:"username"`
+	IsAdmin                    bool      `json:"is_admin" db:"is_admin"`
+	AdminRole                  string    `json:"admin_role" db:"admin_role"`
+	Subscriptions              int       `json:"subscriptions" db:"subscriptions"`
+	DefaultGroupID             string    `json:"default_group_id" db:"default_group_id"`
+	DefaultGroupUniversityName string    `json:"default_group_university_name" db:"default_group_university_name"`
+	DefaultGroupName           string    `json:"default_group_name" db:"default_group_name"`
+	NotificationsEnabled       bool      `json:"notifications_enabled" db:"notifications_enabled"`
+	CreatedAt                  time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt                  time.Time `json:"updated_at" db:"updated_at"`
 }
 
 type SupportRequestView struct {

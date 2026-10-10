@@ -157,7 +157,7 @@ export function UsersPage({
                       <dd>
                         {item.role === "teacher"
                           ? `Преподаватель · ${item.teacher_name || "не выбран"}${item.teacher_university_name ? ` · ${item.teacher_university_name}` : ""}`
-                          : `Студент · ${item.default_group_name || "группа не выбрана"}`}
+                          : `Студент · ${item.default_group_name || "группа не выбрана"}${item.default_group_university_name ? ` · ${item.default_group_university_name}` : ""}`}
                       </dd>
                     </div>
                     <div>
