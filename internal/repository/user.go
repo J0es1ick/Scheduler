@@ -324,13 +324,18 @@ func (r *UserRepository) ExportUserData(ctx context.Context, id string) (*domain
 		return nil, err
 	}
 	result := &domain.UserDataExport{
-		ExportedAt:      time.Now().UTC(),
-		User:            *user,
-		Subscriptions:   []domain.Subscription{},
-		SupportRequests: []domain.SupportRequest{},
-		AuditRecords:    []domain.PersonalAuditRecord{},
-		AdminSessions:   []domain.PersonalAdminSession{},
-		References:      []domain.PersonalDataReference{},
+		PersonalSessions: []domain.PersonalAppSession{},
+		ExportedAt:       time.Now().UTC(),
+		User:             *user,
+		Subscriptions:    []domain.Subscription{},
+		SupportRequests:  []domain.SupportRequest{},
+		AuditRecords:     []domain.PersonalAuditRecord{},
+		AdminSessions:    []domain.PersonalAdminSession{},
+		References:       []domain.PersonalDataReference{},
+	}
+	result.PersonalChanges, err = NewPersonalScheduleRepository(r.db).List(ctx, id)
+	if err != nil {
+		return nil, err
 	}
 	if user.TeacherID != "" {
 		result.Teacher, err = r.GetTeacher(ctx, user.TeacherID)
@@ -364,6 +369,9 @@ func (r *UserRepository) ExportUserData(ctx context.Context, id string) (*domain
         WHERE actor_id=$1 OR (object_type='user' AND object_id=$1)
 		ORDER BY created_at`, id); err != nil {
 		return nil, fmt.Errorf("export audit records for user %s: %w", id, err)
+	}
+	if err = r.db.SelectContext(ctx, &result.PersonalSessions, `SELECT name,expires_at,created_at FROM personal_sessions WHERE user_id=$1 ORDER BY created_at`, id); err != nil {
+		return nil, err
 	}
 	if err = r.db.SelectContext(ctx, &result.AdminSessions, `
 		SELECT name, auth_method, admin_role, expires_at, created_at, last_seen_at

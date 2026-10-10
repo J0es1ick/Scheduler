@@ -299,7 +299,7 @@ func (r *LessonRepository) ReplaceLessonsForGroup(ctx context.Context, groupID s
 	return nil
 }
 
-const lessonCols = `id, university_id, semester_id, COALESCE(day_of_week, 0) AS day_of_week, special_date,
+const lessonCols = `COALESCE(base_lesson_id,id) AS personal_key, id, university_id, semester_id, COALESCE(day_of_week, 0) AS day_of_week, special_date,
 	time_start, time_end, week_type, subject, type, teacher, room, group_id, subgroup,
 	valid_from, valid_to, recurrence, COALESCE(source_id, '') AS source_id,
 	external_id, fetched_at, source_fingerprint, updated_at`
@@ -325,3 +325,10 @@ func nullIfEmpty(value string) any {
 }
 
 var _ = strings.Join
+
+func (r *LessonRepository) PersonalRepository() *PersonalScheduleRepository {
+	if r == nil {
+		return nil
+	}
+	return NewPersonalScheduleRepository(r.db)
+}

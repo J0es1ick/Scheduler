@@ -34,15 +34,23 @@ type User struct {
 	UpdatedAt            time.Time          `db:"updated_at" json:"updated_at"`
 }
 
+type PersonalAppSession struct {
+	Name      string    `db:"name" json:"name"`
+	ExpiresAt time.Time `db:"expires_at" json:"expires_at"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
 type UserDataExport struct {
-	Teacher         *Teacher                `json:"teacher,omitempty"`
-	ExportedAt      time.Time               `json:"exported_at"`
-	User            User                    `json:"user"`
-	Subscriptions   []Subscription          `json:"subscriptions"`
-	SupportRequests []SupportRequest        `json:"support_requests"`
-	AuditRecords    []PersonalAuditRecord   `json:"audit_records"`
-	AdminSessions   []PersonalAdminSession  `json:"admin_sessions"`
-	References      []PersonalDataReference `json:"references"`
+	PersonalSessions []PersonalAppSession    `json:"personal_sessions"`
+	PersonalChanges  []PersonalOverride      `json:"personal_schedule_changes"`
+	Teacher          *Teacher                `json:"teacher,omitempty"`
+	ExportedAt       time.Time               `json:"exported_at"`
+	User             User                    `json:"user"`
+	Subscriptions    []Subscription          `json:"subscriptions"`
+	SupportRequests  []SupportRequest        `json:"support_requests"`
+	AuditRecords     []PersonalAuditRecord   `json:"audit_records"`
+	AdminSessions    []PersonalAdminSession  `json:"admin_sessions"`
+	References       []PersonalDataReference `json:"references"`
 }
 
 type PersonalAuditRecord struct {

@@ -99,6 +99,12 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 		role, table, privilege string
 		want                   bool
 	}{
+		{botRole, "personal_schedule_overrides", "SELECT", true},
+		{botRole, "personal_schedule_overrides", "UPDATE", false},
+		{adminRole, "personal_schedule_overrides", "INSERT", true},
+		{adminRole, "personal_sessions", "DELETE", true},
+		{parserRole, "personal_schedule_overrides", "SELECT", false},
+		{privacyRole, "personal_schedule_overrides", "SELECT", false},
 		{botRole, "broadcasts", "SELECT", true},
 		{botRole, "broadcasts", "INSERT", false},
 		{botRole, "broadcast_attachments", "UPDATE", true},

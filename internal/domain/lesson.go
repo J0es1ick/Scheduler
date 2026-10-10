@@ -24,6 +24,7 @@ const (
 )
 
 type Lesson struct {
+	PersonalKey       string         `db:"personal_key" json:"personal_key,omitempty"`
 	ID                string         `db:"id"`
 	UniversityID      string         `db:"university_id"`
 	SemesterID        string         `db:"semester_id"`  // к какому семестру относится

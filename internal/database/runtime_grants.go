@@ -85,7 +85,8 @@ func ApplyRuntimeGrants(
 			"SELECT, INSERT, UPDATE, DELETE ON subscriptions, chat_schedule_profiles, notification_deliveries, bot_outbox, worker_status",
 			"SELECT, INSERT ON support_requests",
 			"SELECT, DELETE ON schedule_change_events",
-			"SELECT ON users, teachers, schedule_profile_recipients",
+			"SELECT ON users, teachers, schedule_profile_recipients, personal_schedule_overrides",
+			"SELECT (user_id,name,expires_at,created_at) ON personal_sessions",
 			"INSERT, UPDATE ON teachers",
 			"INSERT (id, username, created_at, updated_at) ON users",
 			"UPDATE (service_updates_consent, service_updates_answered_at, service_updates_prompt_delivered_at, role, teacher_id, teacher_schedule_view_format, daily_enabled, daily_time, daily_setup, daily_next_at, username, default_group_id, notifications_enabled, reminder_enabled, reminder_minutes, quiet_hours_enabled, quiet_hours_start, quiet_hours_end, search_schedule_view_format, telegram_menu_fingerprint, updated_at) ON users",
@@ -98,6 +99,7 @@ func ApplyRuntimeGrants(
 			"SELECT, UPDATE ON users, support_requests",
 			"SELECT, INSERT, UPDATE, DELETE ON broadcasts, broadcast_attachments, broadcast_recipients",
 			"SELECT ON teachers, schedule_profile_recipients",
+			"SELECT, INSERT, UPDATE, DELETE ON personal_schedule_overrides, personal_sessions",
 			"SELECT, DELETE ON subscriptions",
 			"SELECT ON chat_schedule_profiles, worker_status",
 			"SELECT, UPDATE ON operational_maintenance",
@@ -150,7 +152,7 @@ func ApplyRuntimeGrants(
 			"scheduler_lock_privacy_deletion_request(TEXT, TEXT)",
 		},
 	}
-	if _, err = tx.ExecContext(ctx, "REVOKE ALL ON FUNCTION scheduler_anonymize_audit_json(JSONB, TEXT, TEXT), scheduler_profile_schedule_changed(), scheduler_service_updates_changed(), scheduler_updates_prompt_delivered() FROM PUBLIC"); err != nil {
+	if _, err = tx.ExecContext(ctx, "REVOKE ALL ON FUNCTION scheduler_anonymize_audit_json(JSONB, TEXT, TEXT), scheduler_profile_schedule_changed(), scheduler_personal_schedule_changed(), scheduler_service_updates_changed(), scheduler_updates_prompt_delivered() FROM PUBLIC"); err != nil {
 		return fmt.Errorf("revoke public internal function privileges: %w", err)
 	}
 	for role, signatures := range functions {

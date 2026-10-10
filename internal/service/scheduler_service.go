@@ -14,6 +14,7 @@ import (
 )
 
 type ScheduleService struct {
+	personalRepo *repository.PersonalScheduleRepository
 	lessonRepo   *repository.LessonRepository
 	semesterRepo *repository.SemesterRepository
 	groupRepo    *repository.GroupRepository
@@ -24,7 +25,7 @@ func NewScheduleService(
 	semesterRepo *repository.SemesterRepository,
 	groupRepo *repository.GroupRepository,
 ) *ScheduleService {
-	return &ScheduleService{lessonRepo: lessonRepo, semesterRepo: semesterRepo, groupRepo: groupRepo}
+	return &ScheduleService{personalRepo: lessonRepo.PersonalRepository(), lessonRepo: lessonRepo, semesterRepo: semesterRepo, groupRepo: groupRepo}
 }
 
 func (s *ScheduleService) GetScheduleForGroup(ctx context.Context, groupID string, date time.Time) ([]domain.Lesson, error) {
