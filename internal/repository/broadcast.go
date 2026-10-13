@@ -62,10 +62,10 @@ func (r *BroadcastRepository) Get(ctx context.Context, id string) (*domain.Broad
 	if err := r.db.SelectContext(ctx, &b.Recipients, `SELECT r.user_id,COALESCE(u.username,'') AS username,
 		CASE WHEN o.status='delivered' THEN 'delivered' WHEN COALESCE(jsonb_array_length(o.broadcast_message_ids),0)>0 AND o.status<>'pending' THEN 'partial'
 		WHEN o.status='pending' THEN 'pending' WHEN o.status='failed' THEN 'failed' WHEN o.status='cancelled' THEN 'skipped'
-		WHEN u.bot_blocked THEN 'blocked' WHEN u.service_updates_consent IS NOT TRUE THEN 'no_consent' ELSE 'ready' END AS status,
+		WHEN u.bot_blocked THEN 'blocked' WHEN $2<>'all_users' AND u.service_updates_consent IS NOT TRUE THEN 'no_consent' ELSE 'ready' END AS status,
 		COALESCE(NULLIF(o.last_error,''),o.cancel_reason,'') AS reason,COALESCE(jsonb_array_length(o.broadcast_message_ids),0) AS parts
 		FROM broadcast_recipients r JOIN users u ON u.id=r.user_id LEFT JOIN bot_outbox o ON o.broadcast_id=r.broadcast_id AND o.user_id=r.user_id
-		WHERE r.broadcast_id=$1 ORDER BY r.user_id`, id); err != nil {
+		WHERE r.broadcast_id=$1 ORDER BY r.user_id`, id, b.AudienceMode); err != nil {
 		return nil, err
 	}
 	b.Counts = map[string]int{}
@@ -102,11 +102,11 @@ func NormalizeBroadcastUsernames(input string) ([]string, error) {
 
 func (r *BroadcastRepository) Audience(ctx context.Context, mode, input string) (BroadcastAudience, error) {
 	result := BroadcastAudience{Recipients: []domain.BroadcastRecipient{}}
-	if mode == "all" {
-		err := r.db.QueryRowContext(ctx, `SELECT COUNT(*),COUNT(*) FILTER(WHERE service_updates_consent IS TRUE AND NOT bot_blocked) FROM users`).Scan(&result.Total, &result.Eligible)
+	if mode == domain.BroadcastAudienceSubscribers || mode == domain.BroadcastAudienceEveryone {
+		err := r.db.QueryRowContext(ctx, `SELECT COUNT(*),COUNT(*) FILTER(WHERE ($1='all_users' OR service_updates_consent IS TRUE) AND NOT bot_blocked) FROM users`, mode).Scan(&result.Total, &result.Eligible)
 		return result, err
 	}
-	if mode != "selected" {
+	if mode != domain.BroadcastAudienceSelected {
 		return result, fmt.Errorf("неверный режим получателей")
 	}
 	names, err := NormalizeBroadcastUsernames(input)
@@ -154,7 +154,7 @@ func (r *BroadcastRepository) Save(ctx context.Context, id string, input Broadca
 	if err != nil {
 		return err
 	}
-	if input.AudienceMode != "all" && input.AudienceMode != "selected" {
+	if input.AudienceMode != domain.BroadcastAudienceSubscribers && input.AudienceMode != domain.BroadcastAudienceSelected && input.AudienceMode != domain.BroadcastAudienceEveryone {
 		return fmt.Errorf("неверный режим получателей")
 	}
 	if len(input.UserIDs) > 1000 {
@@ -196,7 +196,7 @@ func (r *BroadcastRepository) Save(ctx context.Context, id string, input Broadca
 	if _, err = tx.ExecContext(ctx, `DELETE FROM broadcast_recipients WHERE broadcast_id=$1`, id); err != nil {
 		return err
 	}
-	if input.AudienceMode == "selected" {
+	if input.AudienceMode == domain.BroadcastAudienceSelected {
 		for _, userID := range input.UserIDs {
 			if _, err = tx.ExecContext(ctx, `INSERT INTO broadcast_recipients(broadcast_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, id, userID); err != nil {
 				return err
@@ -288,15 +288,15 @@ func (r *BroadcastRepository) Send(ctx context.Context, id, key string, version 
 	if _, err = domain.RenderBroadcastDocument(b.Document); err != nil {
 		return err
 	}
-	if b.AudienceMode == "all" {
-		if _, err = tx.ExecContext(ctx, `INSERT INTO broadcast_recipients(broadcast_id,user_id) SELECT $1,id FROM users WHERE service_updates_consent IS TRUE AND NOT bot_blocked ON CONFLICT DO NOTHING`, id); err != nil {
+	if b.AudienceMode == domain.BroadcastAudienceSubscribers || b.AudienceMode == domain.BroadcastAudienceEveryone {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO broadcast_recipients(broadcast_id,user_id) SELECT $1,id FROM users WHERE ($2='all_users' OR service_updates_consent IS TRUE) AND NOT bot_blocked ON CONFLICT DO NOTHING`, id, b.AudienceMode); err != nil {
 			return err
 		}
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO bot_outbox(id,user_id,kind,body,broadcast_id)
 		SELECT 'broadcast:'||r.broadcast_id||':'||r.user_id,r.user_id,'service_update',$2,r.broadcast_id
-		FROM broadcast_recipients r JOIN users u ON u.id=r.user_id WHERE r.broadcast_id=$1 AND u.service_updates_consent IS TRUE AND NOT u.bot_blocked
-		ON CONFLICT DO NOTHING`, id, b.Body)
+		FROM broadcast_recipients r JOIN users u ON u.id=r.user_id WHERE r.broadcast_id=$1 AND ($3='all_users' OR u.service_updates_consent IS TRUE) AND NOT u.bot_blocked
+		ON CONFLICT DO NOTHING`, id, b.Body, b.AudienceMode)
 	if err != nil {
 		return err
 	}
@@ -305,7 +305,7 @@ func (r *BroadcastRepository) Send(ctx context.Context, id, key string, version 
 		return err
 	}
 	if count == 0 {
-		return fmt.Errorf("нет получателей, согласившихся на рассылку")
+		return fmt.Errorf("нет доступных получателей для выбранной аудитории")
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE broadcasts SET status='sending',send_key=$2,sent_at=NOW(),updated_at=NOW(),version=version+1 WHERE id=$1`, id, key); err != nil {
 		return err

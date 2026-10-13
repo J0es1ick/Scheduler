@@ -151,7 +151,8 @@ func (r *NotificationRepository) ClaimBotOutbox(ctx context.Context, limit int) 
 				o.claim_token, o.lease_expires_at
 		)
 		SELECT id, user_id, COALESCE(request_id, '') AS request_id, kind, body, attempts, COALESCE(group_id, '') AS group_id, expires_at, reminder_context, COALESCE(teacher_id,'') AS teacher_id, schedule_context, schedule_messages, delivered_parts, COALESCE(broadcast_id,'') AS broadcast_id, broadcast_message_ids,
-			claim_token, lease_expires_at
+			claim_token, lease_expires_at,
+			COALESCE((SELECT b.audience_mode FROM broadcasts b WHERE b.id=claimed.broadcast_id),'') AS broadcast_audience_mode
 		FROM claimed
 		ORDER BY expires_at NULLS LAST, id`, limit, claimToken, int(notificationClaimLease/time.Second))
 	if err != nil {

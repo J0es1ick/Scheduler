@@ -10,6 +10,13 @@ import (
 	"unicode/utf16"
 )
 
+const (
+	BroadcastAudienceSubscribers = "all"
+	BroadcastAudienceSelected    = "selected"
+	BroadcastAudienceEveryone    = "all_users"
+	ServiceUpdatesPrompt         = "Хотите получать информацию об обновлениях сервиса?\nВажные объявления о техработах и запуске сервиса могут приходить независимо от ответа."
+)
+
 type Broadcast struct {
 	ID           string                `db:"id" json:"id"`
 	AuthorID     string                `db:"author_id" json:"author_id"`

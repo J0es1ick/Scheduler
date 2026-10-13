@@ -256,3 +256,147 @@ func TestBroadcastAttachmentLimitsOrderAndRetention(t *testing.T) {
 		t.Fatalf("attachments retained: %d %v", count, err)
 	}
 }
+
+func TestBroadcastAudiencesAndConsentChanges(t *testing.T) {
+	for _, mode := range []string{domain.BroadcastAudienceSubscribers, domain.BroadcastAudienceSelected, domain.BroadcastAudienceEveryone} {
+		t.Run(mode, func(t *testing.T) {
+			db, ctx := openOperationalIntegrationDB(t)
+			if _, err := db.ExecContext(ctx, `INSERT INTO users(id,username,service_updates_consent,bot_blocked) VALUES
+    ('42','subscribed',TRUE,FALSE),('43','declined',FALSE,FALSE),('44',NULL,NULL,FALSE),('45','blocked',TRUE,TRUE)`); err != nil {
+				t.Fatal(err)
+			}
+			r := repository.NewBroadcastRepository(db)
+			audience, err := r.Audience(ctx, mode, "subscribed declined blocked")
+			want := 1
+			if mode == domain.BroadcastAudienceEveryone {
+				want = 3
+			}
+			if err != nil || audience.Eligible != want {
+				t.Fatalf("audience: %+v %v", audience, err)
+			}
+			id, err := r.Create(ctx, "42")
+			if err != nil {
+				t.Fatal(err)
+			}
+			doc := json.RawMessage(`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Важное сообщение"}]}]}`)
+			input := repository.BroadcastInput{Document: doc, AudienceMode: mode, UserIDs: []string{"42", "43", "44", "45"}, Version: 1}
+			if err = r.Save(ctx, id, input); err != nil {
+				t.Fatal(err)
+			}
+			key := uuid.NewString()
+			var wg sync.WaitGroup
+			for range 3 {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					if err := r.Send(ctx, id, key, 2); err != nil {
+						t.Error(err)
+					}
+				}()
+			}
+			wg.Wait()
+			var count int
+			if err = db.Get(&count, `SELECT COUNT(*) FROM bot_outbox WHERE broadcast_id=$1`, id); err != nil || count != want {
+				t.Fatalf("queued: %d %v", count, err)
+			}
+			var unchanged bool
+			if err = db.Get(&unchanged, `SELECT service_updates_consent IS FALSE FROM users WHERE id='43'`); err != nil || !unchanged {
+				t.Fatalf("declined preference changed: %t %v", unchanged, err)
+			}
+			if err = db.Get(&unchanged, `SELECT service_updates_consent IS NULL FROM users WHERE id='44'`); err != nil || !unchanged {
+				t.Fatalf("unknown preference changed: %t %v", unchanged, err)
+			}
+			q := repository.NewNotificationRepository(db)
+			items, err := q.ClaimBotOutbox(ctx, 20)
+			if err != nil || len(items) != want {
+				t.Fatalf("claims: %+v %v", items, err)
+			}
+			users := repository.NewUserRepository(db)
+			if _, err = users.SetServiceUpdates(ctx, "42", false, ""); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = users.SetServiceUpdates(ctx, "44", false, ""); err != nil {
+				t.Fatal(err)
+			}
+			for _, item := range items {
+				if item.BroadcastAudienceMode != mode || item.UserID == "45" {
+					t.Fatalf("wrong audience: %+v", item)
+				}
+				decision, err := q.BotOutboxDecision(ctx, item.ID, item.ClaimToken)
+				expected := repository.NotificationQueueCancel
+				if mode == domain.BroadcastAudienceEveryone {
+					expected = repository.NotificationQueueReady
+				}
+				if err != nil || decision != expected {
+					t.Fatalf("consent changed: %s %v", decision, err)
+				}
+			}
+			if mode == domain.BroadcastAudienceEveryone {
+				if _, err = db.Exec(`UPDATE users SET bot_blocked=TRUE WHERE id='43'`); err != nil {
+					t.Fatal(err)
+				}
+				for _, item := range items {
+					if item.UserID != "43" {
+						continue
+					}
+					decision, err := q.BotOutboxDecision(ctx, item.ID, item.ClaimToken)
+					if err != nil || decision != repository.NotificationQueueCancel {
+						t.Fatalf("blocked: %s %v", decision, err)
+					}
+				}
+			}
+			if err = r.Stop(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+			for _, item := range items {
+				decision, err := q.BotOutboxDecision(ctx, item.ID, item.ClaimToken)
+				if err != nil || decision != repository.NotificationQueueCancel {
+					t.Fatalf("stopped: %s %v", decision, err)
+				}
+			}
+		})
+	}
+}
+
+func TestConsentRevocationOnlyCancelsPendingUpdates(t *testing.T) {
+	db, ctx := openOperationalIntegrationDB(t)
+	if _, err := db.Exec(`INSERT INTO users(id,service_updates_consent) VALUES('42',TRUE)`); err != nil {
+		t.Fatal(err)
+	}
+	r := repository.NewBroadcastRepository(db)
+	ids := map[string]string{}
+	for _, mode := range []string{domain.BroadcastAudienceSubscribers, domain.BroadcastAudienceEveryone} {
+		id, err := r.Create(ctx, "42")
+		if err != nil {
+			t.Fatal(err)
+		}
+		doc := json.RawMessage(`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Message"}]}]}`)
+		if err = r.Save(ctx, id, repository.BroadcastInput{Document: doc, AudienceMode: mode, Version: 1}); err != nil {
+			t.Fatal(err)
+		}
+		if err = r.Send(ctx, id, uuid.NewString(), 2); err != nil {
+			t.Fatal(err)
+		}
+		ids[mode] = id
+	}
+	if _, err := repository.NewUserRepository(db).SetServiceUpdates(ctx, "42", false, ""); err != nil {
+		t.Fatal(err)
+	}
+	for mode, id := range ids {
+		var status string
+		if err := db.Get(&status, `SELECT status FROM bot_outbox WHERE broadcast_id=$1`, id); err != nil {
+			t.Fatal(err)
+		}
+		expected := "cancelled"
+		if mode == domain.BroadcastAudienceEveryone {
+			expected = "pending"
+		}
+		if status != expected {
+			t.Fatalf("%s: got %s want %s", mode, status, expected)
+		}
+	}
+	items, err := repository.NewNotificationRepository(db).ClaimBotOutbox(ctx, 20)
+	if err != nil || len(items) != 1 || items[0].BroadcastID != ids[domain.BroadcastAudienceEveryone] {
+		t.Fatalf("claims after refusal: %+v %v", items, err)
+	}
+}

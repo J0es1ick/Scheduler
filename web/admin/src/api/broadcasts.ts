@@ -1,6 +1,8 @@
 import { request } from "./client";
 import type { JSONContent } from "@tiptap/react";
 
+export type BroadcastAudienceMode = "all" | "selected" | "all_users";
+
 export interface BroadcastAttachment {
   id: string;
   filename: string;
@@ -21,7 +23,7 @@ export interface Broadcast {
   author_id: string;
   document: JSONContent;
   body: string;
-  audience_mode: "all" | "selected";
+  audience_mode: BroadcastAudienceMode;
   status: "draft" | "sending" | "completed" | "cancelled";
   version: number;
   created_at: string;
@@ -44,7 +46,7 @@ export interface BroadcastPreview {
 }
 export interface BroadcastInput {
   document: JSONContent;
-  audience_mode: "all" | "selected";
+  audience_mode: BroadcastAudienceMode;
   user_ids: string[];
   attachment_ids: string[];
   version: number;
@@ -60,7 +62,7 @@ export const broadcastAPI = {
   get: (id: string) => request<Broadcast>(`${root}/${id}`),
   save: (id: string, input: BroadcastInput) =>
     request<Broadcast>(`${root}/${id}`, json("PUT", input)),
-  audience: (mode: string, usernames: string) =>
+  audience: (mode: BroadcastAudienceMode, usernames: string) =>
     request<BroadcastAudience>(
       `${root}/audience`,
       json("POST", { mode, usernames }),

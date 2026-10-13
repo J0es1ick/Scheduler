@@ -16,7 +16,7 @@ type serviceUpdatesService interface {
 }
 
 func (h *Handler) showUpdatesPrompt(c tele.Context, user *domain.User) error {
-	if err := c.Send("Хотите получать информацию об обновлениях сервиса?", keyboards.ServiceUpdatesPrompt(user.ServiceUpdatesPromptKey)); err != nil {
+	if err := c.Send(domain.ServiceUpdatesPrompt, keyboards.ServiceUpdatesPrompt(user.ServiceUpdatesPromptKey)); err != nil {
 		return err
 	}
 	ctx, cancel := reqCtx()
@@ -57,7 +57,7 @@ func (h *Handler) HandleUpdates(c tele.Context) error {
 	}
 	menu := &tele.ReplyMarkup{}
 	menu.Inline(menu.Row(menu.Data("Включить", "updates_settings", "on"), menu.Data("Выключить", "updates_settings", "off")), menu.Row(menu.Data("Главное меню", "open_main_menu")))
-	return c.Send("Сообщения об обновлениях сервиса: "+status+".\nЭто авторские сообщения о новых возможностях и изменениях бота. Настройки расписания от них не зависят.", menu)
+	return c.Send("Сообщения об обновлениях сервиса: "+status+".\nЭто авторские сообщения о новых возможностях и изменениях бота. Настройки расписания от них не зависят. Важные объявления о техработах и запуске сервиса могут приходить независимо от этой настройки.", menu)
 }
 
 func (h *Handler) HandleUpdatesChoice(c tele.Context) error {

@@ -474,7 +474,7 @@ func (w *NotificationWorker) deliverBotOutbox(ctx context.Context, item domain.B
 		var options []any
 		body := item.Body
 		if item.Kind == "service_updates_prompt" {
-			body = "Хотите получать информацию об обновлениях сервиса?"
+			body = domain.ServiceUpdatesPrompt
 			options = []any{keyboards.ServiceUpdatesPrompt(item.Body)}
 		}
 		_, err = w.bot.Send(&tele.User{ID: telegramID}, body, options...)

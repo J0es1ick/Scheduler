@@ -51,7 +51,10 @@ func (w *NotificationWorker) sendBroadcast(ctx context.Context, item domain.BotO
 			return errDailyCancelled
 		}
 		var body any = item.Body
-		options := []any{tele.ModeHTML, keyboards.ServiceUpdatesUnsubscribe()}
+		options := []any{tele.ModeHTML}
+		if item.BroadcastAudienceMode != domain.BroadcastAudienceEveryone {
+			options = append(options, keyboards.ServiceUpdatesUnsubscribe())
+		}
 		var attachmentID string
 		if part > 0 {
 			a := attachments[part-1]

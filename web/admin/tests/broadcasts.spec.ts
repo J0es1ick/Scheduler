@@ -135,7 +135,11 @@ async function setup(page: Page, role = "owner") {
         broadcast,
         body: broadcast.body,
         eligible:
-          broadcast.audience_mode === "all" ? 12 : broadcast.recipients.length,
+          broadcast.audience_mode === "all_users"
+            ? 20
+            : broadcast.audience_mode === "all"
+              ? 12
+              : broadcast.recipients.length,
       };
     else if (path === "/api/broadcasts/b1/send") {
       sends.push(request.postDataJSON());
@@ -249,4 +253,57 @@ for (const role of ["read_only", "support", "editor", "reviewer", "operator"])
     await expect(
       page.getByRole("button", { name: "Рассылки", exact: true }),
     ).toHaveCount(0);
+  });
+
+for (const width of [320, 1440])
+  test(`important announcements reach all users at ${width}px`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const { broadcast, sends } = await setup(page);
+    await page.goto("/#/broadcasts");
+    await page.getByRole("button", { name: "Новая рассылка" }).click();
+    await expect(
+      page.getByRole("radio", { name: "Все подписавшиеся", exact: true }),
+    ).toBeChecked();
+    await page
+      .getByRole("textbox", { name: "Текст сообщения" })
+      .fill("Завтра техработы 🛠️");
+    await page.getByRole("radio", { name: "Все пользователи", exact: true }).check();
+    await expect(page.getByText(/Сообщение получат и отказавшиеся/)).toBeVisible();
+    await page.getByRole("button", { name: "Проверить и отправить" }).click();
+    await expect(
+      page.getByRole("button", { name: "Отправить 20 пользователям" }),
+    ).toBeVisible();
+    await expect(page.locator(".telegram-message-unsubscribe")).toHaveCount(0);
+    expect(broadcast.audience_mode).toBe("all_users");
+    await page.getByRole("radio", { name: "Все подписавшиеся", exact: true }).check();
+    await expect(
+      page.getByRole("button", { name: "Отправить 20 пользователям" }),
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "Проверить и отправить" }).click();
+    await expect(
+      page.getByRole("button", { name: "Отправить 12 пользователям" }),
+    ).toBeVisible();
+    await expect(page.locator(".telegram-message-unsubscribe")).toBeVisible();
+    await page.getByRole("radio", { name: "Все пользователи", exact: true }).check();
+    await page.getByRole("button", { name: "Проверить и отправить" }).click();
+    await expect(
+      page.getByText("Аудитория: Все пользователи · важное объявление"),
+    ).toBeVisible();
+    await expect(page.locator(".telegram-message-unsubscribe")).toHaveCount(0);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(width);
+    await expectReadableTheme(page);
+    await page.screenshot({
+      path: info.outputPath("important-broadcast.png"),
+      fullPage: true,
+    });
+    await page.getByRole("button", { name: "Отправить 20 пользователям" }).click();
+    expect(sends).toHaveLength(1);
+    await expect(
+      page.getByRole("heading", { name: "Результат рассылки" }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("Все пользователи · важное объявление", { exact: true }),
+    ).toBeVisible();
   });

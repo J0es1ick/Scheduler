@@ -102,7 +102,7 @@ export function canAccessView(view: ViewName, role: AdminRole): boolean {
 const pageCopy: Record<ViewName, { title: string; subtitle: string }> = {
   broadcasts: {
     title: "Рассылки",
-    subtitle: "Сообщения об обновлениях сервиса",
+    subtitle: "Обновления сервиса и важные объявления",
   },
   overview: {
     title: "Обзор",

@@ -182,4 +182,55 @@ func TestBroadcastAPIConsentPermissionsAndAttachments(t *testing.T) {
 	if err = db.Get(&decision, `SELECT policy_decision FROM notification_queue_eligibility WHERE id=$1`, "broadcast:"+created.ID+":"+recipient); err != nil || decision != "cancel" {
 		t.Fatalf("stop decision: %s %v", decision, err)
 	}
+
+	t.Run("important announcement includes every consent state", func(t *testing.T) {
+		unknown := uuid.NewString()
+		if _, err = db.Exec(`INSERT INTO users(id) VALUES($1)`, unknown); err != nil {
+			t.Fatal(err)
+		}
+		defer db.Exec(`DELETE FROM users WHERE id=$1`, unknown)
+		var expected int
+		if err = db.Get(&expected, `SELECT COUNT(*) FROM users WHERE NOT bot_blocked`); err != nil {
+			t.Fatal(err)
+		}
+		response = request("POST", "/api/broadcasts/audience", []byte(`{"mode":"all_users"}`), "application/json", true)
+		var audience struct {
+			Eligible int `json:"eligible"`
+		}
+		if err = json.Unmarshal(response.Body.Bytes(), &audience); err != nil || response.Code != 200 || audience.Eligible != expected {
+			t.Fatalf("audience: %d %+v %v", response.Code, audience, err)
+		}
+		response = request("POST", "/api/broadcasts", nil, "application/json", true)
+		if err = json.Unmarshal(response.Body.Bytes(), &created); err != nil || response.Code != 201 {
+			t.Fatalf("create: %d %v", response.Code, err)
+		}
+		defer db.Exec(`DELETE FROM broadcasts WHERE id=$1`, created.ID)
+		importantBase := "/api/broadcasts/" + created.ID
+		response = request("PUT", importantBase, []byte(`{"version":1,"audience_mode":"all_users","document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Техработы"}]}]}}`), "application/json", true)
+		if response.Code != 200 {
+			t.Fatalf("save important: %d %s", response.Code, response.Body.String())
+		}
+		response = request("POST", importantBase+"/preview", nil, "application/json", true)
+		if err = json.Unmarshal(response.Body.Bytes(), &preview); err != nil || response.Code != 200 || preview.Eligible != expected {
+			t.Fatalf("important preview: %d %+v %v", response.Code, preview, err)
+		}
+		send = []byte(fmt.Sprintf(`{"version":2,"key":%q}`, uuid.NewString()))
+		for range 2 {
+			response = request("POST", importantBase+"/send", send, "application/json", true)
+			if response.Code != 200 {
+				t.Fatalf("important send: %d %s", response.Code, response.Body.String())
+			}
+		}
+		if err = db.Get(&count, `SELECT COUNT(*) FROM bot_outbox WHERE broadcast_id=$1`, created.ID); err != nil || count != expected {
+			t.Fatalf("important delivery count: %d %v", count, err)
+		}
+		for _, id := range []string{actor, recipient, declined, unknown} {
+			if err = db.Get(&count, `SELECT COUNT(*) FROM bot_outbox WHERE broadcast_id=$1 AND user_id=$2`, created.ID, id); err != nil || count != 1 {
+				t.Fatalf("important recipient %s: %d %v", id, count, err)
+			}
+		}
+		if response = request("PUT", importantBase, []byte(`{"version":3,"audience_mode":"all","document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Changed"}]}]}}`), "application/json", true); response.Code != 409 {
+			t.Fatalf("sent audience changed: %d", response.Code)
+		}
+	})
 }

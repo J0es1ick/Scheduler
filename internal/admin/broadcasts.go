@@ -101,8 +101,8 @@ func (s *Server) handleBroadcastPreview(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	eligible := b.Counts["ready"]
-	if b.AudienceMode == "all" {
-		audience, err := repo.Audience(r.Context(), "all", "")
+	if b.AudienceMode == domain.BroadcastAudienceSubscribers || b.AudienceMode == domain.BroadcastAudienceEveryone {
+		audience, err := repo.Audience(r.Context(), b.AudienceMode, "")
 		if err != nil {
 			s.broadcastError(w, err)
 			return

@@ -36,10 +36,15 @@ const labels: Record<string, string> = {
   partial: "Частично доставлено",
   failed: "Ошибка",
   skipped: "Пропущено",
-  ready: "Согласие получено",
+  ready: "Готов к отправке",
   blocked: "Заблокирован",
   no_consent: "Нет согласия",
   unknown: "Не найден",
+};
+const audienceLabels: Record<Broadcast["audience_mode"], string> = {
+  all: "Все подписавшиеся",
+  selected: "По выбранным никам",
+  all_users: "Все пользователи · важное объявление",
 };
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : "Не удалось выполнить действие";
@@ -80,9 +85,9 @@ export function BroadcastsPage({
     <div className="page-stack broadcasts-page">
       <div className="page-intro">
         <div>
-          <h2>Обновления для подписчиков</h2>
+          <h2>Сообщения пользователям</h2>
           <p>
-            Авторские сообщения получают только пользователи, давшие согласие.
+            Обновления сервиса — подписавшимся, важные объявления — всем пользователям.
           </p>
         </div>
         <button
@@ -126,9 +131,7 @@ export function BroadcastsPage({
                     "Новое сообщение"}
                 </strong>
                 <small>
-                  {item.audience_mode === "all"
-                    ? "Все подписавшиеся"
-                    : "По выбранным никам"}
+                  {audienceLabels[item.audience_mode]}
                 </small>
               </span>
               <time>{formatDateTime(item.created_at)}</time>
@@ -293,6 +296,7 @@ function BroadcastComposer({
             <ArrowLeft size={15} /> Все рассылки
           </button>
           <h2>{draft ? "Новое сообщение" : "Результат рассылки"}</h2>
+          {!draft && <p>{audienceLabels[broadcast.audience_mode]}</p>}
           <p>
             {labels[broadcast.status]} · {formatDateTime(broadcast.created_at)}
             {broadcast.author_id
@@ -452,6 +456,20 @@ function BroadcastComposer({
                     />{" "}
                     По никам
                   </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="audience"
+                      checked={mode === "all_users"}
+                      disabled={busy}
+                      onChange={() => {
+                        setMode("all_users");
+                        setAudience(null);
+                        change();
+                      }}
+                    />{" "}
+                    Все пользователи
+                  </label>
                 </div>
                 {mode === "selected" && (
                   <>
@@ -495,8 +513,10 @@ function BroadcastComposer({
                   </>
                 )}
                 <p>
-                  Без согласия сообщения не отправляются — в том числе при
-                  выборе по нику.
+                  {mode === "all_users"
+                    ? "Для важных объявлений: техработы, запуск сервиса и другие существенные новости. Сообщение получат и отказавшиеся от обновлений, и те, кто ещё не ответил."
+                    : "Обновления сервиса получают только согласившиеся пользователи, в том числе при выборе по нику."}
+                  {" "}Пользователи с заблокированным ботом исключаются.
                 </p>
                 {audience && (
                   <div className="audience-results">
@@ -641,9 +661,11 @@ function BroadcastComposer({
                     __html: preview?.body ?? broadcast.body,
                   }}
                 />
-                <div className="telegram-message-unsubscribe">
-                  Отключить обновления сервиса
-                </div>
+                {(preview?.broadcast.audience_mode ?? broadcast.audience_mode) !== "all_users" && (
+                  <div className="telegram-message-unsubscribe">
+                    Отключить обновления сервиса
+                  </div>
+                )}
               </div>
               {(preview?.broadcast.attachments ?? broadcast.attachments).map(
                 (a) => (
@@ -667,6 +689,7 @@ function BroadcastComposer({
               {preview && draft && (
                 <div className="broadcast-confirm">
                   <strong>Получат: {preview.eligible}</strong>
+                  <p>Аудитория: {audienceLabels[preview.broadcast.audience_mode]}</p>
                   <p>
                     Отправка начнётся сразу. После запуска изменить сообщение
                     нельзя.

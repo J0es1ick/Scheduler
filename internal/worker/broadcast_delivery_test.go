@@ -85,3 +85,31 @@ func TestBroadcastConsentCheckedBeforeAttachment(t *testing.T) {
 		t.Fatalf("cancelled: %v sent=%d reads=%d", err, sent, repo.reads)
 	}
 }
+
+func TestBroadcastUnsubscribeOnlyForServiceUpdates(t *testing.T) {
+	for _, mode := range []string{domain.BroadcastAudienceSubscribers, domain.BroadcastAudienceSelected, domain.BroadcastAudienceEveryone} {
+		t.Run(mode, func(t *testing.T) {
+			repo := &broadcastProgressStub{}
+			textSent := false
+			w := &NotificationWorker{repository: repo, limiter: telegramlimit.New(0, 0), waitSend: func(context.Context, string) error { return nil }, bot: notificationSenderFunc(func(_ tele.Recipient, body any, options ...any) (*tele.Message, error) {
+				if _, ok := body.(string); ok {
+					textSent = true
+					hasUnsubscribe := false
+					for _, option := range options {
+						if _, ok := option.(*tele.ReplyMarkup); ok {
+							hasUnsubscribe = true
+						}
+					}
+					if hasUnsubscribe != (mode != domain.BroadcastAudienceEveryone) {
+						t.Fatalf("unexpected unsubscribe button for %s", mode)
+					}
+				}
+				return &tele.Message{ID: len(repo.ids) + 1}, nil
+			})}
+			err := w.sendBroadcast(context.Background(), domain.BotOutboxDelivery{UserID: "42", BroadcastAudienceMode: mode, Body: "Message", BroadcastMessageIDs: json.RawMessage(`[]`)})
+			if err != nil || !textSent {
+				t.Fatalf("delivery: %v text=%t", err, textSent)
+			}
+		})
+	}
+}
