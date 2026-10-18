@@ -879,6 +879,9 @@ test("group directory manages active and archived groups safely", async ({
   let deleted = false;
   let requestedActive: boolean | null = null;
   let requestedOrder = "";
+  const requestedStatuses: string[] = [];
+  let finishUpdate = () => {};
+  const updateReleased = new Promise<void>((resolve) => { finishUpdate = resolve; });
 
   await page.route("**/api/universities", (route) =>
     json(route, {
@@ -896,6 +899,7 @@ test("group directory manages active and archived groups safely", async ({
   await page.route("**/api/groups?**", (route) => {
     const parameters = new URL(route.request().url()).searchParams;
     const status = parameters.get("status") ?? "active";
+    requestedStatuses.push(status);
     requestedOrder = parameters.get("order") ?? "name";
     const candidates = [activeGroup, ...(deleted ? [] : [archivedGroup])];
     const items = candidates.filter((group) =>
@@ -918,6 +922,7 @@ test("group directory manages active and archived groups safely", async ({
       is_active: requestedActive,
       manually_disabled: !requestedActive,
     };
+    await updateReleased;
     await json(route, activeGroup);
   });
   await page.route("**/api/groups/ispu-archived", async (route) => {
@@ -949,6 +954,11 @@ test("group directory manages active and archived groups safely", async ({
   const archivedRow = page
     .locator(".group-directory-row")
     .filter({ hasText: "2-ЭЭ-В" });
+  await expect(archivedRow).toHaveCount(1);
+  const requestsBeforeSave = requestedStatuses.length;
+  finishUpdate();
+  await expect.poll(() => requestedStatuses.length).toBeGreaterThan(requestsBeforeSave);
+  expect(requestedStatuses.at(-1)).toBe("inactive");
   await archivedRow.getByRole("button", { name: "Удалить" }).click();
   await expectViewportDialog(page);
   await expect(page.getByText("1 подписок", { exact: true })).toBeVisible();

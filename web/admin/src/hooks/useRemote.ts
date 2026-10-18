@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useId } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useId } from "react";
 
 export function useRemote<T>(
   loader: () => Promise<T>,
@@ -12,9 +12,16 @@ export function useRemote<T>(
   const [loading, setLoading] = useState(options.enabled !== false);
   const requestSequence = useRef(0);
   const enabled = options.enabled !== false;
+  const currentLoader = useRef<(() => Promise<T>) | null>(null);
+
+  useLayoutEffect(() => {
+    currentLoader.current = enabled ? loader : null;
+    return () => { currentLoader.current = null; };
+  });
 
   const reload = useCallback(async () => {
-    if (!enabled) return;
+    const load = currentLoader.current;
+    if (!load) return;
     const request = ++requestSequence.current;
     setLoading(true);
     setError("");
@@ -22,7 +29,7 @@ export function useRemote<T>(
       new CustomEvent("scheduler:refresh-status", { detail: { id: remoteID } }),
     );
     try {
-      const result = await loader();
+      const result = await load();
       if (request === requestSequence.current) {
         setData(result);
         updatedAt.current = Date.now();
