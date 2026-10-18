@@ -24,7 +24,8 @@ async function mockAdmin(page: Page) {
     } } });
     if (path === "/api/dashboard") return route.fulfill({ json: {
       stats: { universities: 3, groups: 522, lessons: 18400, users: 1240, subscriptions: 1600, success_rate: 99 },
-      sources: [], recent_logs: [], trend: [], universities: [],
+      sources: [], recent_logs: [], universities: [],
+      trend: [800, 1200, 1600, 400, 1100, 1400, 900].map((records, index) => ({ date: `2026-10-${12 + index}`, records, failed: index === 3 })),
       operations: { status: "healthy", database: true, sources_total: 3, sources_healthy: 3 },
     } });
     if (path === "/api/broadcasts") return route.fulfill({ json: [] });
@@ -41,6 +42,7 @@ for (const width of [320, 390, 768, 1440]) {
     await expect(example).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
     const height = (await example.boundingBox())!.height;
+    await page.screenshot({ path: info.outputPath("site-hero.png"), animations: "disabled" });
     await page.getByRole("button", { name: "Преподаватель", exact: true }).click();
     await expect(page.getByText("Павлова Елена Андреевна")).toBeVisible();
     await expect(page.getByRole("button", { name: "Преподаватель", exact: true })).toHaveAttribute("aria-pressed", "true");
@@ -116,4 +118,64 @@ test("site content remains accessible without intersection observers", async ({ 
   await page.goto("http://127.0.0.1:15174");
   await expect(page.getByRole("heading", { name: "Ваш вуз. Ваше расписание." })).toBeVisible();
   await expect(page.locator("[data-reveal]:not([data-revealed='true'])")).toHaveCount(0);
+});
+
+test("surface lighting follows the pointer and stops when motion is disabled", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await mockSite(page);
+  await page.goto("http://127.0.0.1:15174");
+  const product = page.locator(".public-hero-product");
+  await product.hover({ position: { x: 70, y: 60 } });
+  await expect(product).toHaveAttribute("data-light-active", "true");
+  await expect.poll(() => product.evaluate((element) => Math.abs(Number.parseFloat((element as HTMLElement).style.getPropertyValue("--light-x")) - 70))).toBeLessThan(2);
+  await page.mouse.move(2, 500);
+  await expect(product).not.toHaveAttribute("data-light-active");
+  await product.dispatchEvent("pointermove", { pointerType: "touch", clientX: 80, clientY: 80 });
+  await expect(product).not.toHaveAttribute("data-light-active");
+  await product.hover();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(product).not.toHaveAttribute("data-light-active");
+  await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await mockAdmin(page);
+  await page.goto("http://127.0.0.1:15173/#/overview");
+  const metric = page.locator(".metric-strip article").first();
+  await metric.hover();
+  await expect(metric).toHaveAttribute("data-light-active", "true");
+  await expectReadableTheme(page);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(metric).not.toHaveAttribute("data-light-active");
+  await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
+});
+
+test("personal schedule preview and final action remain usable on a narrow phone", async ({ page }, info) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  await mockSite(page);
+  await page.goto("http://127.0.0.1:15174");
+  await page.locator(".public-personal-feature").scrollIntoViewIfNeeded();
+  await expect(page.getByLabel("Пример личной правки")).toBeVisible();
+  await expect(page.getByText("Изменено только для вас")).toBeVisible();
+  await page.locator(".public-final-cta").scrollIntoViewIfNeeded();
+  const launch = page.getByRole("link", { name: "Запустить Scheduler" });
+  await expect(launch).toHaveAttribute("href", "https://t.me/schedule_free_bot");
+  await launch.focus();
+  await expect(launch).toBeFocused();
+  expect((await launch.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+  await page.screenshot({ path: info.outputPath("site-final-phone.png"), animations: "disabled" });
+});
+
+test("desktop sidebar remains reachable in a short window", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 600 });
+  await mockAdmin(page);
+  await page.goto("/#/overview");
+  const sidebar = page.locator(".sidebar");
+  const logout = sidebar.getByRole("button", { name: "Выйти", exact: true });
+  await logout.scrollIntoViewIfNeeded();
+  await expect(logout).toBeInViewport();
+  const box = (await sidebar.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(600);
+  await sidebar.getByRole("button", { name: "Обзор", exact: true }).focus();
+  await expect(sidebar.getByRole("button", { name: "Обзор", exact: true })).toBeInViewport();
 });
