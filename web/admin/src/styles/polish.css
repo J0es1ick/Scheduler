@@ -55,6 +55,61 @@
 .metric-value {
   animation: metric-update 340ms var(--ease-out);
 }
+.overview-navigable {
+  position: relative;
+  transition: border-color var(--motion-control) ease, box-shadow var(--motion-control) ease;
+}
+.overview-card-link {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+}
+.overview-card-link:focus-visible {
+  outline: 2px solid var(--olive);
+  outline-offset: 3px;
+}
+.overview-card-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--olive-dark);
+  font-size: 13px;
+  font-weight: 500;
+}
+.metric-link-arrow {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  color: var(--olive-dark);
+}
+.metric-strip .overview-navigable em {
+  padding-right: 14px;
+}
+.overview-card-hint svg, .metric-link-arrow {
+  transition: transform var(--motion-control) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .overview-navigable:has(.overview-card-link:hover) {
+    border-color: var(--olive);
+    box-shadow: 0 6px 22px var(--shadow-soft);
+  }
+  .overview-navigable:has(.overview-card-link:hover) .overview-card-hint svg,
+  .overview-navigable:has(.overview-card-link:hover) .metric-link-arrow {
+    transform: translateX(3px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .overview-navigable:has(.overview-card-link:hover) .overview-card-hint svg,
+  .overview-navigable:has(.overview-card-link:hover) .metric-link-arrow {
+    transform: none;
+  }
+}
 .bar-track {
   width: 24px;
   border-radius: 8px 8px 0 0;

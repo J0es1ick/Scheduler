@@ -6,6 +6,9 @@ import {
 } from "react";
 
 const selections = new Map<string, unknown>();
+export function presetViewState<T>(key: string, value: T) {
+  selections.set(key, value);
+}
 export function useViewState<T>(
   key: string,
   initial: T,

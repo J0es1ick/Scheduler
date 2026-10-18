@@ -3,7 +3,7 @@ import { RefreshStatus } from "./RefreshStatus";
 import { useMiniApp } from "./useMiniApp";
 import { useTheme } from "./useTheme";
 import { ThemeSwitch } from "./ThemeSwitch";
-import { clearViewState } from "../hooks/useViewState";
+import { clearViewState, presetViewState } from "../hooks/useViewState";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { APIError, api } from "../api";
 import { LoadingBlock, Toasts, type ToastMessage } from "../components";
@@ -12,7 +12,7 @@ import { DataPage } from "../pages/DataPage";
 import { ConnectorsPage } from "../pages/ConnectorsPage";
 import { EditorPage } from "../pages/EditorPage";
 import { LoginPage } from "../pages/LoginPage";
-import { LogsPage } from "../pages/LogsPage";
+import { LogsPage, type LogTab } from "../pages/LogsPage";
 import { OverviewPage } from "../pages/OverviewPage";
 import { SourcesPage } from "../pages/SourcesPage";
 import { SupportPage } from "../pages/SupportPage";
@@ -155,7 +155,7 @@ export default function App() {
       window.removeEventListener("scheduler:session-expired", sessionExpired);
   }, []);
 
-  function navigate(next: ViewName) {
+  function navigate(next: ViewName, logTab?: LogTab) {
     if (
       next === view ||
       !window.dispatchEvent(
@@ -163,6 +163,7 @@ export default function App() {
       )
     )
       return;
+    if (next === "logs" && logTab) presetViewState("LogsPage:tab", logTab);
     setView(next);
     window.history.pushState({ scheduler: true }, "", `#/${next}`);
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -252,7 +253,9 @@ export default function App() {
           <OverviewPage
             canEdit={!!user && canAccessView("editor", user.role)}
             canOperate={!!user && canAccessView("sources", user.role)}
+            canViewUsers={!!user && canAccessView("users", user.role)}
             onNavigate={navigate}
+            onParserRuns={() => navigate("logs", "parsers")}
           />
         );
     }

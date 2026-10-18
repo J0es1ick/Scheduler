@@ -97,6 +97,71 @@ async function expectViewportDialog(page: Page) {
   expect(box!.height).toBe(viewport!.height);
 }
 
+async function mockOverviewNavigation(page: Page, role = "owner") {
+  await mockAuthenticated(page);
+  await page.route("**/api/auth/me", (route) => json(route, { user: { ...admin, role } }));
+  await page.route("**/api/dashboard", (route) => json(route, {
+    ...dashboard,
+    sources: [{ id: "isuct", university_name: "ИГХТУ", lesson_count: 1200, health: "healthy", running: false }],
+    trend: [{ date: "2026-10-18", records: 1200, failed: false }],
+  }));
+  for (const endpoint of ["sources", "parser-snapshots", "logs", "universities", "groups", "users"]) {
+    await page.route(new RegExp(`/api/${endpoint}(?:\\?.*)?$`), (route) => json(route, {
+      items: [], pagination: { page: 1, page_size: 30, total: 0 },
+    }));
+  }
+}
+
+for (const width of [390, 1440]) {
+  test(`overview cards open their matching sections at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await mockOverviewNavigation(page);
+    await page.goto("/#/overview");
+    const metrics = page.locator(".metric-strip");
+    await metrics.getByRole("button", { name: /занятий в расписании/ }).click();
+    await expect(page).toHaveURL(/#\/data$/);
+    await expect(page.getByRole("heading", { name: "Справочники", exact: true })).toBeVisible();
+    await page.goBack();
+    const users = metrics.getByRole("button", { name: /пользователей бота/ });
+    await users.focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/#\/users$/);
+    await page.goBack();
+    await metrics.getByRole("button", { name: /университета/ }).click();
+    await expect(page).toHaveURL(/#\/sources$/);
+    await page.goBack();
+    await page.getByRole("button", { name: "Открыть источники", exact: true }).click({ position: { x: 80, y: 120 } });
+    await expect(page).toHaveURL(/#\/sources$/);
+    await page.goBack();
+    const success = metrics.getByRole("button", { name: /успешных запусков/ });
+    await success.focus();
+    await page.keyboard.press("Space");
+    await expect(page.getByRole("tab", { name: "Запуски парсеров" })).toHaveAttribute("aria-selected", "true");
+    await page.getByRole("tab", { name: "Доставка", exact: true }).click();
+    await page.goBack();
+    await page.getByRole("button", { name: "Получено записей — открыть запуски парсеров" }).click();
+    await expect(page).toHaveURL(/#\/logs$/);
+    await expect(page.getByRole("tab", { name: "Запуски парсеров" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("heading", { name: "Запуски парсеров", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  });
+}
+
+for (const role of ["read_only", "support", "editor", "reviewer", "operator"]) {
+  test(`overview shortcuts respect ${role} permissions`, async ({ page }) => {
+    await mockOverviewNavigation(page, role);
+    await page.goto("/#/overview");
+    const metrics = page.locator(".metric-strip");
+    await expect(metrics).toBeVisible();
+    await expect(metrics.getByRole("button", { name: /пользователей бота/ })).toHaveCount(0);
+    const canOpenSources = role === "reviewer" || role === "operator";
+    await expect(metrics.getByRole("button", { name: /университета/ })).toHaveCount(canOpenSources ? 1 : 0);
+    await expect(page.getByRole("button", { name: "Открыть источники", exact: true })).toHaveCount(canOpenSources ? 1 : 0);
+    await metrics.getByRole("button", { name: /успешных запусков/ }).click();
+    await expect(page.getByRole("tab", { name: "Запуски парсеров" })).toHaveAttribute("aria-selected", "true");
+  });
+}
+
 test("general feedback can be read and filtered in support", async ({
   page,
 }) => {

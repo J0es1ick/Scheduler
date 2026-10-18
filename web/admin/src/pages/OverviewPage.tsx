@@ -26,12 +26,16 @@ import type { ViewName } from "../app/layout/AppLayout";
 
 export function OverviewPage({
   onNavigate,
+  onParserRuns,
   canEdit = false,
   canOperate = false,
+  canViewUsers = false,
 }: {
   canEdit?: boolean;
   canOperate?: boolean;
+  canViewUsers?: boolean;
   onNavigate: (view: ViewName) => void;
+  onParserRuns: () => void;
 }) {
   const { data, loading, error, reload } = useRemote(() => api.dashboard(), []);
 
@@ -153,39 +157,51 @@ export function OverviewPage({
           value={number.format(data.stats.lessons)}
           label="занятий в расписании"
           note={`${number.format(data.stats.groups)} групп`}
+          destination="Расписание"
+          onOpen={() => onNavigate("data")}
         />
         <Metric
           icon={UsersRound}
           value={number.format(data.stats.users)}
           label="пользователей бота"
           note={`${number.format(data.stats.subscriptions)} подписок`}
+          destination="Пользователи"
+          onOpen={canViewUsers ? () => onNavigate("users") : undefined}
         />
         <Metric
           icon={CircleGauge}
           value={`${data.stats.success_rate}%`}
           label="успешных запусков"
           note="за 7 дней"
+          destination="Запуски парсеров"
+          onOpen={onParserRuns}
         />
         <Metric
           icon={CalendarClock}
           value={String(data.stats.universities)}
           label="университета"
           note="активные источники"
+          destination="Источники"
+          onOpen={canOperate ? () => onNavigate("sources") : undefined}
         />
       </section>
 
       <section className="overview-main-grid">
-        <article className="card-surface source-overview-card">
+        <article className={`card-surface source-overview-card${canOperate ? " overview-navigable" : ""}`}>
+          {canOperate && (
+            <button
+              type="button"
+              className="overview-card-link"
+              aria-label="Открыть источники"
+              onClick={() => onNavigate("sources")}
+            />
+          )}
           <SectionTitle
             title="Источники"
             action={
-              <button
-                className="text-button"
-                disabled={!canOperate}
-                onClick={() => onNavigate("sources")}
-              >
+              canOperate && <span className="overview-card-hint" aria-hidden="true">
                 Настроить <ChevronRight size={15} />
-              </button>
+              </span>
             }
           />
           <div className="source-overview-list">
@@ -216,8 +232,18 @@ export function OverviewPage({
           </div>
         </article>
 
-        <article className="card-surface activity-card">
-          <SectionTitle eyebrow="7 дней" title="Получено записей" />
+        <article className="card-surface activity-card overview-navigable">
+          <button
+            type="button"
+            className="overview-card-link"
+            aria-label="Получено записей — открыть запуски парсеров"
+            onClick={onParserRuns}
+          />
+          <SectionTitle
+            eyebrow="7 дней"
+            title="Получено записей"
+            action={<span className="overview-card-hint" aria-hidden="true"><ChevronRight size={18} /></span>}
+          />
           <div
             className="bar-chart"
             aria-label="Количество полученных записей по дням"
@@ -257,7 +283,7 @@ export function OverviewPage({
         <SectionTitle
           title="Последние запуски"
           action={
-            <button className="text-button" onClick={() => onNavigate("logs")}>
+            <button className="text-button" onClick={onParserRuns}>
               Вся история <ChevronRight size={15} />
             </button>
           }
@@ -310,14 +336,29 @@ function Metric({
   value,
   label,
   note,
+  destination,
+  onOpen,
 }: {
   icon: typeof BookOpenCheck;
   value: string;
   label: string;
   note: string;
+  destination: string;
+  onOpen?: () => void;
 }) {
   return (
-    <article data-surface-light>
+    <article data-surface-light className={onOpen ? "overview-navigable" : undefined}>
+      {onOpen && (
+        <>
+          <button
+            type="button"
+            className="overview-card-link"
+            aria-label={`${value} ${label} — открыть раздел «${destination}»`}
+            onClick={onOpen}
+          />
+          <ChevronRight className="metric-link-arrow" size={16} aria-hidden="true" />
+        </>
+      )}
       <span className="metric-icon">
         <Icon size={19} />
       </span>

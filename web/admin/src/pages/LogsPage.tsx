@@ -5,9 +5,11 @@ import { ParserRuns } from "./ParserRuns";
 import { LogDelivery } from "./LogDelivery";
 import { LogTabs } from "./LogTabs";
 
+export type LogTab = "logs" | "parsers" | "delivery";
+
 export function LogsPage({ role }: { role: AdminRole }) {
   const canReadLogs = role === "owner" || role === "operator";
-  const [selection, setSelection] = useViewState(
+  const [selection, setSelection] = useViewState<LogTab>(
     "LogsPage:tab",
     canReadLogs ? "logs" : "parsers",
   );
@@ -24,7 +26,7 @@ export function LogsPage({ role }: { role: AdminRole }) {
         label="Разделы диагностики"
         options={options}
         value={tab}
-        onChange={setSelection}
+        onChange={(value) => setSelection(value as LogTab)}
       />
       <div
         role="tabpanel"
