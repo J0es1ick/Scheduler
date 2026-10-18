@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Check, X } from "lucide-react";
 import {
   dateLabel,
   lessonTypes,
@@ -41,8 +42,26 @@ export function LessonEditor({
       onClose();
   };
   useEffect(() => {
-    dialog.current?.showModal();
+    const element = dialog.current;
+    const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    element?.showModal();
+    element?.querySelector<HTMLElement>("header")?.focus();
+    window.dispatchEvent(new Event("scheduler:dialog-state"));
+    return () => {
+      element?.close();
+      document.body.style.overflow = overflow;
+      const destination = focused?.matches(":disabled")
+        ? focused.closest(".personal-day")?.querySelector<HTMLElement>("h2")
+        : focused;
+      destination?.focus({ preventScroll: true });
+      window.dispatchEvent(new Event("scheduler:dialog-state"));
+    };
   }, []);
+  useEffect(() => {
+    if (error) dialog.current?.querySelector('[role="alert"]')?.scrollIntoView({ block: "nearest" });
+  }, [error]);
   useEffect(() => {
     const before = (event: BeforeUnloadEvent) => {
       if (dirty) event.preventDefault();
@@ -103,7 +122,7 @@ export function LessonEditor({
       aria-labelledby="personal-edit-title"
     >
       <form onSubmit={(event) => void save(event)}>
-        <header>
+        <header tabIndex={-1}>
           <div>
             <small>{dateLabel(date)} · только для вас</small>
             <h2 id="personal-edit-title">Изменить занятие</h2>
@@ -115,146 +134,148 @@ export function LessonEditor({
             disabled={busy}
             aria-label="Закрыть"
           >
-            ×
+            <X size={20} aria-hidden="true" />
           </button>
         </header>
-        <fieldset disabled={busy}>
-          <label>
-            Предмет
-            <input
-              required
-              maxLength={300}
-              value={form.Subject}
-              onChange={(e) => setForm({ ...form, Subject: e.target.value })}
-            />
-          </label>
-          <label>
-            Преподаватель
-            <input
-              maxLength={300}
-              value={form.Teacher}
-              onChange={(e) => setForm({ ...form, Teacher: e.target.value })}
-            />
-          </label>
-          <div className="personal-form-row">
+        <div className="personal-dialog-body">
+          <fieldset disabled={busy}>
             <label>
-              Аудитория
+              Предмет
+              <input
+                required
+                maxLength={300}
+                value={form.Subject}
+                onChange={(e) => setForm({ ...form, Subject: e.target.value })}
+              />
+            </label>
+            <label>
+              Преподаватель
               <input
                 maxLength={300}
-                value={form.Room}
-                onChange={(e) => setForm({ ...form, Room: e.target.value })}
+                value={form.Teacher}
+                onChange={(e) => setForm({ ...form, Teacher: e.target.value })}
               />
             </label>
+            <div className="personal-form-row">
+              <label>
+                Аудитория
+                <input
+                  maxLength={300}
+                  value={form.Room}
+                  onChange={(e) => setForm({ ...form, Room: e.target.value })}
+                />
+              </label>
+              <label>
+                Тип
+                <select
+                  value={form.Type}
+                  onChange={(e) => setForm({ ...form, Type: e.target.value })}
+                >
+                  {Object.entries(lessonTypes).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="personal-form-row">
+              <label>
+                Начало
+                <input
+                  type="time"
+                  required
+                  value={form.TimeStart}
+                  onChange={(e) =>
+                    setForm({ ...form, TimeStart: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Окончание
+                <input
+                  type="time"
+                  required
+                  value={form.TimeEnd}
+                  onChange={(e) => setForm({ ...form, TimeEnd: e.target.value })}
+                />
+              </label>
+            </div>
+            <label className="personal-check personal-cancel-check">
+              <input
+                type="checkbox"
+                checked={cancelled}
+                onChange={(e) => setCancelled(e.target.checked)}
+              />
+              Отменить занятие для меня
+            </label>
             <label>
-              Тип
+              Применить
               <select
-                value={form.Type}
-                onChange={(e) => setForm({ ...form, Type: e.target.value })}
+                aria-label="Применить"
+                value={scope}
+                onChange={(e) =>
+                  setScope(e.target.value as "day" | "semester" | "selected")
+                }
               >
-                {Object.entries(lessonTypes).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
+                <option value="day">Только {dateLabel(date)}</option>
+                {item.can_repeat && (
+                  <>
+                    <option value="semester">
+                      Все подтверждённые повторы с этой даты
+                    </option>
+                    <option value="selected">Выбрать даты повторов</option>
+                  </>
+                )}
               </select>
             </label>
-          </div>
-          <div className="personal-form-row">
-            <label>
-              Начало
-              <input
-                type="time"
-                required
-                value={form.TimeStart}
-                onChange={(e) =>
-                  setForm({ ...form, TimeStart: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              Окончание
-              <input
-                type="time"
-                required
-                value={form.TimeEnd}
-                onChange={(e) => setForm({ ...form, TimeEnd: e.target.value })}
-              />
-            </label>
-          </div>
-          <label className="personal-check">
-            <input
-              type="checkbox"
-              checked={cancelled}
-              onChange={(e) => setCancelled(e.target.checked)}
-            />
-            Отменить занятие для меня
-          </label>
-          <label>
-            Применить
-            <select
-              aria-label="Применить"
-              value={scope}
-              onChange={(e) =>
-                setScope(e.target.value as "day" | "semester" | "selected")
-              }
-            >
-              <option value="day">Только {dateLabel(date)}</option>
-              {item.can_repeat && (
-                <>
-                  <option value="semester">
-                    Все подтверждённые повторы с этой даты
-                  </option>
-                  <option value="selected">Выбрать даты повторов</option>
-                </>
-              )}
-            </select>
-          </label>
-          {scope === "selected" && (
-            <fieldset className="personal-repeat-dates">
-              <legend>Даты повторов</legend>
-              {(item.repeats || []).map((repeat) => (
-                <label className="personal-check" key={repeat.date}>
-                  <input
-                    type="checkbox"
-                    checked={dates.includes(repeat.date)}
-                    onChange={(e) =>
-                      setDates(
-                        e.target.checked
-                          ? [...dates, repeat.date]
-                          : dates.filter((value) => value !== repeat.date),
-                      )
-                    }
-                  />
-                  {dateLabel(repeat.date)}
-                </label>
-              ))}
-            </fieldset>
-          )}
-          <p className="personal-note">
-            {scope === "selected"
-              ? `Выбрано дат: ${dates.length}.`
-              : scope === "semester"
-                ? `Подтверждено повторов: ${item.repeats?.length || 0}. До ${dateLabel(item.repeats?.at(-1)?.date || item.semester_end)}. Правки отдельных дат имеют приоритет.`
-                : "Другие даты останутся без изменений."}{" "}
-            Правки учитываются в боте, экспорте, ежедневной отправке и
-            напоминаниях.
-          </p>
-          <details>
-            <summary>По данным вуза</summary>
-            <p>
-              {item.original.Subject} · {item.original.TimeStart}–
-              {item.original.TimeEnd}
-              <br />
-              {item.original.Teacher || "Преподаватель не указан"} ·{" "}
-              {item.original.Room || "Аудитория не указана"}
+            {scope === "selected" && (
+              <fieldset className="personal-repeat-dates">
+                <legend>Даты повторов</legend>
+                {(item.repeats || []).map((repeat) => (
+                  <label className="personal-check" key={repeat.date}>
+                    <input
+                      type="checkbox"
+                      checked={dates.includes(repeat.date)}
+                      onChange={(e) =>
+                        setDates(
+                          e.target.checked
+                            ? [...dates, repeat.date]
+                            : dates.filter((value) => value !== repeat.date),
+                        )
+                      }
+                    />
+                    {dateLabel(repeat.date)}
+                  </label>
+                ))}
+              </fieldset>
+            )}
+            <p className="personal-note">
+              {scope === "selected"
+                ? `Выбрано дат: ${dates.length}.`
+                : scope === "semester"
+                  ? `Подтверждено повторов: ${item.repeats?.length || 0}. До ${dateLabel(item.repeats?.at(-1)?.date || item.semester_end)}. Правки отдельных дат имеют приоритет.`
+                  : "Другие даты останутся без изменений."}{" "}
+              Правки учитываются в боте, экспорте, ежедневной отправке и
+              напоминаниях.
             </p>
-          </details>
-        </fieldset>
-        {error && (
-          <p role="alert" className="personal-error">
-            {error}
-          </p>
-        )}
+            <details>
+              <summary>По данным вуза</summary>
+              <p>
+                {item.original.Subject} · {item.original.TimeStart}–
+                {item.original.TimeEnd}
+                <br />
+                {item.original.Teacher || "Преподаватель не указан"} ·{" "}
+                {item.original.Room || "Аудитория не указана"}
+              </p>
+            </details>
+          </fieldset>
+          {error && (
+            <p role="alert" className="personal-error">
+              {error}
+            </p>
+          )}
+        </div>
         <footer>
           <button
             className="button button-ghost"
@@ -269,6 +290,7 @@ export function LessonEditor({
             type="submit"
             disabled={busy || (scope === "selected" && !dates.length)}
           >
+            {!busy && <Check size={18} aria-hidden="true" />}
             {busy ? "Сохранение…" : "Сохранить"}
           </button>
         </footer>

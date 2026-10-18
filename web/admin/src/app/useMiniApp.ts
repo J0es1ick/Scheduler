@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-export function useMiniApp(view: string) {
+export function useMiniAppViewport() {
   useEffect(() => {
     const app = window.Telegram?.WebApp;
     const apply = () => {
@@ -22,20 +22,29 @@ export function useMiniApp(view: string) {
         "--app-viewport-height",
         `${height}px`,
       );
+      document.documentElement.style.setProperty(
+        "--app-viewport-top",
+        `${window.visualViewport?.offsetTop ?? 0}px`,
+      );
     };
     apply();
     window.visualViewport?.addEventListener("resize", apply);
+    window.visualViewport?.addEventListener("scroll", apply);
     app?.onEvent?.("viewportChanged", apply);
     app?.onEvent?.("safeAreaChanged", apply);
     app?.onEvent?.("contentSafeAreaChanged", apply);
     return () => {
       window.visualViewport?.removeEventListener("resize", apply);
+      window.visualViewport?.removeEventListener("scroll", apply);
       app?.offEvent?.("viewportChanged", apply);
       app?.offEvent?.("safeAreaChanged", apply);
       app?.offEvent?.("contentSafeAreaChanged", apply);
     };
   }, []);
+}
 
+export function useMiniApp(view: string) {
+  useMiniAppViewport();
   useEffect(() => {
     const back = window.Telegram?.WebApp?.BackButton;
     const update = () => {

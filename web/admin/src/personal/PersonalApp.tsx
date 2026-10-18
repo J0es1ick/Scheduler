@@ -1,14 +1,22 @@
 import { useEffect, useState } from "react";
 import {
   CalendarDays,
+  ArrowUpRight,
+  Check,
   ChevronLeft,
   ChevronRight,
   Pencil,
+  MapPin,
+  RefreshCw,
+  Repeat2,
   Shield,
   Undo2,
+  UserRound,
 } from "lucide-react";
 import { useTheme } from "../app/useTheme";
+import { useMiniAppViewport } from "../app/useMiniApp";
 import { ThemeSwitch } from "../app/ThemeSwitch";
+import { LoadingBlock } from "../components";
 import {
   dateLabel,
   lessonTypes,
@@ -27,10 +35,30 @@ import "./personal.css";
 
 export default function PersonalApp() {
   const theme = useTheme();
+  useMiniAppViewport();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
   const [chosen, setChosen] = useState(false);
+  useEffect(() => {
+    const back = window.Telegram?.WebApp?.BackButton;
+    const update = () => {
+      if ((profile?.is_admin && chosen) || document.querySelector(".personal-dialog[open]")) back?.show();
+      else back?.hide();
+    };
+    const onBack = () => {
+      const dialog = document.querySelector<HTMLDialogElement>(".personal-dialog[open]");
+      if (dialog) dialog.dispatchEvent(new Event("cancel", { cancelable: true }));
+      else setChosen(false);
+    };
+    update();
+    back?.onClick(onBack);
+    window.addEventListener("scheduler:dialog-state", update);
+    return () => {
+      back?.offClick(onBack);
+      window.removeEventListener("scheduler:dialog-state", update);
+    };
+  }, [chosen, profile?.is_admin]);
   useEffect(() => {
     let active = true;
     window.Telegram?.WebApp?.ready?.();
@@ -56,8 +84,8 @@ export default function PersonalApp() {
     <main className="personal-app">
       <header className="personal-header">
         <a href="/app" className="personal-brand">
-          <CalendarDays size={23} />
-          <span>Моё расписание</span>
+          <span className="personal-brand-mark"><CalendarDays size={22} aria-hidden="true" /></span>
+          <span><strong>Моё расписание</strong><small>Scheduler · только для вас</small></span>
         </a>
         <ThemeSwitch {...theme} />
       </header>
@@ -65,6 +93,7 @@ export default function PersonalApp() {
         <section className="personal-welcome">
           <h1>Расписание под ваш день</h1>
           <p>{error || "Открываем ваш профиль…"}</p>
+          {!error && <LoadingBlock rows={2} />}
           {error && (
             <button
               className="button button-primary"
@@ -80,19 +109,21 @@ export default function PersonalApp() {
           <h1>Куда перейдём?</h1>
           <div className="personal-destinations">
             <button onClick={() => setChosen(true)}>
-              <CalendarDays />
+              <CalendarDays aria-hidden="true" />
               <strong>Личное расписание</strong>
               <span>Настроить занятия только для себя</span>
+              <ArrowUpRight className="personal-destination-arrow" size={20} aria-hidden="true" />
             </button>
             <a href="/#/editor">
-              <Shield />
+              <Shield aria-hidden="true" />
               <strong>Админка</strong>
               <span>Управлять общим расписанием и сервисом</span>
+              <ArrowUpRight className="personal-destination-arrow" size={20} aria-hidden="true" />
             </a>
           </div>
         </section>
       ) : (
-        <>
+        <div className="personal-workspace">
           <div className="personal-intro">
             {profile.is_admin && (
               <button
@@ -109,7 +140,7 @@ export default function PersonalApp() {
             </p>
           </div>
           <PersonalCalendar profile={profile} />
-        </>
+        </div>
       )}
     </main>
   );
@@ -130,17 +161,24 @@ function PersonalCalendar({ profile }: { profile: Profile }) {
     </section>
   ) : (
     <>
-      <label className="personal-target">
-        Расписание
-        <select value={targetID} onChange={(e) => setTargetID(e.target.value)}>
-          {profile.targets.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-              {t.primary ? " · основное" : ""}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="personal-context">
+        <label className="personal-target">
+          Расписание
+          <select value={targetID} onChange={(e) => setTargetID(e.target.value)}>
+            {profile.targets.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+                {t.primary ? " · основное" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="personal-context-meta">
+          <span>{target.role === "teacher" ? "Преподаватель" : "Студент"}</span>
+          <strong>{target.university_name}</strong>
+          <small>Время вуза · {target.timezone}</small>
+        </div>
+      </div>
       <Calendar key={targetID} target={target} />
     </>
   );
@@ -152,6 +190,7 @@ function Calendar({ target }: { target: Target }) {
   const key = `${date}:${revision}`;
   const [loaded, setLoaded] = useState<{
     key: string;
+    date: string;
     data?: Schedule;
     error?: string;
   }>();
@@ -164,26 +203,35 @@ function Calendar({ target }: { target: Target }) {
   const [actionError, setActionError] = useState("");
   const [notice, setNotice] = useState("");
   useEffect(() => {
+    if (!notice) return;
+    const timeout = window.setTimeout(() => setNotice(""), 6000);
+    return () => window.clearTimeout(timeout);
+  }, [notice]);
+  useEffect(() => {
     let active = true;
     void request<Schedule>(
       `schedule?${new URLSearchParams({ target: target.id, from: date, to: shiftDate(date, 6) })}`,
     )
       .then((data) => {
-        if (active) setLoaded({ key, data });
+        if (active) setLoaded({ key, date, data });
       })
       .catch((error) => {
         if (active)
-          setLoaded({
+          setLoaded((previous) => ({
             key,
+            date,
+            data: previous?.date === date ? previous.data : undefined,
             error:
               error instanceof Error ? error.message : "Расписание недоступно",
-          });
+          }));
       });
     return () => {
       active = false;
     };
   }, [target.id, date, key]);
-  const current = loaded?.key === key ? loaded : undefined;
+  const current = loaded?.date === date ? loaded : undefined;
+  const loading = loaded?.key !== key;
+  const localToday = today(target.timezone);
   async function remove(change: Change) {
     if (
       !window.confirm(
@@ -247,72 +295,94 @@ function Calendar({ target }: { target: Target }) {
   }
   return (
     <>
-      <p className="personal-note">
-        {target.university_name} · {target.timezone}
-      </p>
-      <nav className="personal-date-nav" aria-label="Период расписания">
-        <button
-          className="button button-ghost"
-          aria-label="Предыдущие 7 дней"
-          onClick={() => setDate(shiftDate(date, -7))}
-        >
-          <ChevronLeft size={18} />
-        </button>
-        <label>
-          Начиная с
-          <input
-            aria-label="Начиная с"
-            type="date"
-            value={date}
-            onChange={(e) => {
-              if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value))
-                setDate(e.target.value);
-            }}
-          />
-        </label>
-        <button
-          className="button button-ghost"
-          aria-label="Следующие 7 дней"
-          onClick={() => setDate(shiftDate(date, 7))}
-        >
-          <ChevronRight size={18} />
-        </button>
-        <button
-          className="button button-ghost"
-          onClick={() => setDate(today(target.timezone))}
-        >
-          Сегодня
-        </button>
-        <button
-          className="button button-ghost"
-          onClick={() => setRevision((n) => n + 1)}
-        >
-          Обновить
-        </button>
-      </nav>
-      <p role="status" className="personal-note">
-        {notice}
-      </p>
+      <div className="personal-calendar-controls">
+        <nav className="personal-date-nav" aria-label="Период расписания">
+          <div className="personal-period-picker">
+            <button
+              className="button button-ghost"
+              aria-label="Предыдущие 7 дней"
+              onClick={() => setDate(shiftDate(date, -7))}
+            >
+              <ChevronLeft size={18} />
+            </button>
+            <label>
+              Начиная с
+              <input
+                aria-label="Начиная с"
+                type="date"
+                value={date}
+                onChange={(e) => {
+                  if (/^\d{4}-\d{2}-\d{2}$/.test(e.target.value))
+                    setDate(e.target.value);
+                }}
+              />
+            </label>
+            <button
+              className="button button-ghost"
+              aria-label="Следующие 7 дней"
+              onClick={() => setDate(shiftDate(date, 7))}
+            >
+              <ChevronRight size={18} />
+            </button>
+          </div>
+          <div className="personal-period-actions">
+            <button
+              className="button button-ghost"
+              onClick={() => setDate(today(target.timezone))}
+            >
+              Сегодня
+            </button>
+            <button
+              className="button button-ghost"
+              aria-label="Обновить расписание"
+              disabled={loading}
+              onClick={() => setRevision((n) => n + 1)}
+            >
+              <RefreshCw size={17} className={loading ? "is-loading" : ""} aria-hidden="true" />
+              <span>Обновить</span>
+            </button>
+          </div>
+        </nav>
+        {current?.data && current.data.days.length > 1 && (
+          <nav className="personal-week-strip" aria-label="Дни недели">
+            {current.data.days.map((day) => (
+              <button
+                key={day.date}
+                aria-label={`Перейти к ${dateLabel(day.date)}`}
+                aria-current={day.date === localToday ? "date" : undefined}
+                onClick={(event) => {
+                  const heading = document.getElementById(`personal-day-${day.date}`);
+                  heading?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "start" });
+                  if (event.detail === 0) heading?.focus({ preventScroll: true });
+                }}
+              >
+                <span>{new Date(`${day.date}T12:00:00`).toLocaleDateString("ru-RU", { weekday: "short" })}</span>
+                <strong>{Number(day.date.slice(-2))}</strong>
+                <i className={day.lessons.some((lesson) => !lesson.cancelled) ? "has-lessons" : ""} aria-hidden="true" />
+              </button>
+            ))}
+          </nav>
+        )}
+      </div>
+      <div role="status" aria-live="polite" className="personal-notice" data-visible={!!notice}>
+        {notice && <><Check size={18} aria-hidden="true" /><span>{notice}</span></>}
+      </div>
       {actionError && (
         <p role="alert" className="personal-error">
           {actionError}
         </p>
       )}
-      {!current ? (
-        <p role="status">Загружаем занятия…</p>
-      ) : current.error ? (
-        <p role="alert" className="personal-error">
-          {current.error}
-        </p>
-      ) : (
+      {current?.error && <p role="alert" className="personal-error">{current.error} <button className="text-button" onClick={() => setRevision((n) => n + 1)}>Повторить загрузку</button></p>}
+      {!current?.data && loading && <div className="personal-schedule-loading"><LoadingBlock rows={3} /></div>}
+      {current?.data && (
         <>
           <div className="personal-patterns">
             {current.data?.patterns?.map((pattern) => (
-              <p
-                className="personal-note"
+              <details
+                className="personal-pattern"
                 key={`${pattern.group_id}:${pattern.semester_id}`}
               >
-                <strong>
+                <summary><Repeat2 size={16} aria-hidden="true" /><strong>
                   {target.role === "teacher" ? `${pattern.group_name} · ` : ""}
                   {{
                     weekly: "Недельное",
@@ -320,14 +390,16 @@ function Calendar({ target }: { target: Target }) {
                     individual: "Индивидуальное",
                   }[pattern.kind] || "Индивидуальное"}{" "}
                   расписание
-                </strong>
-                {pattern.from && pattern.to
-                  ? ` · повторы подтверждены с ${dateLabel(pattern.from)} по ${dateLabel(pattern.to)}`
-                  : " · длительный повтор недель не подтверждён"}
-                {pattern.exceptions
-                  ? ` · недель с отличиями: ${pattern.exceptions}`
-                  : ""}
-              </p>
+                </strong><ChevronRight size={16} aria-hidden="true" /></summary>
+                <p>
+                  {pattern.from && pattern.to
+                    ? `Повторы подтверждены с ${dateLabel(pattern.from)} по ${dateLabel(pattern.to)}`
+                    : "Длительный повтор недель не подтверждён"}
+                  {pattern.exceptions
+                    ? ` · недель с отличиями: ${pattern.exceptions}`
+                    : ""}
+                </p>
+              </details>
             ))}
           </div>
           {current.data?.review && (
@@ -371,10 +443,10 @@ function Calendar({ target }: { target: Target }) {
               </div>
             </section>
           )}
-          <div className="personal-days">
+          <div className="personal-days" aria-busy={loading} key={date}>
             {current.data?.days.map((day) => (
               <section key={day.date} className="personal-day">
-                <h2>
+                <h2 id={`personal-day-${day.date}`} tabIndex={-1}>
                   <span>
                     {new Date(day.date + "T12:00:00").toLocaleDateString(
                       "ru-RU",
@@ -382,6 +454,7 @@ function Calendar({ target }: { target: Target }) {
                     )}
                   </span>
                   {dateLabel(day.date)}
+                  {day.date === localToday && <small className="personal-today">Сегодня</small>}
                 </h2>
                 <div className="personal-day-lessons">
                   {!day.lessons.length ? (
@@ -411,10 +484,10 @@ function Calendar({ target }: { target: Target }) {
                                 : ""}
                             </small>
                             <h3>{item.lesson.Subject}</h3>
-                            <p>
+                            <p><UserRound size={14} aria-hidden="true" />
                               {item.lesson.Teacher || "Преподаватель не указан"}
                             </p>
-                            <p>
+                            <p><MapPin size={14} aria-hidden="true" />
                               {item.lesson.Room
                                 ? `Аудитория ${item.lesson.Room}`
                                 : "Аудитория не указана"}
@@ -430,10 +503,10 @@ function Calendar({ target }: { target: Target }) {
                           <button
                             className="button button-ghost personal-edit"
                             aria-label={`Изменить ${item.lesson.Subject}, ${dateLabel(day.date)}`}
-                            disabled={!!current.data?.review || reviewing}
+                            disabled={loading || !!current.data?.review || reviewing}
                             onClick={() => setEditing({ date: day.date, item })}
                           >
-                            <Pencil size={16} />
+                            <Pencil size={16} aria-hidden="true" />
                             <span>Изменить</span>
                           </button>
                         </article>
@@ -444,7 +517,7 @@ function Calendar({ target }: { target: Target }) {
             ))}
           </div>
           <details className="personal-changes">
-            <summary>Мои правки · {current.data?.changes.length || 0}</summary>
+            <summary><Undo2 size={18} aria-hidden="true" /><span>Мои правки · {current.data?.changes.length || 0}</span><ChevronRight size={18} aria-hidden="true" /></summary>
             <p className="personal-note">
               Правка даты важнее правки семестра. Удалите правку, чтобы вернуть
               данные вуза или предыдущее правило. Правки снятых с публикации
@@ -479,18 +552,18 @@ function Calendar({ target }: { target: Target }) {
                       {change.cancelled
                         ? "Отмена"
                         : Object.keys(change.patch)
-                            .map(
-                              (field) =>
-                                ({
-                                  subject: "предмет",
-                                  teacher: "преподаватель",
-                                  room: "аудитория",
-                                  type: "тип",
-                                  time_start: "начало",
-                                  time_end: "окончание",
-                                })[field] || field,
-                            )
-                            .join(", ") || "Без отмены"}
+                          .map(
+                            (field) =>
+                              ({
+                                subject: "предмет",
+                                teacher: "преподаватель",
+                                room: "аудитория",
+                                type: "тип",
+                                time_start: "начало",
+                                time_end: "окончание",
+                              })[field] || field,
+                          )
+                          .join(", ") || "Без отмены"}
                     </p>
                   </div>
                   <button
