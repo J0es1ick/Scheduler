@@ -1,11 +1,11 @@
 @import "../../shared/fonts.css";
+@import "../../shared/motion.css";
 @import "./styles/tokens.css";
 @import "./styles/shell.css";
 @import "./styles/components.css";
 @import "./styles/pages.css";
 @import "./styles/editor.css";
 @import "./styles/snapshot-review.css";
-@import "./styles/motion.css";
 @import "./styles/responsive.css";
 
 @import "./styles/release.css";
@@ -13,3 +13,5 @@
 
 @import "./styles/workspace.css";
 @import "./styles/broadcasts.css";
+
+@import "./styles/motion.css";

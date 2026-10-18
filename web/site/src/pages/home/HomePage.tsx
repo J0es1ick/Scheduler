@@ -1,3 +1,4 @@
+import { useReveal } from "../../shared/ui/useReveal";
 import { usePublicInfo } from "../../features/public-info/usePublicInfo";
 import { projectLinks } from "../../shared/config/project";
 import { Footer } from "../../widgets/Footer";
@@ -11,12 +12,13 @@ import { UniversitiesSection } from "./sections/UniversitiesSection";
 import { WorkflowSection } from "./sections/WorkflowSection";
 
 export function HomePage() {
+  const reveal = useReveal();
   const { info, loading } = usePublicInfo();
   const botURL = info?.bot_url || projectLinks.bot;
   const projectURL = info?.project_url || projectLinks.source;
 
   return (
-    <div className="public-site">
+    <div className="public-site" ref={reveal}>
       <Header botURL={botURL} />
       <main>
         <HeroSection botURL={botURL} projectURL={projectURL} />

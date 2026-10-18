@@ -59,7 +59,11 @@ export function useTheme(): ThemeController {
 
   useLayoutEffect(() => {
     const root = document.documentElement;
+    root.dataset.themeChanging = "true";
     root.dataset.theme = theme;
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => { delete root.dataset.themeChanging; });
+    });
     const colors = getComputedStyle(root);
     document
       .querySelector('meta[name="theme-color"]')
@@ -69,6 +73,10 @@ export function useTheme(): ThemeController {
       app.setHeaderColor?.(colors.getPropertyValue("--paper-deep").trim());
       app.setBackgroundColor?.(colors.getPropertyValue("--paper").trim());
     }
+    return () => {
+      cancelAnimationFrame(frame);
+      delete root.dataset.themeChanging;
+    };
   }, [theme]);
 
   function setPreference(next: ThemePreference) {

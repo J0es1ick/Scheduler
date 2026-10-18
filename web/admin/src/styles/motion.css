@@ -1,19 +1,160 @@
-button,
-a,
-input,
-select,
-textarea {
-  transition:
-    background-color 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
+:root {
+  --radius: 10px;
 }
+
+:where(button, a, input, select, textarea, summary) {
+  transition:
+    color var(--motion-quick) ease,
+    background-color var(--motion-control) ease,
+    border-color var(--motion-control) ease,
+    box-shadow var(--motion-control) ease,
+    transform var(--motion-control) var(--ease-out);
+}
+
+.button, .icon-button, .topbar-audit, .dialog-close,
+.desktop-nav button, .login-submit {
+  border-radius: 8px;
+}
+
+.button-primary, .login-submit {
+  box-shadow: 0 1px 2px var(--shadow-soft), inset 0 1px 0 #ffffff20;
+}
+
+.card-surface, .source-card, .user-card, .metric-strip, .broadcast-preview {
+  border-radius: var(--radius);
+  box-shadow: 0 2px 6px var(--shadow-soft);
+}
+
+.desktop-nav {
+  position: relative;
+  isolation: isolate;
+}
+
+.nav-indicator {
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  inset-inline: 0;
+  height: var(--nav-height, 40px);
+  transform: translateY(var(--nav-position, 0px));
+  border-radius: 8px;
+  background: var(--olive-soft);
+  box-shadow: inset 3px 0 0 var(--olive);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform var(--motion-panel) var(--ease-out), opacity var(--motion-control) ease;
+}
+
+.desktop-nav[data-measured="true"] .nav-indicator { opacity: 1; }
+.desktop-nav[data-measured="true"] button.is-active { background: transparent; }
+.desktop-nav button.is-active::before { display: none; }
+.desktop-nav button svg { transition: transform var(--motion-control) var(--ease-out); }
+.desktop-nav button.is-active svg { transform: scale(1.06); }
+
+.page-transition {
+  min-width: 0;
+  animation: ui-fade-in var(--motion-control) ease-out;
+}
+
+.topbar-heading { animation: ui-rise-in var(--motion-panel) var(--ease-out); }
+.login-panel, .login-sheet-copy { animation: ui-rise-in 420ms var(--ease-out); }
+.metric-strip article { animation: ui-rise-in 360ms var(--ease-out) backwards; }
+.metric-strip article:nth-child(2) { animation-delay: 40ms; }
+.metric-strip article:nth-child(3) { animation-delay: 80ms; }
+.metric-strip article:nth-child(4) { animation-delay: 120ms; }
+
+.dialog-backdrop {
+  animation: ui-fade-in var(--motion-control) ease-out;
+  backdrop-filter: blur(3px);
+}
+
+.dialog-backdrop [role="dialog"], .personal-dialog[open] {
+  border-radius: 14px;
+  animation: ui-dialog-in var(--motion-panel) var(--ease-out);
+}
+
+.personal-dialog::backdrop { animation: ui-fade-in var(--motion-control) ease-out; }
+.group-search-results, .emoji-picker[open] > div { animation: ui-rise-in var(--motion-control) var(--ease-out); }
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 10px;
+  animation: ui-rise-in var(--motion-panel) var(--ease-out);
+}
+.toast > svg { flex-shrink: 0; color: var(--olive-dark); }
+.toast-error > svg { color: var(--red); }
+.toast > span { overflow-wrap: anywhere; }
+.state-block, .refresh-warning { animation: ui-fade-in var(--motion-control) ease-out; }
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  animation: none;
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--surface) 75%, transparent), transparent);
+  animation: skeleton-sweep 1.8s ease-in-out infinite;
+  animation-delay: inherit;
+}
+@keyframes skeleton-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+
+.theme-switch-thumb { transition: transform var(--motion-panel) var(--ease-out); }
+.theme-switch-track { transition: background-color var(--motion-control) ease, border-color var(--motion-control) ease; }
+
+.search-field:focus-within,
+.field input:focus-visible, .field select:focus-visible, .field textarea:focus-visible {
+  border-color: var(--olive);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .button:hover:not(:disabled), .login-submit:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px var(--shadow-soft);
+  }
+  .button-primary:hover:not(:disabled) { box-shadow: 0 4px 14px color-mix(in srgb, var(--olive) 18%, transparent); }
+  .icon-button:hover:not(:disabled), .dialog-close:hover:not(:disabled) { background: var(--olive-soft); }
+  .desktop-nav button:not(.is-active):hover { background: var(--surface-muted); }
+  .table-row, .broadcast-history-row { transition: background-color var(--motion-quick) ease; }
+  .table-row:hover, .broadcast-history-row:hover { background: var(--surface-muted); }
+}
+
+.button:active:not(:disabled), .icon-button:active:not(:disabled),
+.login-submit:active:not(:disabled), .mobile-nav button:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+  transition-duration: 80ms;
+}
+
+@media (max-width: 700px) {
+  .dialog-backdrop [role="dialog"] { animation-name: ui-rise-in; }
+  .toast-stack { max-width: calc(100vw - 24px); right: 12px; }
+  .toast { min-width: 0; max-width: 100%; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  *, *::before, *::after {
     animation: none !important;
     transition: none !important;
     scroll-behavior: auto !important;
   }
+  .button:hover:not(:disabled), .button:active:not(:disabled),
+  .icon-button:active:not(:disabled), .login-submit:hover:not(:disabled),
+  .login-submit:active:not(:disabled), .mobile-nav button:active:not(:disabled) {
+    transform: none;
+  }
+  .skeleton::after { display: none; }
+}
+
+:root[data-theme-changing] *,
+:root[data-theme-changing] *::before,
+:root[data-theme-changing] *::after {
+  transition-property: transform, opacity !important;
 }

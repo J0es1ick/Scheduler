@@ -242,7 +242,7 @@ export function SectionTitle({
 
 export function LoadingBlock({ rows = 3 }: { rows?: number }) {
   return (
-    <div className="loading-stack" aria-label="Загрузка">
+    <div className="loading-stack" role="status" aria-label="Загрузка">
       {Array.from({ length: rows }).map((_, index) => (
         <div
           className="skeleton"
@@ -363,7 +363,8 @@ export function Toasts({ items }: { items: ToastMessage[] }) {
     <div className="toast-stack" aria-live="polite">
       {items.map((item) => (
         <div key={item.id} className={`toast toast-${item.tone}`}>
-          {item.text}
+          {item.tone === "success" ? <Check size={18} aria-hidden="true" /> : <AlertCircle size={18} aria-hidden="true" />}
+          <span>{item.text}</span>
         </div>
       ))}
     </div>

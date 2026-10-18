@@ -9,7 +9,7 @@ interface StatisticsSectionProps {
 export function StatisticsSection({ info, loading }: StatisticsSectionProps) {
   return (
     <section className="public-stats" aria-label="Статистика проекта">
-      <div className="public-container public-stats-inner">
+      <div className="public-container public-stats-inner" data-reveal>
         <div className="public-stats-title">
           <span>
             {!loading && !info ? "Статистика недоступна" : "Показатели сервиса"}

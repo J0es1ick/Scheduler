@@ -3,7 +3,7 @@ import { technologyGroups } from "../content";
 export function TechnologiesSection() {
   return (
     <section className="public-section public-technologies" id="technologies">
-      <div className="public-container">
+      <div className="public-container" data-reveal>
         <details>
           <summary>На чём работает Scheduler</summary>
           <div className="public-tech-grid">

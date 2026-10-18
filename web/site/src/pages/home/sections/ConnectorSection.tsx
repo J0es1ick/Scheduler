@@ -51,7 +51,7 @@ export function ConnectorSection({ projectURL }: ConnectorSectionProps) {
   return (
     <section className="public-section public-connectors" id="connectors">
       <div className="public-container">
-        <div className="public-section-heading">
+        <div className="public-section-heading" data-reveal>
           <div>
             <span className="public-kicker">Открытые интеграции</span>
             <h2>Напишите парсер — его запуск возьмёт на себя Scheduler</h2>
@@ -63,7 +63,7 @@ export function ConnectorSection({ projectURL }: ConnectorSectionProps) {
           </p>
         </div>
 
-        <div className="public-connector-steps">
+        <div className="public-connector-steps" data-reveal>
           {steps.map((step) => {
             const Icon = step.icon;
             return (
@@ -79,7 +79,7 @@ export function ConnectorSection({ projectURL }: ConnectorSectionProps) {
           })}
         </div>
 
-        <div className="public-connector-kit">
+        <div className="public-connector-kit" data-reveal>
           <div>
             <span className="public-kicker">Быстрый старт</span>
             <h3>Начните с управляемого парсера</h3>

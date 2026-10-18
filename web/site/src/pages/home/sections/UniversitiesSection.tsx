@@ -8,7 +8,7 @@ export function UniversitiesSection({
 }) {
   return (
     <section className="public-section public-universities" id="universities">
-      <div className="public-container public-universities-grid">
+      <div className="public-container public-universities-grid" data-reveal>
         <div>
           <span className="public-kicker">Доступные вузы</span>
           <h2>

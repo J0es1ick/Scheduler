@@ -12,7 +12,7 @@ export function StatusSection({ sources }: { sources: PublicSourceStatus[] }) {
   return (
     <section className="public-section public-status" id="status">
       <div className="public-container">
-        <div className="public-section-heading">
+        <div className="public-section-heading" data-reveal>
           <div>
             <span className="public-kicker">Состояние данных</span>
             <h2>Состояние источников</h2>
@@ -22,7 +22,7 @@ export function StatusSection({ sources }: { sources: PublicSourceStatus[] }) {
             успешного обновления и текущее состояние.
           </p>
         </div>
-        <div className="public-status-list">
+        <div className="public-status-list" data-reveal>
           {!sources.length && (
             <p className="public-empty-state">
               Данные об источниках пока недоступны.

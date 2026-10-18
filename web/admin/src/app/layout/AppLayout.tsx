@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 import {
   Activity,
   CalendarDays,
@@ -139,6 +139,22 @@ export function AppLayout({
   themeControl: ReactNode;
   children: ReactNode;
 }) {
+  const navigationRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const nav = navigationRef.current;
+    if (!nav) return;
+    const measure = () => {
+      const selected = nav.querySelector<HTMLElement>('[aria-current="page"]');
+      if (!selected || !selected.offsetHeight) return;
+      nav.style.setProperty("--nav-position", `${selected.offsetTop}px`);
+      nav.style.setProperty("--nav-height", `${selected.offsetHeight}px`);
+      nav.dataset.measured = "true";
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(nav);
+    return () => observer.disconnect();
+  }, [view, user.role]);
   const current = pageCopy[view];
   const date = new Intl.DateTimeFormat("ru-RU", {
     weekday: "long",
@@ -150,7 +166,8 @@ export function AppLayout({
     <div className="app-shell">
       <aside className="sidebar">
         <LogoMark />
-        <nav className="desktop-nav" aria-label="Основная навигация">
+        <nav ref={navigationRef} className="desktop-nav" aria-label="Основная навигация">
+          <span className="nav-indicator" aria-hidden="true" />
           <span className="nav-caption">Управление</span>
           {navigation
             .filter((item) => canAccessView(item.id, user.role))
@@ -159,6 +176,7 @@ export function AppLayout({
               return (
                 <button
                   key={item.id}
+                  aria-current={view === item.id ? "page" : undefined}
                   className={view === item.id ? "is-active" : ""}
                   onClick={() => onNavigate(item.id)}
                 >
@@ -242,6 +260,7 @@ export function AppLayout({
         {canAccessView("overview", user.role) && (
           <button
             className={view === "overview" ? "is-active" : ""}
+            aria-current={view === "overview" ? "page" : undefined}
             onClick={() => onNavigate("overview")}
           >
             <LayoutDashboard size={20} />
@@ -251,6 +270,7 @@ export function AppLayout({
         {canAccessView("sources", user.role) && (
           <button
             className={view === "sources" ? "is-active" : ""}
+            aria-current={view === "sources" ? "page" : undefined}
             onClick={() => onNavigate("sources")}
           >
             <RadioTower size={20} />
@@ -260,6 +280,7 @@ export function AppLayout({
         {canAccessView("editor", user.role) && (
           <button
             className={`mobile-primary ${view === "editor" ? "is-active" : ""}`}
+            aria-current={view === "editor" ? "page" : undefined}
             onClick={() => onNavigate("editor")}
             aria-label="Редактор"
           >
@@ -269,6 +290,7 @@ export function AppLayout({
         {canAccessView("support", user.role) && (
           <button
             className={view === "support" ? "is-active" : ""}
+            aria-current={view === "support" ? "page" : undefined}
             onClick={() => onNavigate("support")}
           >
             <MessagesSquare size={20} />
@@ -278,6 +300,7 @@ export function AppLayout({
         {canAccessView("users", user.role) && (
           <button
             className={view === "users" ? "is-active" : ""}
+            aria-current={view === "users" ? "page" : undefined}
             onClick={() => onNavigate("users")}
           >
             <Users size={20} />

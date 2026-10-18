@@ -53,6 +53,7 @@ export function HeroSection({
           </div>
           <div
             className="public-example-tabs"
+            data-role={role}
             role="group"
             aria-label="Пример для роли"
           >
@@ -71,48 +72,52 @@ export function HeroSection({
               Преподаватель
             </button>
           </div>
-          <div className="public-product-date">
-            <strong>Понедельник</strong>
-            <span>
-              {role === "student" ? "Группа ИВТ-21" : "Павлова Елена Андреевна"}
-            </span>
-          </div>
-          <div className="public-example-lessons" aria-live="polite">
-            {[
-              {
-                time: "09:50",
-                end: "11:20",
-                title: "Информационные технологии",
-                type: "Лекция",
-                room: "А-206",
-                teacher: "Павлова Е.А.",
-                group: "ИВТ-21, ИВТ-22",
-              },
-              {
-                time: "12:10",
-                end: "13:40",
-                title: role === "student" ? "Иностранный язык" : "Базы данных",
-                type: "Практика",
-                room: "К-401",
-                teacher: "Смирнов А.В.",
-                group: "ИВТ-31",
-              },
-            ].map((lesson) => (
-              <article className="public-lesson" key={lesson.time}>
-                <div className="public-lesson-time">
-                  <time>{lesson.time}</time>
-                  <small>{lesson.end}</small>
-                </div>
-                <div>
-                  <span>{lesson.type}</span>
-                  <h3>{lesson.title}</h3>
-                  <p>Ауд. {lesson.room}</p>
-                  <small>
-                    {role === "student" ? lesson.teacher : lesson.group}
-                  </small>
-                </div>
-              </article>
-            ))}
+          <div className="public-example-content" aria-live="polite">
+            <div key={role} className="public-role-content">
+              <div className="public-product-date">
+                <strong>Понедельник</strong>
+                <span>
+                  {role === "student" ? "Группа ИВТ-21" : "Павлова Елена Андреевна"}
+                </span>
+              </div>
+              <div className="public-example-lessons">
+                {[
+                  {
+                    time: "09:50",
+                    end: "11:20",
+                    title: "Информационные технологии",
+                    type: "Лекция",
+                    room: "А-206",
+                    teacher: "Павлова Е.А.",
+                    group: "ИВТ-21, ИВТ-22",
+                  },
+                  {
+                    time: "12:10",
+                    end: "13:40",
+                    title: role === "student" ? "Иностранный язык" : "Базы данных",
+                    type: "Практика",
+                    room: "К-401",
+                    teacher: "Смирнов А.В.",
+                    group: "ИВТ-31",
+                  },
+                ].map((lesson) => (
+                  <article className="public-lesson" key={lesson.time}>
+                    <div className="public-lesson-time">
+                      <time>{lesson.time}</time>
+                      <small>{lesson.end}</small>
+                    </div>
+                    <div>
+                      <span>{lesson.type}</span>
+                      <h3>{lesson.title}</h3>
+                      <p>Ауд. {lesson.room}</p>
+                      <small>
+                        {role === "student" ? lesson.teacher : lesson.group}
+                      </small>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
           </div>
           <div className="public-product-footer">
             <Bell size={16} />

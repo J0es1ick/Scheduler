@@ -165,7 +165,7 @@ export default function App() {
       return;
     setView(next);
     window.history.pushState({ scheduler: true }, "", `#/${next}`);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({ top: 0, behavior: "instant" });
   }
 
   function notify(text: string, tone: ToastMessage["tone"] = "success") {
@@ -282,7 +282,7 @@ export default function App() {
         onLogout={() => void logout()}
       >
         <RefreshStatus />
-        {page}
+        <div className="page-transition" key={view}>{page}</div>
       </AppLayout>
       <Toasts items={toasts} />
     </>

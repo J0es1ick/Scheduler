@@ -2,7 +2,7 @@ export function WorkflowSection() {
   return (
     <section className="public-section public-workflow" id="how-it-works">
       <div className="public-container">
-        <div className="public-section-heading">
+        <div className="public-section-heading" data-reveal>
           <div>
             <span className="public-kicker">Начать пользоваться</span>
             <h2>Пара минут на настройку.</h2>
@@ -27,7 +27,7 @@ export function WorkflowSection() {
               text: "Выберите время ежедневного расписания. Напоминания, изменения и новости сервиса включаются отдельно.",
             },
           ].map((step, index) => (
-            <li key={step.title}>
+            <li key={step.title} data-reveal data-reveal-delay={index * 60}>
               <span>{String(index + 1).padStart(2, "0")}</span>
               <div>
                 <h3>{step.title}</h3>
