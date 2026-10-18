@@ -57,8 +57,13 @@ export function OverviewPage({
           </p>
         </div>
         <div className="intro-actions">
-          <button className="button button-ghost" onClick={() => void reload()}>
-            <RefreshCw size={16} /> Обновить
+          <button
+            className="button button-ghost"
+            disabled={loading}
+            aria-busy={loading}
+            onClick={() => void reload()}
+          >
+            <RefreshCw size={16} className={loading ? "refresh-spinning" : undefined} /> Обновить
           </button>
           <button
             className="button button-primary"
@@ -312,12 +317,12 @@ function Metric({
   note: string;
 }) {
   return (
-    <article>
+    <article data-surface-light>
       <span className="metric-icon">
         <Icon size={19} />
       </span>
       <div>
-        <strong>{value}</strong>
+        <strong key={value} className="metric-value">{value}</strong>
         <span>{label}</span>
       </div>
       <em>{note}</em>

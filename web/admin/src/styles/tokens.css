@@ -9,15 +9,15 @@
   font-variant-numeric: tabular-nums;
   text-rendering: optimizeLegibility;
 
-  --paper: #f5f6f8;
-  --paper-deep: #eef0f3;
+  --paper: #f2f5f2;
+  --paper-deep: #e9efea;
   --surface: #ffffff;
-  --surface-muted: #f8f9fb;
+  --surface-muted: #f5f8f5;
   --ink: #171c24;
   --muted: #586474;
   --muted-light: #647184;
-  --line: #dce1e8;
-  --line-strong: #bdc6d2;
+  --line: #d9e2dc;
+  --line-strong: #b7c8bd;
   --olive: #23724e;
   --olive-dark: #185638;
   --olive-soft: #e8f3ec;
@@ -44,7 +44,7 @@
   --logo-border: #185638;
   --logo-ink: #ffffff;
   --surface-overlay: #ffffff;
-  --hover-border: #b6c4d8;
+  --hover-border: #a8c8b4;
   --focus-ring: rgba(35, 114, 78, 0.22);
   --backdrop: rgba(16, 24, 40, 0.5);
   --shadow-soft: rgba(15, 25, 45, 0.04);

@@ -1,4 +1,5 @@
-import { useLayoutEffect, useRef, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { installSurfaceLight } from "../../../../shared/surfaceLight";
 import {
   Activity,
   CalendarDays,
@@ -140,6 +141,10 @@ export function AppLayout({
   children: ReactNode;
 }) {
   const navigationRef = useRef<HTMLElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (shellRef.current) return installSurfaceLight(shellRef.current);
+  }, []);
   useLayoutEffect(() => {
     const nav = navigationRef.current;
     if (!nav) return;
@@ -163,7 +168,7 @@ export function AppLayout({
   }).format(new Date());
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" ref={shellRef}>
       <aside className="sidebar">
         <LogoMark />
         <nav ref={navigationRef} className="desktop-nav" aria-label="Основная навигация">
