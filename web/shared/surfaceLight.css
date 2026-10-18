@@ -1,0 +1,23 @@
+[data-surface-light] {
+  position: relative;
+  isolation: isolate;
+}
+[data-surface-light]::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(260px circle at var(--light-x, 50%) var(--light-y, 0%), var(--surface-light, #a6edbb12), transparent 80%);
+  opacity: 0;
+  transition: opacity 280ms ease;
+  pointer-events: none;
+}
+[data-light-active]::before {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce), (hover: none) {
+  [data-surface-light]::before {
+    display: none;
+  }
+}

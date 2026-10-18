@@ -27,7 +27,7 @@ export function WorkflowSection() {
               text: "Выберите время ежедневного расписания. Напоминания, изменения и новости сервиса включаются отдельно.",
             },
           ].map((step, index) => (
-            <li key={step.title} data-reveal data-reveal-delay={index * 60}>
+            <li key={step.title} data-surface-light data-reveal data-reveal-delay={index * 60}>
               <span>{String(index + 1).padStart(2, "0")}</span>
               <div>
                 <h3>{step.title}</h3>

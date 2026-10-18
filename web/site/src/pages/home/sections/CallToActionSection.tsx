@@ -13,14 +13,13 @@ export function CallToActionSection({
 }: CallToActionSectionProps) {
   return (
     <section className="public-final-cta">
-      <div className="public-container public-final-card">
+      <div className="public-container public-final-card" data-reveal>
         <div>
-          <span className="public-kicker">Готово к проверке</span>
-          <h2>Откройте бота и выберите свою группу</h2>
+          <span className="public-kicker">Начните с вашего вуза</span>
+          <h2>Пусть расписание будет под рукой.</h2>
           <p>
-            Расписание, подписки и уведомления доступны прямо в Telegram. Если
-            вашего учебного заведения пока нет, его можно предложить через
-            горячую линию.
+            Выберите роль и найдите свою группу или ФИО. Следующие пары,
+            личные правки и напоминания — всё в Telegram.
           </p>
         </div>
         <div className="public-final-actions">

@@ -46,82 +46,88 @@ export function HeroSection({
             <Check size={15} /> Вы выбираете, какие сообщения получать
           </p>
         </div>
-        <div className="public-hero-product" aria-label="Пример расписания">
-          <div className="public-product-heading">
-            <span>Внутри бота</span>
-            <small>Пример</small>
+        <div className="public-product-stage">
+          <div className="public-stage-label">
+            <span>На каждый день</span>
+            <span>В одном сообщении</span>
           </div>
-          <div
-            className="public-example-tabs"
-            data-role={role}
-            role="group"
-            aria-label="Пример для роли"
-          >
-            <button
-              type="button"
-              aria-pressed={role === "student"}
-              onClick={() => setRole("student")}
+          <div className="public-hero-product" aria-label="Пример расписания" data-surface-light>
+            <div className="public-product-heading">
+              <span>Внутри бота</span>
+              <small>Пример</small>
+            </div>
+            <div
+              className="public-example-tabs"
+              data-role={role}
+              role="group"
+              aria-label="Пример для роли"
             >
-              Студент
-            </button>
-            <button
-              type="button"
-              aria-pressed={role === "teacher"}
-              onClick={() => setRole("teacher")}
-            >
-              Преподаватель
-            </button>
-          </div>
-          <div className="public-example-content" aria-live="polite">
-            <div key={role} className="public-role-content">
-              <div className="public-product-date">
-                <strong>Понедельник</strong>
-                <span>
-                  {role === "student" ? "Группа ИВТ-21" : "Павлова Елена Андреевна"}
-                </span>
-              </div>
-              <div className="public-example-lessons">
-                {[
-                  {
-                    time: "09:50",
-                    end: "11:20",
-                    title: "Информационные технологии",
-                    type: "Лекция",
-                    room: "А-206",
-                    teacher: "Павлова Е.А.",
-                    group: "ИВТ-21, ИВТ-22",
-                  },
-                  {
-                    time: "12:10",
-                    end: "13:40",
-                    title: role === "student" ? "Иностранный язык" : "Базы данных",
-                    type: "Практика",
-                    room: "К-401",
-                    teacher: "Смирнов А.В.",
-                    group: "ИВТ-31",
-                  },
-                ].map((lesson) => (
-                  <article className="public-lesson" key={lesson.time}>
-                    <div className="public-lesson-time">
-                      <time>{lesson.time}</time>
-                      <small>{lesson.end}</small>
-                    </div>
-                    <div>
-                      <span>{lesson.type}</span>
-                      <h3>{lesson.title}</h3>
-                      <p>Ауд. {lesson.room}</p>
-                      <small>
-                        {role === "student" ? lesson.teacher : lesson.group}
-                      </small>
-                    </div>
-                  </article>
-                ))}
+              <button
+                type="button"
+                aria-pressed={role === "student"}
+                onClick={() => setRole("student")}
+              >
+                Студент
+              </button>
+              <button
+                type="button"
+                aria-pressed={role === "teacher"}
+                onClick={() => setRole("teacher")}
+              >
+                Преподаватель
+              </button>
+            </div>
+            <div className="public-example-content" aria-live="polite">
+              <div key={role} className="public-role-content">
+                <div className="public-product-date">
+                  <strong>Понедельник</strong>
+                  <span>
+                    {role === "student" ? "Группа ИВТ-21" : "Павлова Елена Андреевна"}
+                  </span>
+                </div>
+                <div className="public-example-lessons">
+                  {[
+                    {
+                      time: "09:50",
+                      end: "11:20",
+                      title: "Информационные технологии",
+                      type: "Лекция",
+                      room: "А-206",
+                      teacher: "Павлова Е.А.",
+                      group: "ИВТ-21, ИВТ-22",
+                    },
+                    {
+                      time: "12:10",
+                      end: "13:40",
+                      title: role === "student" ? "Иностранный язык" : "Базы данных",
+                      type: "Практика",
+                      room: "К-401",
+                      teacher: "Смирнов А.В.",
+                      group: "ИВТ-31",
+                    },
+                  ].map((lesson) => (
+                    <article className="public-lesson" key={lesson.time}>
+                      <div className="public-lesson-time">
+                        <time>{lesson.time}</time>
+                        <small>{lesson.end}</small>
+                      </div>
+                      <div>
+                        <span>{lesson.type}</span>
+                        <h3>{lesson.title}</h3>
+                        <p>Ауд. {lesson.room}</p>
+                        <small>
+                          {role === "student" ? lesson.teacher : lesson.group}
+                        </small>
+                      </div>
+                    </article>
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
-          <div className="public-product-footer">
-            <Bell size={16} />
-            <span>Каждый день в 07:00 — если захотите</span>
+            <div className="public-product-footer">
+              <Bell size={16} />
+              <span>Каждый день в 07:00 — если захотите</span>
+            </div>
           </div>
         </div>
       </div>

@@ -1,16 +1,18 @@
 :root {
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-  color: #171c24;
-  background: #f7f8fa;
+  color-scheme: dark;
+  color: var(--ink);
+  background: var(--paper);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   font-size: 16px;
   line-height: 1.55;
-  --paper: #f7f8fa;
-  --surface: #ffffff;
-  --ink: #171c24;
-  --muted: #596576;
-  --line: #dce1e8;
-  --accent: #23724e;
-  --accent-soft: #e8f3ec;
+  --paper: #0b1211;
+  --surface: #16221f;
+  --ink: #edf6f0;
+  --muted: #acbfb4;
+  --line: #ffffff20;
+  --accent: #a6edbb;
+  --accent-soft: #213d30;
+  --on-accent: #11281b;
 }
