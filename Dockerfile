@@ -14,7 +14,7 @@ COPY web/site/ ./
 COPY web/shared/ /src/web/shared/
 RUN npm run build
 
-FROM golang:1.26.10-alpine AS go-builder
+FROM golang:1.27.3-alpine AS go-builder
 ARG VERSION=dev
 ARG COMMIT=local
 ARG BUILD_TIME=unknown
