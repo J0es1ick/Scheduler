@@ -26,12 +26,12 @@ paths:
             schema:
               $ref: "../schema/schedule-snapshot-v1.json"
       responses:
-        "202": { description: Снимок поставлен в очередь }
-        "200": { description: Повтор ранее принятого снимка }
-        "401": { description: Подпись отклонена }
-        "413": { description: Превышен допустимый размер данных }
-        "422": { description: Данные не соответствуют контракту }
-        "429": { description: Превышено ограничение частоты запросов }
+        "202": { description: "Снимок поставлен в очередь" }
+        "200": { description: "Повтор ранее принятого снимка" }
+        "401": { description: "Подпись отклонена" }
+        "413": { description: "Превышен допустимый размер данных" }
+        "422": { description: "Данные не соответствуют контракту" }
+        "429": { description: "Превышено ограничение частоты запросов" }
   /api/v1/connectors/{connectorId}/runs/{runId}:
     get:
       summary: Получить состояние обработки
@@ -49,7 +49,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RunStatus"
-        "404": { description: Запуск не найден }
+        "404": { description: "Запуск не найден" }
 components:
   schemas:
     RunStatus:

@@ -1,0 +1,72 @@
+name: Semgrep
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "41 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: semgrep-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Code security
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    env:
+      SEMGREP_IMAGE: semgrep/semgrep:1.182.0@sha256:4a34048c04fef049f71665047f074cffb00cc3d89482f965a5cd151d589237af
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Scan source code
+        id: scan
+        shell: bash
+        run: |
+          report_dir="$RUNNER_TEMP/semgrep"
+          mkdir -p "$report_dir"
+          status=0
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE:ro" \
+            --volume "$report_dir:/reports" \
+            --workdir "$GITHUB_WORKSPACE" \
+            --env GIT_CONFIG_COUNT=1 \
+            --env GIT_CONFIG_KEY_0=safe.directory \
+            --env "GIT_CONFIG_VALUE_0=$GITHUB_WORKSPACE" \
+            "$SEMGREP_IMAGE" semgrep scan \
+            --config p/ci \
+            --oss-only --metrics off --disable-version-check \
+            --error --strict \
+            --json-output /reports/semgrep.json \
+            --sarif-output /reports/semgrep.sarif . || status=$?
+          if [ -s "$report_dir/semgrep.sarif" ]; then
+            printf 'report=true\n' >> "$GITHUB_OUTPUT"
+          fi
+          exit "$status"
+      - name: Save scan reports
+        if: always() && steps.scan.outputs.report == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: semgrep-reports
+          path: ${{ runner.temp }}/semgrep/
+          retention-days: 14
+          if-no-files-found: error
+      - name: Publish code scanning results
+        if: >-
+          always() && steps.scan.outputs.report == 'true' &&
+          github.actor != 'dependabot[bot]' &&
+          (github.event_name != 'pull_request' ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938
+        with:
+          sarif_file: ${{ runner.temp }}/semgrep/semgrep.sarif
+          category: semgrep-ce
