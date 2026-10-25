@@ -112,6 +112,137 @@ async function mockOverviewNavigation(page: Page, role = "owner") {
   }
 }
 
+function overviewNotices() {
+  return {
+    ...dashboard,
+    sources: [{
+      id: "ispu", university_name: "ИГЭУ", lesson_count: 1200,
+      health: "error", last_error: "Источник недоступен", quarantined_count: 0,
+    }],
+    operations: {
+      ...dashboard.operations,
+      sources_error: 1,
+      failed_outbox: 16,
+      daily_worker: {
+        last_finished_at: "2026-08-03T12:00:30Z",
+        last_processed: 0,
+        last_failures: 0,
+        last_error: "",
+      },
+    },
+  };
+}
+
+async function refreshOverview(page: Page) {
+  const response = page.waitForResponse("**/api/dashboard");
+  const refresh = page.getByRole("button", { name: "Обновить", exact: true });
+  await refresh.click();
+  await response;
+  await expect(refresh).toBeEnabled();
+}
+
+for (const width of [320, 1440]) {
+  test(`overview notices can be dismissed independently at ${width}px`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await mockOverviewNavigation(page);
+    const data = overviewNotices();
+    await page.route("**/api/dashboard", (route) => json(route, data));
+    await page.goto("/#/overview");
+    const notices = page.locator(".dismissible-notice");
+    await expect(notices).toHaveCount(3);
+    await expect(page.getByRole("region", { name: "Ежедневная отправка расписания" })).toHaveClass(/notice-neutral/);
+    for (const close of await page.getByRole("button", { name: /^Скрыть уведомление/ }).all()) {
+      const box = await close.boundingBox();
+      expect(box!.width).toBeGreaterThanOrEqual(44);
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await page.screenshot({ path: info.outputPath("notices.png"), fullPage: true, animations: "disabled" });
+    const closeDelivery = page.getByRole("button", { name: "Скрыть уведомление «Доставка сообщений»" });
+    await closeDelivery.focus();
+    await page.keyboard.press("Enter");
+    await expect(notices).toHaveCount(2);
+    await page.getByRole("button", { name: "Скрыть уведомление «Ежедневная отправка расписания»" }).click();
+    data.operations.checked_at = "2026-08-03T12:02:00Z";
+    data.operations.daily_worker.last_finished_at = "2026-08-03T12:01:50Z";
+    data.operations.daily_worker.last_processed = 5;
+    await refreshOverview(page);
+    await expect(notices).toHaveCount(1);
+    await page.getByRole("button", { name: "Проверить источники", exact: true }).click();
+    await expect(page).toHaveURL(/#\/sources$/);
+    await page.goBack();
+    await expect(notices).toHaveCount(1);
+    await page.getByRole("button", { name: "Скрыть уведомление «Проблемы источников»" }).click();
+    await expect(notices).toHaveCount(0);
+  });
+}
+
+test("overview notices return for changed problems and after recovery", async ({ page }) => {
+  await mockOverviewNavigation(page);
+  const data = overviewNotices();
+  await page.route("**/api/dashboard", (route) => json(route, data));
+  await page.goto("/#/overview");
+  const source = page.getByRole("region", { name: "Проблемы источников" });
+  const delivery = page.getByRole("region", { name: "Доставка сообщений" });
+  const daily = page.getByRole("region", { name: "Ежедневная отправка расписания" });
+  for (const notice of [source, delivery, daily]) await notice.getByRole("button", { name: /^Скрыть/ }).click();
+  data.sources[0].last_error = "Новый снимок требует проверки";
+  data.operations.failed_outbox = 17;
+  data.operations.daily_worker.last_error = "Проверка завершилась с ошибкой";
+  data.operations.daily_worker.last_failures = 1;
+  await refreshOverview(page);
+  for (const notice of [source, delivery, daily]) await expect(notice).toBeVisible();
+  await expect(daily).toHaveClass(/notice-warning/);
+  await expect(daily).toContainText("Проверка завершилась с ошибкой");
+  for (const notice of [source, delivery, daily]) await notice.getByRole("button", { name: /^Скрыть/ }).click();
+  data.operations.sources_error = 0;
+  data.sources[0].health = "healthy";
+  data.operations.failed_outbox = 0;
+  data.operations.daily_worker.last_error = "";
+  data.operations.daily_worker.last_failures = 0;
+  await refreshOverview(page);
+  await expect(source).toHaveCount(0);
+  await expect(delivery).toHaveCount(0);
+  await expect(daily).toHaveClass(/notice-neutral/);
+  await daily.getByRole("button", { name: /^Скрыть/ }).click();
+  data.operations.sources_error = 1;
+  data.sources[0].health = "error";
+  data.operations.failed_outbox = 17;
+  data.operations.checked_at = "2026-08-03T12:05:00Z";
+  await refreshOverview(page);
+  for (const notice of [source, delivery, daily]) await expect(notice).toBeVisible();
+  await expect(daily).toContainText("Проверка давно не выполнялась.");
+  await delivery.getByRole("button", { name: "Открыть диагностику" }).click();
+  await expect(page).toHaveURL(/#\/logs$/);
+});
+
+test("dismissed refresh errors stay hidden during retries and return after recovery", async ({ page }) => {
+  await mockAuthenticated(page);
+  let failed = false;
+  await page.route("**/api/dashboard", (route) => json(route,
+    failed ? { error: "Источник временно недоступен" } : dashboard, failed ? 503 : 200));
+  await page.goto("/#/overview");
+  await expect(page.locator(".metric-strip")).toBeVisible();
+  const notice = page.getByRole("alert", { name: "Не удалось обновить данные" });
+  failed = true;
+  await refreshOverview(page);
+  await expect(notice).toBeVisible();
+  await notice.getByRole("button", { name: /^Скрыть/ }).click();
+  await expect(notice).toHaveCount(0);
+  await refreshOverview(page);
+  await expect(notice).toHaveCount(0);
+  failed = false;
+  await refreshOverview(page);
+  failed = true;
+  await refreshOverview(page);
+  await expect(notice).toBeVisible();
+  failed = false;
+  await refreshOverview(page);
+  await expect(notice).toHaveCount(0);
+});
+
 for (const width of [390, 1440]) {
   test(`overview cards open their matching sections at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });

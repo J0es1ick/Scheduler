@@ -22,6 +22,7 @@ import {
   StatusPill,
 } from "../components";
 import { useRemote } from "../hooks";
+import { DismissibleNotice } from "../components/DismissibleNotice";
 import type { ViewName } from "../app/layout/AppLayout";
 
 export function OverviewPage({
@@ -49,6 +50,28 @@ export function OverviewPage({
   if (!data) return null;
 
   const maxRecords = Math.max(1, ...data.trend.map((point) => point.records));
+  const operations = data.operations;
+  const sourceSignature = operations.sources_stale + operations.sources_error + operations.sources_quarantined > 0
+    ? JSON.stringify([
+      operations.sources_stale, operations.sources_error, operations.sources_quarantined,
+      data.sources
+        .filter((source) => ["stale", "error", "quarantined", "empty"].includes(source.health))
+        .map((source) => [source.id, source.health, source.last_error, source.quarantined_count])
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    ])
+    : null;
+  const pending = operations.pending_notifications + operations.pending_outbox;
+  const failed = operations.failed_notifications + operations.failed_outbox;
+  const deliverySignature = pending + failed > 0
+    ? JSON.stringify([operations.failed_notifications, operations.failed_outbox, operations.failed_service_updates ?? 0])
+    : null;
+  const daily = operations.daily_worker;
+  const dailyStale = Boolean(daily?.last_finished_at &&
+    Date.parse(operations.checked_at) - Date.parse(daily.last_finished_at) > 180_000);
+  const dailySignature = !daily ? null : JSON.stringify([
+    daily.last_error, daily.last_failures > 0, Boolean(daily.last_finished_at), dailyStale,
+  ]);
+  const dailyHealthy = Boolean(daily?.last_finished_at && !daily.last_error && !daily.last_failures && !dailyStale);
 
   return (
     <div className="page-stack overview-page">
@@ -79,20 +102,11 @@ export function OverviewPage({
         </div>
       </div>
 
-      {data.operations.sources_stale +
-        data.operations.sources_error +
-        data.operations.sources_quarantined >
-        0 && (
-        <section className="operations-warning">
-          <CircleGauge size={20} />
-          <div>
-            <strong>Проблемы источников</strong>
-            <span>
-              Устарели: {data.operations.sources_stale}. Ошибки:{" "}
-              {data.operations.sources_error}. На проверке:{" "}
-              {data.operations.sources_quarantined}.
-            </span>
-          </div>
+      <DismissibleNotice
+        id="overview-sources"
+        title="Проблемы источников"
+        signature={sourceSignature}
+        action={
           <button
             className="button button-ghost"
             disabled={!canOperate}
@@ -100,56 +114,49 @@ export function OverviewPage({
           >
             Проверить источники
           </button>
-        </section>
-      )}
-      {data.operations.pending_notifications +
-        data.operations.pending_outbox +
-        data.operations.failed_notifications +
-        data.operations.failed_outbox >
-        0 && (
-        <section className="operations-warning">
-          <CircleGauge size={20} />
-          <div>
-            <strong>Доставка сообщений</strong>
-            <span>
-              Ожидают:{" "}
-              {data.operations.pending_notifications +
-                data.operations.pending_outbox}
-              . Ошибки:{" "}
-              {data.operations.failed_notifications +
-                data.operations.failed_outbox}
-              . Массовая отправка занимает время.
-              <br />
-              Рассылки: {data.operations.pending_service_updates ??
-                0} ожидают, {data.operations.failed_service_updates ?? 0}{" "}
-              ошибок. Запросы согласия:{" "}
-              {data.operations.pending_service_updates_prompts ?? 0}.
-            </span>
-          </div>
+        }
+      >
+        <span>
+          Устарели: {operations.sources_stale}. Ошибки: {operations.sources_error}.
+          На проверке: {operations.sources_quarantined}.
+        </span>
+      </DismissibleNotice>
+      <DismissibleNotice
+        id="overview-delivery"
+        title="Доставка сообщений"
+        signature={deliverySignature}
+        action={
           <button
             className="button button-ghost"
             onClick={() => onNavigate("logs")}
           >
             Открыть диагностику
           </button>
-        </section>
-      )}
-
-      {data.operations.daily_worker && (
-        <section className="operations-warning">
-          <CircleGauge size={20} />
-          <div>
-            <strong>Ежедневная отправка расписания</strong>
-            <span>
-              {data.operations.daily_worker.last_finished_at
-                ? `Последняя проверка: ${new Date(data.operations.daily_worker.last_finished_at).toLocaleString("ru-RU")}. Обработано: ${data.operations.daily_worker.last_processed}.`
-                : "Проверка ещё не выполнялась."}
-              {data.operations.daily_worker.last_error &&
-                ` Ошибка: ${data.operations.daily_worker.last_error}`}
-            </span>
-          </div>
-        </section>
-      )}
+        }
+      >
+        <span>
+          Ожидают: {pending}. Ошибки: {failed}. Массовая отправка занимает время.
+          <br />
+          Рассылки: {operations.pending_service_updates ?? 0} ожидают,{" "}
+          {operations.failed_service_updates ?? 0} ошибок. Запросы согласия:{" "}
+          {operations.pending_service_updates_prompts ?? 0}.
+        </span>
+      </DismissibleNotice>
+      <DismissibleNotice
+        id="overview-daily"
+        title="Ежедневная отправка расписания"
+        signature={dailySignature}
+        tone={dailyHealthy ? "neutral" : "warning"}
+        icon={CalendarClock}
+      >
+        <span>
+          {daily?.last_finished_at
+            ? `Последняя проверка: ${new Date(daily.last_finished_at).toLocaleString("ru-RU")}. Обработано: ${daily.last_processed}.`
+            : "Проверка ещё не выполнялась."}
+          {dailyStale && " Проверка давно не выполнялась."}
+          {daily?.last_error && ` Ошибка: ${daily.last_error}`}
+        </span>
+      </DismissibleNotice>
 
       <section className="metric-strip">
         <Metric

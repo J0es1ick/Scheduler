@@ -26,13 +26,16 @@ export function useRemote<T>(
     setLoading(true);
     setError("");
     window.dispatchEvent(
-      new CustomEvent("scheduler:refresh-status", { detail: { id: remoteID } }),
+      new CustomEvent("scheduler:refresh-status", { detail: { id: remoteID, loading: true } }),
     );
     try {
       const result = await load();
       if (request === requestSequence.current) {
         setData(result);
         updatedAt.current = Date.now();
+        window.dispatchEvent(
+          new CustomEvent("scheduler:refresh-status", { detail: { id: remoteID, updatedAt: updatedAt.current } }),
+        );
       }
     } catch (caught) {
       if (request === requestSequence.current) {
