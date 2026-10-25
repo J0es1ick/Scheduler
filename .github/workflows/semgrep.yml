@@ -28,6 +28,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.12"
+      - name: Test finding policy
+        run: python -m unittest discover -s scripts/tests -p test_semgrep_gate.py -v
       - name: Scan source code
         id: scan
         shell: bash
@@ -45,13 +50,20 @@ jobs:
             "$SEMGREP_IMAGE" semgrep scan \
             --config p/ci \
             --oss-only --metrics off --disable-version-check \
-            --error --strict \
+            --strict --quiet --jobs 2 --timeout 30 \
             --json-output /reports/semgrep.json \
-            --sarif-output /reports/semgrep.sarif . || status=$?
-          if [ -s "$report_dir/semgrep.sarif" ]; then
+            --sarif-output /reports/semgrep.raw.sarif . || status=$?
+          if [ -s "$report_dir/semgrep.json" ] && [ -s "$report_dir/semgrep.raw.sarif" ]; then
             printf 'report=true\n' >> "$GITHUB_OUTPUT"
+          else
+            echo '::error title=Semgrep::The scanner did not produce both required reports.'
+            status=2
           fi
           exit "$status"
+      - name: Apply finding policy
+        id: policy
+        if: always() && steps.scan.outputs.report == 'true'
+        run: python scripts/semgrep_gate.py "$RUNNER_TEMP/semgrep"
       - name: Save scan reports
         if: always() && steps.scan.outputs.report == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -62,7 +74,7 @@ jobs:
           if-no-files-found: error
       - name: Publish code scanning results
         if: >-
-          always() && steps.scan.outputs.report == 'true' &&
+          always() && steps.policy.outputs.report == 'true' &&
           github.actor != 'dependabot[bot]' &&
           (github.event_name != 'pull_request' ||
            github.event.pull_request.head.repo.full_name == github.repository)
