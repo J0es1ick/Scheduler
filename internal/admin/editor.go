@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/J0es1ick/Scheduler/internal/service"
 	"github.com/google/uuid"
@@ -116,7 +117,7 @@ func (s *Store) CreateManualLesson(ctx context.Context, actorID string, lesson L
 		tx,
 		ctx,
 		lesson.GroupID,
-		fmt.Sprintf("Добавлено занятие «%s».", lesson.Subject),
+		fmt.Sprintf("Добавлено занятие «%s».", lesson.Subject), beforeTeachers,
 	); err != nil {
 		return "", err
 	}
@@ -124,7 +125,7 @@ func (s *Store) CreateManualLesson(ctx context.Context, actorID string, lesson L
 	if err != nil {
 		return "", err
 	}
-	if err = repository.EnqueueTeacherChanges(ctx, tx, universityID, service.TeacherChanges(beforeTeachers, afterTeachers)); err != nil {
+	if err = repository.EnqueueTeacherChanges(ctx, tx, universityID, service.TeacherChanges(beforeTeachers, afterTeachers), beforeTeachers, afterTeachers); err != nil {
 		return "", err
 	}
 
@@ -218,7 +219,7 @@ func (s *Store) UpdateEditorLesson(
 		tx,
 		ctx,
 		lesson.GroupID,
-		fmt.Sprintf("Изменено занятие «%s».", lesson.Subject),
+		fmt.Sprintf("Изменено занятие «%s».", lesson.Subject), beforeTeachers,
 	); err != nil {
 		return "", err
 	}
@@ -227,7 +228,7 @@ func (s *Store) UpdateEditorLesson(
 	if err != nil {
 		return "", err
 	}
-	if err = repository.EnqueueTeacherChanges(ctx, tx, current.UniversityID, service.TeacherChanges(beforeTeachers, afterTeachers)); err != nil {
+	if err = repository.EnqueueTeacherChanges(ctx, tx, current.UniversityID, service.TeacherChanges(beforeTeachers, afterTeachers), beforeTeachers, afterTeachers); err != nil {
 		return "", err
 	}
 
@@ -312,7 +313,7 @@ func (s *Store) DeleteEditorLesson(
 		tx,
 		ctx,
 		current.GroupID,
-		fmt.Sprintf("Удалено занятие «%s».", current.Subject),
+		fmt.Sprintf("Удалено занятие «%s».", current.Subject), beforeTeachers,
 	); err != nil {
 		return err
 	}
@@ -321,7 +322,7 @@ func (s *Store) DeleteEditorLesson(
 	if err != nil {
 		return err
 	}
-	if err = repository.EnqueueTeacherChanges(ctx, tx, current.UniversityID, service.TeacherChanges(beforeTeachers, afterTeachers)); err != nil {
+	if err = repository.EnqueueTeacherChanges(ctx, tx, current.UniversityID, service.TeacherChanges(beforeTeachers, afterTeachers), beforeTeachers, afterTeachers); err != nil {
 		return err
 	}
 
@@ -388,7 +389,7 @@ func (s *Store) RestoreEditorLesson(ctx context.Context, lessonID string, expect
 		tx,
 		ctx,
 		lesson.GroupID,
-		fmt.Sprintf("Восстановлено занятие «%s» из расписания источника.", lesson.Subject),
+		fmt.Sprintf("Восстановлено занятие «%s» из расписания источника.", lesson.Subject), beforeTeachers,
 	); err != nil {
 		return err
 	}
@@ -396,7 +397,7 @@ func (s *Store) RestoreEditorLesson(ctx context.Context, lessonID string, expect
 	if err != nil {
 		return err
 	}
-	if err = repository.EnqueueTeacherChanges(ctx, tx, lesson.UniversityID, service.TeacherChanges(beforeTeachers, afterTeachers)); err != nil {
+	if err = repository.EnqueueTeacherChanges(ctx, tx, lesson.UniversityID, service.TeacherChanges(beforeTeachers, afterTeachers), beforeTeachers, afterTeachers); err != nil {
 		return err
 	}
 
@@ -406,21 +407,16 @@ func (s *Store) RestoreEditorLesson(ctx context.Context, lessonID string, expect
 	return nil
 }
 
-func enqueueManualScheduleChange(
-	tx *sqlx.Tx,
-	ctx context.Context,
-	groupID, summary string,
-) error {
-	if _, err := tx.ExecContext(
-		ctx,
-		`SELECT enqueue_schedule_change($1, $2, 'manual', $3)`,
-		uuid.NewString(),
-		groupID,
-		summary,
-	); err != nil {
-		return fmt.Errorf("editor enqueue schedule notification: %w", err)
+func enqueueManualScheduleChange(tx *sqlx.Tx, ctx context.Context, groupID, summary string, before []domain.Lesson) error {
+	var universityID string
+	if err := tx.GetContext(ctx, &universityID, `SELECT university_id FROM groups WHERE id=$1`, groupID); err != nil {
+		return err
 	}
-	return nil
+	after, err := repository.EffectiveLessonsForUniversity(ctx, tx, universityID)
+	if err != nil {
+		return err
+	}
+	return repository.EnqueueScheduleTransition(ctx, tx, uuid.NewString(), groupID, "manual", summary, before, after)
 }
 
 func effectiveLessonForUpdate(

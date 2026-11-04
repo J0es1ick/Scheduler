@@ -90,6 +90,7 @@ func main() {
 	workerMonitor := worker.NewMonitor()
 	workerMonitor.Register(worker.ConnectorWorkerName, 35*time.Minute)
 	adminServer, err := admin.NewServer(store, auth, parserService, admin.ServerOptions{
+		BotUsername:       cfg.BotUsername,
 		ServiceLogs:       servicelogs.NewClient(cfg.Admin.LogSocket),
 		MetricsToken:      cfg.Admin.MetricsToken,
 		TrustedProxyCIDRs: cfg.Admin.TrustedProxyCIDRs,

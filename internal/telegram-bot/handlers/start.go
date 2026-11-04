@@ -27,6 +27,9 @@ func (h *Handler) HandleStart(c tele.Context) error {
 	if args := c.Args(); len(args) == 1 && strings.HasPrefix(args[0], "report_") {
 		return h.handleReportLink(c, args[0])
 	}
+	if args := c.Args(); len(args) == 1 && strings.HasPrefix(args[0], "group_") {
+		return h.handleGroupInvitation(c, args[0])
+	}
 	ctx, cancel := reqCtx()
 	defer cancel()
 

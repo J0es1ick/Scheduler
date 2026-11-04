@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/J0es1ick/Scheduler/internal/database"
+	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/J0es1ick/Scheduler/internal/service"
 	"github.com/google/uuid"
@@ -133,6 +134,49 @@ func TestPersonalAPIWithRuntimePrivileges(t *testing.T) {
 	if response.Code != 200 || !strings.Contains(response.Body.String(), "Physics") {
 		t.Fatalf("read: %d %s", response.Code, response.Body)
 	}
+	response = request("GET", "/api/personal/agenda?target="+suffix, "", false)
+	if response.Code != 200 {
+		t.Fatalf("agenda with runtime grants: %d %s", response.Code, response.Body)
+	}
+	response = request("GET", "/api/personal/agenda?target=foreign", "", false)
+	if response.Code != 404 {
+		t.Fatalf("foreign agenda: %d", response.Code)
+	}
+	response = request("GET", "/api/personal/notifications", "", false)
+	var settings struct {
+		Preferences domain.NotificationPreferences `json:"preferences"`
+	}
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &settings) != nil {
+		t.Fatalf("settings: %d %s", response.Code, response.Body)
+	}
+	settings.Preferences.DailyDayOffset = 1
+	settings.Preferences.DailyWeekdays = 31
+	preferencesJSON, _ := json.Marshal(settings.Preferences)
+	response = request("PUT", "/api/personal/notifications", string(preferencesJSON), false)
+	if response.Code != 403 {
+		t.Fatal("settings without csrf", response.Code)
+	}
+	response = request("PUT", "/api/personal/notifications", string(preferencesJSON), true)
+	if response.Code != 200 {
+		t.Fatal("settings runtime grants", response.Code, response.Body)
+	}
+	response = request("PUT", "/api/personal/notifications", string(preferencesJSON), true)
+	if response.Code != 409 {
+		t.Fatal("settings version conflict", response.Code, response.Body)
+	}
+	notePayload := fmt.Sprintf(`{"target_id":%q,"lesson_id":%q,"date":"2026-09-07","body":"Private task","due_date":"2026-09-10"}`, suffix, suffix)
+	response = request("POST", "/api/personal/notes", notePayload, false)
+	if response.Code != 403 {
+		t.Fatal("notes without csrf", response.Code)
+	}
+	response = request("POST", "/api/personal/notes", notePayload, true)
+	if response.Code != 200 {
+		t.Fatal("notes runtime grants", response.Code, response.Body)
+	}
+	response = request("GET", "/api/personal/notes", "", false)
+	if response.Code != 200 || !strings.Contains(response.Body.String(), "Private task") {
+		t.Fatal("read notes", response.Code, response.Body)
+	}
 	payload := fmt.Sprintf(`{"target_id":%q,"lesson_id":%q,"date":"2026-09-07","scope":"semester","patch":{"room":"Personal"}}`, suffix, suffix)
 	response = request("POST", "/api/personal/changes", payload, false)
 	if response.Code != 403 {
@@ -193,7 +237,7 @@ func TestPersonalAPIWithRuntimePrivileges(t *testing.T) {
 	}
 	defer botDB.Close()
 	export, err := repository.NewUserRepository(botDB).ExportUserData(ctx, user)
-	if err != nil || len(export.PersonalChanges) != 1 || len(export.PersonalSessions) != 1 {
+	if err != nil || len(export.PersonalChanges) != 1 || len(export.PersonalSessions) != 1 || len(export.Notes) != 1 {
 		t.Fatalf("bot export privileges: %+v %v", export, err)
 	}
 	var writable bool

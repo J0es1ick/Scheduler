@@ -344,6 +344,7 @@ func SubscriptionSettings(
 	if reminderEnabled {
 		reminderLabel = fmt.Sprintf("Напоминания: за %d мин.", reminderMinutes)
 	}
+	rows = append(rows, menu.Row(menu.Data("Все уведомления и ближайшие сообщения", "notification_center")))
 	rows = append(rows, menu.Row(menu.Data(reminderLabel, "show_reminder_settings", fmt.Sprint(page))))
 	rows = append(rows, menu.Row(menu.Data("Ежедневное расписание", "daily_settings")), menu.Row(menu.Data("Обновления сервиса", "updates_settings")))
 	rows = append(rows, menu.Row(menu.Data("Сменить роль", "role_settings")))
@@ -381,6 +382,7 @@ func SubscriptionActions(item domain.GroupSubscription, page int) *tgbotapi.Repl
 	if item.Subgroup > 0 {
 		subgroupLabel = fmt.Sprintf("Подгруппа: %d", item.Subgroup)
 	}
+	rows = append(rows, menu.Row(menu.Data("Поделиться группой", "share_group", groupToken)))
 	rows = append(rows, menu.Row(menu.Data(subgroupLabel, "subgroup_settings", groupToken, fmt.Sprint(page))))
 	rows = append(rows,
 		menu.Row(menu.Data("Удалить подписку", "request_delete_subscription", groupToken, fmt.Sprint(page))),

@@ -11,6 +11,7 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/J0es1ick/Scheduler/internal/service"
+	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 )
 
 type personalSessionStore struct{ store *Store }
@@ -64,6 +65,12 @@ func (s *Server) registerPersonalRoutes(mux *http.ServeMux) {
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	})
 	s.personalRoute(mux, "GET /api/personal/schedule", s.handlePersonalSchedule)
+	s.personalRoute(mux, "GET /api/personal/agenda", s.handlePersonalAgenda)
+	s.personalRoute(mux, "GET /api/personal/notes", s.handlePersonalNotes)
+	s.personalRoute(mux, "POST /api/personal/notes", s.handlePersonalNotes)
+	s.personalRoute(mux, "DELETE /api/personal/notes/{id}", s.handlePersonalNotes)
+	s.personalRoute(mux, "GET /api/personal/notifications", s.handlePersonalNotifications)
+	s.personalRoute(mux, "PUT /api/personal/notifications", s.handlePersonalNotifications)
 	s.personalRoute(mux, "POST /api/personal/changes", s.handlePersonalSave)
 	s.personalRoute(mux, "POST /api/personal/review", s.handlePersonalReview)
 	s.personalRoute(mux, "DELETE /api/personal/changes/{id}", s.handlePersonalDelete)
@@ -153,6 +160,11 @@ func (s *Server) handlePersonalMe(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.personalError(w, err)
 		return
+	}
+	for i := range targets {
+		if targets[i].Role == "student" && s.botUsername != "" {
+			targets[i].ShareURL = "https://t.me/" + s.botUsername + "?start=group_" + keyboards.GroupToken(targets[i].ID)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": user.ID, "name": identity.Name, "is_admin": user.IsAdmin, "role": user.Role, "csrf_token": identity.CSRFToken, "targets": targets})
 }

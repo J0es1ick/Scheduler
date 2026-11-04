@@ -5,6 +5,7 @@ import "time"
 import "github.com/J0es1ick/Scheduler/internal/domain"
 
 type UserState struct {
+	InviteSubgroups                    []int
 	Role                               domain.UserRole
 	TeacherID                          string
 	TeacherName                        string

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	tele "gopkg.in/telebot.v3"
@@ -48,8 +49,11 @@ func (h *Handler) showDailySetup(c tele.Context, step string, onboarding bool) e
 	} else if onboarding {
 		menu.Inline(menu.Row(menu.Data("Да, настроить время", "daily_action", "on", state.FlowNonce)), menu.Row(menu.Data("Нет, позже", "daily_action", "off", state.FlowNonce)))
 	} else {
-		text = "Ежедневное расписание: " + onOff(user.DailyEnabled) + ".\nВремя: " + user.DailyTime + " · " + h.universityLocation(ctx, state.UniversityID).String() + ".\nИзменить время: /daily 06:00. Отключить: /daily off.\nОтправка выполняется и во время тихих часов."
+		text = dailyPreferencesText(user) + "\nВремя: " + user.DailyTime + " · " + h.universityLocation(ctx, state.UniversityID).String() + ".\nИзменить время: /daily 06:00. Отключить: /daily off.\nОтправка выполняется и во время тихих часов."
 		menu.Inline(menu.Row(menu.Data("Настроить время", "daily_action", "on", state.FlowNonce)), menu.Row(menu.Data("Выключить", "daily_action", "off", state.FlowNonce)), menu.Row(menu.Data("Закрыть", "daily_action", "close", state.FlowNonce)))
+	}
+	if !onboarding {
+		menu.InlineKeyboard = append(menu.InlineKeyboard, []tele.InlineButton{{Text: "Все настройки отправки", Unique: "notification_center"}})
 	}
 	h.StateManager.Set(c.Sender().ID, state)
 	return c.Send(text, menu)
@@ -133,7 +137,10 @@ func (h *Handler) saveDaily(c tele.Context, state *dto.UserState, value string) 
 	}
 	text := "Ежедневная отправка выключена. Её можно включить в настройках или через /daily."
 	if enabled {
-		text = "Буду присылать расписание на сегодня каждый день в " + clock + " по времени вуза (" + h.universityLocation(ctx, state.UniversityID).String() + ")."
+		text = "Отправка настроена на " + clock + " по времени вуза (" + h.universityLocation(ctx, state.UniversityID).String() + ")."
+		if user, err := h.UserService.GetUser(ctx, fmt.Sprint(c.Sender().ID)); err == nil && user != nil {
+			text += "\n" + dailyPreferencesText(user)
+		}
 	}
 	if err := c.Send(text); err != nil {
 		return err
@@ -145,4 +152,25 @@ func (h *Handler) saveDaily(c tele.Context, state *dto.UserState, value string) 
 		return err
 	}
 	return c.Send("Настройки сохранены.", keyboards.BackButton("open_main_menu"))
+}
+
+func dailyPreferencesText(user *domain.User) string {
+	day := "сегодня"
+	if user.DailyDayOffset == 1 {
+		day = "завтра"
+	}
+	days := []string{}
+	for i, label := range []string{"пн", "вт", "ср", "чт", "пт", "сб", "вс"} {
+		if user.DailyWeekdays&(1<<i) != 0 {
+			days = append(days, label)
+		}
+	}
+	text := "Расписание на " + day + ": " + onOff(user.DailyEnabled) + ".\nДни отправки: " + strings.Join(days, ", ") + "."
+	if user.DailySkipEmpty {
+		text += "\nДни без занятий пропускаются."
+	}
+	if user.NotificationsPausedUntil != nil {
+		text += "\nПауза уведомлений до " + user.NotificationsPausedUntil.Format("02.01.2006") + "."
+	}
+	return text
 }

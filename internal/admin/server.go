@@ -34,6 +34,7 @@ const (
 )
 
 type ServerOptions struct {
+	BotUsername       string
 	ServiceLogs       serviceLogReader
 	MetricsToken      string
 	TrustedProxyCIDRs string
@@ -43,6 +44,7 @@ type ServerOptions struct {
 }
 
 type Server struct {
+	botUsername      string
 	personalAuth     *AuthManager
 	personalSchedule *service.ScheduleService
 	serviceLogs      serviceLogReader
@@ -84,6 +86,7 @@ func NewServer(store *Store, auth *AuthManager, parser *service.ParserService, o
 		catalog[item.ParserID] = item
 	}
 	server := &Server{
+		botUsername:     strings.TrimPrefix(strings.TrimSpace(opts.BotUsername), "@"),
 		serviceLogs:     opts.ServiceLogs,
 		store:           store,
 		auth:            auth,
