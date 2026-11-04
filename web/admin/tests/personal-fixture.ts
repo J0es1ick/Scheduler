@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import type { Note } from "../src/personal/Notes";
 import { shiftDate } from "../src/personal/api";
 
 export async function setup(page: Page, admin = false, options: { week?: boolean; teacher?: boolean } = {}) {
@@ -11,6 +12,7 @@ export async function setup(page: Page, admin = false, options: { week?: boolean
     university_name: "Ивановский энергетический университет",
     timezone: "Europe/Moscow",
     primary: true,
+    share_url: options.teacher ? undefined : "https://t.me/scheduler_bot?start=group_token",
   };
   const original = {
     ID: "lesson",
@@ -24,6 +26,12 @@ export async function setup(page: Page, admin = false, options: { week?: boolean
     Subgroup: 0,
   };
   const state = {
+    notes: [] as Note[],
+    noteRequests: [] as Record<string, unknown>[],
+    notificationRequests: [] as Record<string, unknown>[],
+    unpublished: false,
+    empty: false,
+    preferences: { changes: false, daily_enabled: false, daily_time: "06:00", daily_day_offset: 0, daily_weekdays: 127, daily_skip_empty: false, paused_until: "", reminder_enabled: false, reminder_minutes: 20, quiet_enabled: false, quiet_start: "22:00", quiet_end: "07:00", service_updates: null as boolean | null, version: "2026-10-05T05:00:00Z" },
     changes: [] as Record<string, unknown>[],
     requests: [] as Record<string, unknown>[],
     cancelled: false,
@@ -45,13 +53,35 @@ export async function setup(page: Page, admin = false, options: { week?: boolean
         csrf_token: "personal-csrf",
         targets: [target],
       };
-    else if (url.pathname.endsWith("/schedule")) {
+    else if (url.pathname.endsWith("/notifications")) {
+      if (route.request().method() === "PUT") {
+        expect(route.request().headers()["x-csrf-token"]).toBe("personal-csrf");
+        const input = route.request().postDataJSON();
+        state.notificationRequests.push(input);
+        state.preferences = { ...input, version: "2026-10-05T06:01:00Z" };
+      }
+      body = { preferences: state.preferences, timezone: target.timezone, preview: state.preferences.daily_enabled ? [{ kind: "daily", at: "2026-10-05T17:00:00Z", date: "2026-10-06", label: "Расписание на завтра" }] : [] };
+    } else if (url.pathname.includes("/notes")) {
+      const method = route.request().method();
+      if (method === "POST") {
+        expect(route.request().headers()["x-csrf-token"]).toBe("personal-csrf");
+        const input = route.request().postDataJSON(); state.noteRequests.push(input);
+        const existing = state.notes.find((note) => note.id === input.id);
+        const note = { ...existing, ...input, id: input.id || `note-${state.notes.length + 1}`, version: (existing?.version || 0) + 1, target_id: input.target_id || existing?.target_id || target.id, lesson_id: input.lesson_id || existing?.lesson_id || "lesson-0", lesson_date: input.date || existing?.lesson_date || "2026-10-05", basis: original, binding: "attached" as const, current_date: input.date || existing?.current_date || "2026-10-05", current_lesson_id: input.lesson_id || "lesson-0" };
+        state.notes = [...state.notes.filter((item) => item.id !== note.id), note]; body = note;
+      } else if (method === "DELETE") {
+        state.notes = state.notes.filter((item) => item.id !== url.pathname.split("/").at(-1)); body = { ok: true };
+      } else body = state.notes;
+    } else if (url.pathname.endsWith("/agenda")) {
+      body = { target, freshness: { State: state.unpublished ? "stale" : "current", LastSuccess: state.unpublished ? null : "2026-10-05T05:00:00Z" }, days: [{ date: "2026-10-05", lessons: state.empty ? [] : [{ original, lesson: original, cancelled: state.cancelled, group_name: "4/147" }] }, { date: "2026-10-06", lessons: state.empty ? [] : [{ original, lesson: { ...original, TimeStart: "10:10", TimeEnd: "11:40" }, cancelled: false }] }] };
+    } else if (url.pathname.endsWith("/schedule")) {
       await state.scheduleGate;
       if (state.scheduleError) return route.fulfill({ status: 503, json: { error: "Временно недоступно" } });
       const date = url.searchParams.get("from") || "2026-10-05";
       body = {
         target,
         publication: "snapshot-2",
+        freshness: { State: "current", LastSuccess: state.unpublished ? null : "2026-10-05T05:00:00Z" },
         patterns: [
           {
             group_id: "group",
@@ -86,7 +116,7 @@ export async function setup(page: Page, admin = false, options: { week?: boolean
           const changes = state.changes.filter((change) => change.scope === "semester" || (change.scope === "selected" ? Array.isArray(change.dates) && change.dates.includes(dayDate) : change.date === dayDate));
           return {
           date: dayDate,
-          lessons: index === 5 ? [] : [
+          lessons: state.empty || index === 5 ? [] : [
             {
               original: { ...original, ID: `lesson-${index}` },
               lesson: { ...original, Room: changes.length ? state.room : original.Room },

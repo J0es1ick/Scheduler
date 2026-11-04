@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import {
   CalendarDays,
+  Bell,
+  NotebookPen,
+  Share2,
   ArrowUpRight,
   Check,
   ChevronLeft,
@@ -31,6 +34,9 @@ import {
   type Target,
 } from "./api";
 import { LessonEditor } from "./LessonEditor";
+import { NowNext } from "./NowNext";
+import { NotificationCenter } from "./NotificationCenter";
+import { Notes, NoteEditor, type Note } from "./Notes";
 import "./personal.css";
 
 export default function PersonalApp() {
@@ -39,7 +45,8 @@ export default function PersonalApp() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
-  const [chosen, setChosen] = useState(false);
+  const [chosen, setChosen] = useState(() => new URLSearchParams(window.location.search).has("section"));
+  const [section, setSection] = useState(() => new URLSearchParams(window.location.search).get("section") || "schedule");
   useEffect(() => {
     const back = window.Telegram?.WebApp?.BackButton;
     const update = () => {
@@ -133,13 +140,11 @@ export default function PersonalApp() {
                 ← К выбору сервиса
               </button>
             )}
-            <h1>Ваши правки</h1>
-            <p>
-              Измените аудиторию, преподавателя или отмените пару. Правки видны
-              только вам — в приложении и в боте.
-            </p>
+            <h1>{section === "notifications" ? "Уведомления" : section === "notes" ? "Ваши заметки" : "Ваш день"}</h1>
+            <p>Расписание, личные правки и задания — в одном месте.</p>
           </div>
-          <PersonalCalendar profile={profile} />
+          <nav className="personal-tabs" aria-label="Личное расписание">{([{ id: "schedule", label: "Расписание", Icon: CalendarDays }, { id: "notes", label: "Заметки", Icon: NotebookPen }, { id: "notifications", label: "Уведомления", Icon: Bell }]).map(({ id, label, Icon }) => <button key={id} aria-current={section === id ? "page" : undefined} onClick={() => setSection(id)}><Icon size={18} /><span>{label}</span></button>)}</nav>
+          {section === "notifications" ? <NotificationCenter /> : section === "notes" ? <Notes targets={profile.targets} /> : <PersonalCalendar profile={profile} />}
         </div>
       )}
     </main>
@@ -148,7 +153,7 @@ export default function PersonalApp() {
 
 function PersonalCalendar({ profile }: { profile: Profile }) {
   const [targetID, setTargetID] = useState(
-    profile.targets.find((t) => t.primary)?.id || profile.targets[0]?.id || "",
+    profile.targets.find((item) => item.id === new URLSearchParams(window.location.search).get("target"))?.id || profile.targets.find((t) => t.primary)?.id || profile.targets[0]?.id || "",
   );
   const target = profile.targets.find((t) => t.id === targetID);
   return !target ? (
@@ -179,15 +184,20 @@ function PersonalCalendar({ profile }: { profile: Profile }) {
           <small>Время вуза · {target.timezone}</small>
         </div>
       </div>
+      {target.share_url && <a className="button button-ghost personal-share" href={`https://t.me/share/url?${new URLSearchParams({ url: target.share_url, text: `${target.university_name} · ${target.name}` })}`} target="_blank" rel="noreferrer"><Share2 size={17} />Поделиться группой</a>}
       <Calendar key={targetID} target={target} />
     </>
   );
 }
 
 function Calendar({ target }: { target: Target }) {
-  const [date, setDate] = useState(() => today(target.timezone));
+  const [date, setDate] = useState(() => { const value = new URLSearchParams(window.location.search).get("date") || ""; const parsed = new Date(`${value}T12:00:00Z`); return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value ? value : today(target.timezone); });
+  const [noteEditing, setNoteEditing] = useState<{ date: string; item: PersonalLesson; note?: Note }>();
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [notesError, setNotesError] = useState(false);
   const [revision, setRevision] = useState(0);
   const key = `${date}:${revision}`;
+  useEffect(() => { let active = true; void request<Note[]>("notes").then((items) => { if (active) { setNotes(items); setNotesError(false); } }).catch(() => { if (active) setNotesError(true); }); return () => { active = false; }; }, [revision]);
   const [loaded, setLoaded] = useState<{
     key: string;
     date: string;
@@ -295,6 +305,8 @@ function Calendar({ target }: { target: Target }) {
   }
   return (
     <>
+      <NowNext target={target} revision={revision} />
+      {notesError && <p role="status" className="personal-note">Не удалось загрузить заметки к занятиям. <button className="text-button" onClick={() => setRevision((value) => value + 1)}>Повторить</button></p>}
       <div className="personal-calendar-controls">
         <nav className="personal-date-nav" aria-label="Период расписания">
           <div className="personal-period-picker">
@@ -458,7 +470,7 @@ function Calendar({ target }: { target: Target }) {
                 </h2>
                 <div className="personal-day-lessons">
                   {!day.lessons.length ? (
-                    <p className="personal-empty-day">Занятий нет</p>
+                    <p className="personal-empty-day">{current.data?.freshness && !current.data.freshness.LastSuccess ? "Расписание ещё не опубликовано" : "Занятий нет"}</p>
                   ) : (
                     [...day.lessons]
                       .sort((a, b) =>
@@ -500,6 +512,8 @@ function Calendar({ target }: { target: Target }) {
                               </span>
                             )}
                           </div>
+                          <div className="personal-lesson-actions">
+                          <button className="button button-ghost" disabled={loading} onClick={() => setNoteEditing({ date: day.date, item })}><NotebookPen size={16} />Заметка</button>
                           <button
                             className="button button-ghost personal-edit"
                             aria-label={`Изменить ${item.lesson.Subject}, ${dateLabel(day.date)}`}
@@ -509,6 +523,8 @@ function Calendar({ target }: { target: Target }) {
                             <Pencil size={16} aria-hidden="true" />
                             <span>Изменить</span>
                           </button>
+                          </div>
+                          {notes.filter((note) => !note.completed && note.target_id === target.id && (note.current_date || note.lesson_date.slice(0, 10)) === day.date && (note.current_lesson_id === item.original.ID || note.lesson_id === (item.original.personal_key || item.original.ID))).map((note) => <button className="personal-attached-note" key={note.id} onClick={() => setNoteEditing({ date: day.date, item, note })}><NotebookPen size={14} /><span>{note.body}</span>{note.due_date && <small>до {dateLabel(note.due_date)}</small>}</button>)}
                         </article>
                       ))
                   )}
@@ -581,6 +597,7 @@ function Calendar({ target }: { target: Target }) {
           </details>
         </>
       )}
+      {noteEditing && <NoteEditor note={noteEditing.note} selection={noteEditing.note ? undefined : { target: target.id, ...noteEditing }} onClose={() => setNoteEditing(undefined)} onSaved={() => { setNoteEditing(undefined); setRevision((n) => n + 1); setNotice("Заметка сохранена"); }} />}
       {editing && (
         <LessonEditor
           key={`${editing.date}:${editing.item.original.ID}`}

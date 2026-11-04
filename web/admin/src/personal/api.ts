@@ -1,4 +1,5 @@
 export interface Target {
+  share_url?: string;
   id: string;
   role: "student" | "teacher";
   name: string;
@@ -67,6 +68,7 @@ export interface Review {
   dropped: number;
 }
 export interface Schedule {
+  freshness?: { State: string; LastSuccess: string | null } | null;
   publication: string;
   patterns?: {
     group_id: string;

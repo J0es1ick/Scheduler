@@ -5,7 +5,7 @@ test("ordinary user edits one day and resets it", async ({ page }) => {
   const state = await setup(page);
   await page.goto("/app");
   await expect(
-    page.getByRole("heading", { name: "Ваши правки" }),
+    page.getByRole("heading", { name: "Ваш день" }),
   ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Куда перейдём?" }),
