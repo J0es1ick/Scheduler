@@ -20,17 +20,20 @@ func (r *DailyRepository) EnqueueDue(ctx context.Context, now time.Time, limit i
 	}
 	defer tx.Rollback()
 	var recipients []struct {
-		UserID    string          `db:"user_id"`
-		Role      domain.UserRole `db:"role"`
-		GroupID   string          `db:"group_id"`
-		TeacherID string          `db:"teacher_id"`
-		Timezone  string          `db:"timezone"`
-		Clock     string          `db:"clock"`
+		UserID      string          `db:"user_id"`
+		Role        domain.UserRole `db:"role"`
+		GroupID     string          `db:"group_id"`
+		TeacherID   string          `db:"teacher_id"`
+		Timezone    string          `db:"timezone"`
+		Clock       string          `db:"clock"`
+		DayOffset   int             `db:"daily_day_offset"`
+		Weekdays    int             `db:"daily_weekdays"`
+		PausedUntil *time.Time      `db:"notifications_paused_until"`
 	}
 	err = tx.SelectContext(ctx, &recipients, `SELECT u.id AS user_id,u.role,
 		CASE WHEN u.role='student' THEN COALESCE(u.default_group_id,'') ELSE '' END AS group_id,
 		CASE WHEN u.role='teacher' THEN COALESCE(u.teacher_id,'') ELSE '' END AS teacher_id,
-		scheduler_profile_timezone(u) AS timezone,to_char(u.daily_time,'HH24:MI') AS clock
+		scheduler_profile_timezone(u) AS timezone,to_char(u.daily_time,'HH24:MI') AS clock,u.daily_day_offset,u.daily_weekdays,u.notifications_paused_until
 		FROM users u WHERE u.daily_enabled AND NOT u.bot_blocked AND u.daily_next_at<=$1
 		ORDER BY u.daily_next_at,u.id FOR UPDATE OF u SKIP LOCKED LIMIT $2`, now, limit)
 	if err != nil {
@@ -47,9 +50,10 @@ func (r *DailyRepository) EnqueueDue(ctx context.Context, now time.Time, limit i
 		if parseErr != nil {
 			return 0, parseErr
 		}
-		if !now.Before(due) && (recipient.GroupID != "" || recipient.TeacherID != "") {
+		allowed := recipient.Weekdays&(1<<((int(local.Weekday())+6)%7)) != 0 && (recipient.PausedUntil == nil || date >= recipient.PausedUntil.Format(time.DateOnly))
+		if allowed && !now.Before(due) && (recipient.GroupID != "" || recipient.TeacherID != "") {
 			expires := time.Date(local.Year(), local.Month(), local.Day()+1, 0, 0, 0, 0, location)
-			payload, _ := json.Marshal(domain.DailyContext{Date: date, Timezone: recipient.Timezone})
+			payload, _ := json.Marshal(domain.DailyContext{Date: local.AddDate(0, 0, recipient.DayOffset).Format(time.DateOnly), Timezone: recipient.Timezone})
 			_, err = tx.ExecContext(ctx, `INSERT INTO bot_outbox(id,user_id,group_id,teacher_id,kind,body,expires_at,schedule_context)
 				VALUES($1,$2,NULLIF($3,''),NULLIF($4,''),'daily_schedule','Daily schedule',$5,$6::jsonb)
 				ON CONFLICT(id) DO UPDATE SET group_id=EXCLUDED.group_id,teacher_id=EXCLUDED.teacher_id,
@@ -61,7 +65,7 @@ func (r *DailyRepository) EnqueueDue(ctx context.Context, now time.Time, limit i
 				return 0, err
 			}
 		}
-		if _, err = tx.ExecContext(ctx, `UPDATE users SET daily_next_at=CASE WHEN EXISTS(SELECT 1 FROM bot_outbox WHERE id='daily:'||users.id||':'||to_char($3::timestamptz AT TIME ZONE $2,'YYYY-MM-DD') AND status='pending' AND cancel_requested_at IS NOT NULL AND delivered_parts=0) THEN $3::timestamptz+INTERVAL '1 minute' ELSE scheduler_next_daily(daily_time,$2,$3) END WHERE id=$1`, recipient.UserID, recipient.Timezone, now); err != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE users SET daily_next_at=CASE WHEN EXISTS(SELECT 1 FROM bot_outbox WHERE id='daily:'||users.id||':'||to_char($3::timestamptz AT TIME ZONE $2,'YYYY-MM-DD') AND status='pending' AND cancel_requested_at IS NOT NULL AND delivered_parts=0) THEN $3::timestamptz+INTERVAL '1 minute' ELSE scheduler_next_user_daily(users,$3) END WHERE id=$1`, recipient.UserID, recipient.Timezone, now); err != nil {
 			return 0, err
 		}
 	}

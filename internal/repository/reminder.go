@@ -31,6 +31,7 @@ func (r *ReminderRepository) ActiveRecipientsPage(
 		CASE WHEN role='teacher' THEN COALESCE(teacher_id,'') ELSE '' END AS teacher_id,
 		university_id,name AS group_name,university_name,timezone,subgroup,reminder_minutes
 		FROM schedule_profile_recipients WHERE reminder_enabled AND NOT bot_blocked AND is_active
+        AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id=user_id AND u.notifications_paused_until>(clock_timestamp() AT TIME ZONE timezone)::date)
 		AND ($1='' OR user_id>$1) ORDER BY user_id LIMIT $2`, afterUserID, limit); err != nil {
 		return nil, fmt.Errorf("list active reminder recipients: %w", err)
 	}

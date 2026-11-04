@@ -46,7 +46,7 @@ func (r *UserRepository) GetUserByID(ctx context.Context, id string) (*domain.Us
 			to_char(quiet_hours_end, 'HH24:MI') AS quiet_hours_end,
 			search_schedule_view_format, role, COALESCE(teacher_id, '') AS teacher_id, teacher_schedule_view_format,
 			service_updates_consent, service_updates_answered_at, service_updates_prompt_key, service_updates_prompt_delivered_at, service_updates_backfill,
-			daily_enabled, to_char(daily_time, 'HH24:MI') AS daily_time, daily_setup, daily_next_at,
+			daily_enabled, to_char(daily_time, 'HH24:MI') AS daily_time, daily_setup, daily_next_at, daily_day_offset, daily_weekdays, daily_skip_empty, notifications_paused_until,
 			created_at, updated_at
 		 FROM users WHERE id = $1`, id)
 	if err != nil {
@@ -68,7 +68,7 @@ func (r *UserRepository) GetUserByUsername(ctx context.Context, username string)
 			to_char(quiet_hours_end, 'HH24:MI') AS quiet_hours_end,
 			search_schedule_view_format, role, COALESCE(teacher_id, '') AS teacher_id, teacher_schedule_view_format,
 			service_updates_consent, service_updates_answered_at, service_updates_prompt_key, service_updates_prompt_delivered_at, service_updates_backfill,
-			daily_enabled, to_char(daily_time, 'HH24:MI') AS daily_time, daily_setup, daily_next_at,
+			daily_enabled, to_char(daily_time, 'HH24:MI') AS daily_time, daily_setup, daily_next_at, daily_day_offset, daily_weekdays, daily_skip_empty, notifications_paused_until,
 			created_at, updated_at
 		 FROM users WHERE username = $1`, username)
 	if err != nil {
@@ -90,7 +90,7 @@ func (r *UserRepository) GetAllUsers(ctx context.Context) ([]domain.User, error)
 			to_char(quiet_hours_end, 'HH24:MI') AS quiet_hours_end,
 			search_schedule_view_format, role, COALESCE(teacher_id, '') AS teacher_id, teacher_schedule_view_format,
 			service_updates_consent, service_updates_answered_at, service_updates_prompt_key, service_updates_prompt_delivered_at, service_updates_backfill,
-			daily_enabled, to_char(daily_time, 'HH24:MI') AS daily_time, daily_setup, daily_next_at,
+			daily_enabled, to_char(daily_time, 'HH24:MI') AS daily_time, daily_setup, daily_next_at, daily_day_offset, daily_weekdays, daily_skip_empty, notifications_paused_until,
 			created_at, updated_at FROM users`)
 	if err != nil {
 		return nil, fmt.Errorf("get all users: %w", err)
@@ -332,6 +332,10 @@ func (r *UserRepository) ExportUserData(ctx context.Context, id string) (*domain
 		AuditRecords:     []domain.PersonalAuditRecord{},
 		AdminSessions:    []domain.PersonalAdminSession{},
 		References:       []domain.PersonalDataReference{},
+	}
+	result.Notes, err = NewPersonalScheduleRepository(r.db).Notes(ctx, id)
+	if err != nil {
+		return nil, err
 	}
 	result.PersonalChanges, err = NewPersonalScheduleRepository(r.db).List(ctx, id)
 	if err != nil {

@@ -94,7 +94,7 @@ func (r *NotificationRepository) ClaimPending(ctx context.Context, limit int) ([
 		SELECT c.id, c.event_id, c.user_id, e.group_id,
 			g.name AS group_name, u.name AS university_name,
 			COALESCE(usr.default_group_id=e.group_id, FALSE) AS is_default,
-			e.source, e.summary, c.attempts, c.claim_token,
+			e.source, e.summary, e.change_context, c.attempts, c.claim_token,
 			c.lease_expires_at, c.next_attempt_at,
 			c.created_at, c.delivered_at
 		FROM claimed c

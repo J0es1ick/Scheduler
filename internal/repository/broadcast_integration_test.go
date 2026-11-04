@@ -306,6 +306,9 @@ func TestBroadcastAudiencesAndConsentChanges(t *testing.T) {
 			if err = db.Get(&unchanged, `SELECT service_updates_consent IS NULL FROM users WHERE id='44'`); err != nil || !unchanged {
 				t.Fatalf("unknown preference changed: %t %v", unchanged, err)
 			}
+			if _, err = db.ExecContext(ctx, `UPDATE bot_outbox SET next_attempt_at=clock_timestamp()-INTERVAL '1 minute' WHERE broadcast_id=$1`, id); err != nil {
+				t.Fatal(err)
+			}
 			q := repository.NewNotificationRepository(db)
 			items, err := q.ClaimBotOutbox(ctx, 20)
 			if err != nil || len(items) != want {

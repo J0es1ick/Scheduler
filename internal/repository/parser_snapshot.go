@@ -17,8 +17,9 @@ type ParserSnapshotRepository struct {
 }
 
 type SnapshotPublication struct {
-	tx            *sqlx.Tx
-	beforeLessons []domain.Lesson
+	tx              *sqlx.Tx
+	beforeLessons   []domain.Lesson
+	beforeSemesters []domain.Semester
 }
 
 func (p *SnapshotPublication) PreviousEffectiveLessons() []domain.Lesson {
@@ -271,7 +272,11 @@ func (p *SnapshotPublication) EffectiveLessonsByUniversity(
 func (p *SnapshotPublication) EnqueueScheduleChange(
 	ctx context.Context,
 	eventID, groupID, source, summary string,
+	lessons ...[]domain.Lesson,
 ) error {
+	if len(lessons) == 2 {
+		return EnqueueScheduleTransition(ctx, p.tx, eventID, groupID, source, summary, lessons[0], lessons[1], p.beforeSemesters)
+	}
 	if _, err := p.tx.ExecContext(
 		ctx,
 		`SELECT enqueue_schedule_change($1, $2, $3, $4)`,

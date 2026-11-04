@@ -1,8 +1,14 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type NotificationDelivery struct {
+	ChangeContext  json.RawMessage `db:"change_context"`
+	Dates          []string
+	TargetToken    string
 	ID             string     `db:"id"`
 	EventID        string     `db:"event_id"`
 	UserID         string     `db:"user_id"`

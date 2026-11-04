@@ -98,6 +98,27 @@ func (h *Handler) PrepareDailySchedule(ctx context.Context, userID string, date 
 	if err != nil {
 		return nil, err
 	}
+	user, err := h.UserService.GetUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if user != nil && user.DailySkipEmpty {
+		empty := true
+		for _, day := range days {
+			if len(day.Lessons) > 0 {
+				empty = false
+			}
+		}
+		if empty {
+			freshness, loadErr := h.UniversityService.GetSourceFreshness(ctx, target.UniversityID)
+			if loadErr != nil {
+				return nil, loadErr
+			}
+			if freshness != nil && freshness.LastSuccess != nil {
+				return nil, domain.ErrEmptyDailySchedule
+			}
+		}
+	}
 	return h.prepareScheduleMessages(ctx, target, days, date, 1, scheduleDayNavigationForTarget(date, target, false), "")
 }
 

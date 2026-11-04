@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -473,5 +474,56 @@ func TestNotificationWorkerRequeuesRemainingOutboxClaimsAfterFlood(t *testing.T)
 	}
 	if sent != 1 || len(marked) != 2 || marked["first"] != time.Second || marked["second"] != time.Second {
 		t.Fatalf("sent=%d marked=%v", sent, marked)
+	}
+}
+
+func TestPersonalNotificationRebatchesAfterEligibilityWithoutDroppingItems(t *testing.T) {
+	items := []domain.NotificationDelivery{{ID: "first", UserID: "42", Summary: "short", ChangeContext: []byte(`{"before":[]}`)}, {ID: "second", UserID: "42", Summary: "short", ChangeContext: []byte(`{"before":[]}`)}}
+	marked := map[string]int{}
+	repo := &notificationRepositoryStub{active: func(context.Context, string, string) (bool, error) { return true, nil }, mark: func(_ context.Context, id, _ string) error { marked[id]++; return nil }}
+	guard := &notificationClaimGuard{ctx: context.Background(), pending: map[string]struct{}{"first": {}, "second": {}}}
+	calls, sent := 0, 0
+	w := &NotificationWorker{repository: repo, limiter: telegramlimit.New(0, 0), waitSend: func(context.Context, string) error { return nil },
+		describeChanges: func(_ context.Context, _ string, items []domain.NotificationDelivery) ([]domain.NotificationDelivery, error) {
+			calls++
+			copyItems := append([]domain.NotificationDelivery(nil), items...)
+			if calls > 1 {
+				for i := range copyItems {
+					copyItems[i].Summary = strings.Repeat(copyItems[i].ID+" ", 500)
+				}
+			}
+			return copyItems, nil
+		}, bot: notificationSenderFunc(func(_ tele.Recipient, body interface{}, _ ...interface{}) (*tele.Message, error) {
+			sent++
+			if len([]rune(body.(string))) > 4000 {
+				t.Fatal("overlong message")
+			}
+			return &tele.Message{}, nil
+		})}
+	if err := w.deliverScheduleBatch(context.Background(), items, guard); err != nil {
+		t.Fatal(err)
+	}
+	if sent != 2 || marked["first"] != 1 || marked["second"] != 1 || len(guard.pending) != 0 {
+		t.Fatalf("sent=%d marked=%v pending=%v", sent, marked, guard.pending)
+	}
+}
+func TestPersonalNotificationSuppressesRevertedChanges(t *testing.T) {
+	marked := false
+	repo := &notificationRepositoryStub{active: func(context.Context, string, string) (bool, error) { return true, nil }, mark: func(context.Context, string, string) error { marked = true; return nil }}
+	w := &NotificationWorker{repository: repo, limiter: telegramlimit.New(0, 0), waitSend: func(context.Context, string) error { return nil },
+		describeChanges: func(_ context.Context, _ string, items []domain.NotificationDelivery) ([]domain.NotificationDelivery, error) {
+			items[0].Summary = ""
+			return items, nil
+		},
+		bot: notificationSenderFunc(func(tele.Recipient, interface{}, ...interface{}) (*tele.Message, error) {
+			t.Fatal("sent unchanged schedule")
+			return nil, nil
+		})}
+	guard := &notificationClaimGuard{ctx: context.Background(), pending: map[string]struct{}{"event": {}}}
+	if err := w.deliverScheduleBatch(context.Background(), []domain.NotificationDelivery{{ID: "event", UserID: "42", ChangeContext: []byte(`{"before":[]}`)}}, guard); err != nil {
+		t.Fatal(err)
+	}
+	if !marked || len(guard.pending) != 0 {
+		t.Fatal("suppressed event not finalized")
 	}
 }

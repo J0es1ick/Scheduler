@@ -49,6 +49,7 @@ type notificationSender interface {
 }
 
 type NotificationWorker struct {
+	describeChanges    func(context.Context, string, []domain.NotificationDelivery) ([]domain.NotificationDelivery, error)
 	dailySchedule      dailyScheduleProvider
 	reminderSchedule   reminderScheduleProvider
 	reminderRecipient  func(context.Context, string, string) (*domain.ReminderRecipient, error)
@@ -66,11 +67,12 @@ type NotificationWorker struct {
 }
 
 type NotificationOptions struct {
-	DailySchedule dailyScheduleProvider
-	Schedule      reminderScheduleProvider
-	BatchSize     int
-	MaxBatches    int
-	Limiter       *telegramlimit.Limiter
+	DescribeChanges func(context.Context, string, []domain.NotificationDelivery) ([]domain.NotificationDelivery, error)
+	DailySchedule   dailyScheduleProvider
+	Schedule        reminderScheduleProvider
+	BatchSize       int
+	MaxBatches      int
+	Limiter         *telegramlimit.Limiter
 }
 
 func NewNotificationWorker(
@@ -95,6 +97,7 @@ func NewNotificationWorker(
 	}
 	return &NotificationWorker{
 		wake:             make(chan struct{}, 1),
+		describeChanges:  settings.DescribeChanges,
 		dailySchedule:    settings.DailySchedule,
 		reminderSchedule: settings.Schedule, reminderRecipient: repository.ReminderRecipient,
 		backgroundLimiter:  telegramlimit.New(time.Second/15, 0),
@@ -330,15 +333,26 @@ func (w *NotificationWorker) deliverScheduleBatch(
 		}
 		group := byUser[userID]
 		for i := range group {
+			if w.describeChanges != nil && len(group[i].ChangeContext) > 2 {
+				continue
+			}
 			summary, personalErr := w.personalNotification(ctx, userID, group[i].GroupID, group[i].Summary)
 			if personalErr != nil {
 				return personalErr
 			}
 			group[i].Summary = summary
 		}
+		if w.describeChanges != nil {
+			var err error
+			group, err = w.describeChanges(ctx, userID, group)
+			if err != nil {
+				return err
+			}
+		}
 		batches := notificationDigestBatches(group)
 		telegramID, err := strconv.ParseInt(userID, 10, 64)
-		for batchIndex, batch := range batches {
+		for batchIndex := 0; batchIndex < len(batches); batchIndex++ {
+			batch := batches[batchIndex]
 			if err == nil {
 				if waitErr := w.waitForTelegram(ctx, userID); waitErr != nil {
 					return context.Cause(ctx)
@@ -379,7 +393,23 @@ func (w *NotificationWorker) deliverScheduleBatch(
 				if leaseErr := context.Cause(ctx); leaseErr != nil {
 					return leaseErr
 				}
-				_, err = w.bot.Send(&tele.User{ID: telegramID}, notificationDigestBatches(activeItems)[0].Text)
+				if w.describeChanges != nil {
+					activeItems, err = w.describeChanges(ctx, userID, activeItems)
+					if err != nil {
+						return err
+					}
+				}
+				refreshed := notificationDigestBatches(activeItems)
+				message := refreshed[0]
+				batch.Items = message.Items
+				if len(refreshed) > 1 {
+					tail := append([]notificationMessage(nil), batches[batchIndex+1:]...)
+					batches = append(batches[:batchIndex+1], refreshed[1:]...)
+					batches = append(batches, tail...)
+				}
+				if message.Text != "" {
+					_, err = w.bot.Send(&tele.User{ID: telegramID}, message.Text, changeNavigation(message.Items))
+				}
 				w.limiter.Observe(err)
 			}
 			for _, item := range batch.Items {
@@ -458,7 +488,23 @@ func (w *NotificationWorker) deliverBotOutbox(ctx context.Context, item domain.B
 		}
 		item.Body = body
 	}
-	if item.Kind == "teacher_change" {
+	var changeButtons *tele.ReplyMarkup
+	if item.Kind == "teacher_change" && w.describeChanges != nil && len(item.ScheduleContext) > 2 {
+		described, describeErr := w.describeChanges(ctx, item.UserID, []domain.NotificationDelivery{{Summary: item.Body, ChangeContext: item.ScheduleContext}})
+		if describeErr != nil {
+			return guard.finish(item.ID, func(markCtx context.Context) error { return w.recordBotOutboxFailure(markCtx, item, describeErr) })
+		}
+		item.Body = described[0].Summary
+		if body := []rune(item.Body); len(body) > 3800 {
+			item.Body = string(body[:3800]) + "…\nОткройте расписание для подробностей."
+		}
+		changeButtons = changeNavigation(described)
+		if item.Body == "" {
+			return guard.finish(item.ID, func(markCtx context.Context) error {
+				return w.repository.MarkBotOutboxDelivered(markCtx, item.ID, item.ClaimToken)
+			})
+		}
+	} else if item.Kind == "teacher_change" {
 		body, personalErr := w.personalNotification(ctx, item.UserID, "", item.Body)
 		if personalErr != nil {
 			return guard.finish(item.ID, func(markCtx context.Context) error { return w.recordBotOutboxFailure(markCtx, item, personalErr) })
@@ -472,6 +518,9 @@ func (w *NotificationWorker) deliverBotOutbox(ctx context.Context, item domain.B
 		err = w.sendBroadcast(ctx, item)
 	} else if err == nil {
 		var options []any
+		if changeButtons != nil {
+			options = append(options, changeButtons)
+		}
 		body := item.Body
 		if item.Kind == "service_updates_prompt" {
 			body = domain.ServiceUpdatesPrompt
@@ -599,7 +648,7 @@ func notificationDigestBatches(items []domain.NotificationDelivery) []notificati
 			return
 		}
 		batches = append(batches, notificationMessage{
-			Text:  header + strings.Join(currentSections, ""),
+			Text:  notificationSections(header, currentSections),
 			Items: append([]domain.NotificationDelivery(nil), currentItems...),
 		})
 		currentSections = currentSections[:0]
@@ -608,13 +657,20 @@ func notificationDigestBatches(items []domain.NotificationDelivery) []notificati
 	}
 
 	for _, item := range items {
+		if item.Summary == "" {
+			currentItems = append(currentItems, item)
+			continue
+		}
 		summaryRunes := []rune(item.Summary)
-		if len(summaryRunes) > 600 {
-			summaryRunes = append(summaryRunes[:600], '…')
+		if len(summaryRunes) > 2800 {
+			summaryRunes = append(summaryRunes[:2800], '…')
 		}
 		hint := "Откройте /settings и выберите эту группу, чтобы посмотреть актуальное расписание."
 		if item.IsDefault {
 			hint = "Откройте /week, чтобы посмотреть актуальное расписание."
+		}
+		if len(item.Dates) > 0 {
+			hint = "Откройте нужный день кнопкой под сообщением."
 		}
 		section := fmt.Sprintf("\n%s · %s\n%s\n\n%s\n", item.UniversityName, item.GroupName, string(summaryRunes), hint)
 		sectionLength := len([]rune(section))
@@ -735,4 +791,40 @@ func (w *NotificationWorker) personalNotification(ctx context.Context, userID, g
 		return personal.PersonalNotification(ctx, userID, groupID, body)
 	}
 	return body, nil
+}
+
+func notificationSections(header string, sections []string) string {
+	if len(sections) == 0 {
+		return ""
+	}
+	return header + strings.Join(sections, "")
+}
+
+func changeNavigation(items []domain.NotificationDelivery) *tele.ReplyMarkup {
+	menu := &tele.ReplyMarkup{}
+	rows := []tele.Row{}
+	seen := map[string]bool{}
+	for _, item := range items {
+		for _, date := range item.Dates {
+			key := item.TargetToken + date
+			if seen[key] || len(rows) >= 6 {
+				continue
+			}
+			seen[key] = true
+			parsed, err := time.Parse("20060102", date)
+			if err != nil {
+				continue
+			}
+			label := "Открыть " + parsed.Format("02.01")
+			if item.GroupName != "" {
+				label += " · " + item.GroupName
+			}
+			rows = append(rows, menu.Row(menu.Data(label, "schedule_date", parsed.Format(time.DateOnly), item.TargetToken)))
+		}
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	menu.Inline(rows...)
+	return menu
 }

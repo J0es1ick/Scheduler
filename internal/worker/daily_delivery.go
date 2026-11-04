@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -43,6 +44,9 @@ func (w *NotificationWorker) sendDailySchedule(ctx context.Context, item domain.
 	}
 	if item.DeliveredParts == 0 {
 		messages, err = w.dailySchedule(ctx, item.UserID, date)
+		if errors.Is(err, domain.ErrEmptyDailySchedule) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}

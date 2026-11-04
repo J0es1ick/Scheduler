@@ -100,6 +100,12 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 		want                   bool
 	}{
 		{botRole, "personal_schedule_overrides", "SELECT", true},
+		{botRole, "personal_notes", "SELECT", true},
+		{botRole, "personal_notes", "INSERT", false},
+		{adminRole, "personal_notes", "INSERT", true},
+		{adminRole, "personal_notes", "DELETE", true},
+		{parserRole, "personal_notes", "SELECT", false},
+		{privacyRole, "personal_notes", "SELECT", false},
 		{botRole, "personal_schedule_overrides", "UPDATE", false},
 		{adminRole, "personal_schedule_overrides", "INSERT", true},
 		{adminRole, "personal_sessions", "DELETE", true},
@@ -173,6 +179,9 @@ func TestRuntimeDatabasePrivileges(t *testing.T) {
 		want           bool
 	}{
 		{botRole, "scheduler_profile_schedule_changed()", false},
+		{botRole, "scheduler_notification_preferences_changed()", false},
+		{parserRole, "enqueue_schedule_change(text,text,text,text,jsonb)", true},
+		{parserRole, "enqueue_teacher_change(text,text,text,text,jsonb)", true},
 		{botRole, "scheduler_service_updates_changed()", false},
 		{adminRole, "scheduler_updates_prompt_delivered()", false},
 		{botRole, "enqueue_privacy_deletion(text)", true},

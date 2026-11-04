@@ -86,3 +86,10 @@ func TestNotificationRetryDelay(t *testing.T) {
 		}
 	}
 }
+
+func TestPersonalChangeButtonsUseCalendarDateFormat(t *testing.T) {
+	menu := changeNavigation([]domain.NotificationDelivery{{Dates: []string{"20261006", "20261006"}, TargetToken: "group-token", GroupName: "4/147"}})
+	if menu == nil || len(menu.InlineKeyboard) != 1 || menu.InlineKeyboard[0][0].Data != "2026-10-06|group-token" {
+		t.Fatalf("calendar navigation: %+v", menu)
+	}
+}

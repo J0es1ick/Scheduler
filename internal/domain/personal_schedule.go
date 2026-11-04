@@ -6,6 +6,7 @@ import (
 )
 
 type PersonalTarget struct {
+	ShareURL       string   `db:"-" json:"share_url,omitempty"`
 	ID             string   `db:"id" json:"id"`
 	Role           UserRole `db:"role" json:"role"`
 	Name           string   `db:"name" json:"name"`

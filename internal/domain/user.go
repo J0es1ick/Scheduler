@@ -6,6 +6,10 @@ import (
 )
 
 type User struct {
+	DailyDayOffset                  int        `db:"daily_day_offset" json:"daily_day_offset"`
+	DailyWeekdays                   int        `db:"daily_weekdays" json:"daily_weekdays"`
+	DailySkipEmpty                  bool       `db:"daily_skip_empty" json:"daily_skip_empty"`
+	NotificationsPausedUntil        *time.Time `db:"notifications_paused_until" json:"notifications_paused_until"`
 	ServiceUpdatesConsent           *bool      `db:"service_updates_consent" json:"service_updates_consent"`
 	ServiceUpdatesAnsweredAt        *time.Time `db:"service_updates_answered_at" json:"service_updates_answered_at"`
 	ServiceUpdatesPromptKey         string     `db:"service_updates_prompt_key" json:"-"`
@@ -41,6 +45,7 @@ type PersonalAppSession struct {
 }
 
 type UserDataExport struct {
+	Notes            []PersonalNote          `json:"personal_notes"`
 	PersonalSessions []PersonalAppSession    `json:"personal_sessions"`
 	PersonalChanges  []PersonalOverride      `json:"personal_schedule_changes"`
 	Teacher          *Teacher                `json:"teacher,omitempty"`

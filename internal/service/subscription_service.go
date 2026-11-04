@@ -17,6 +17,13 @@ func NewSubscriptionService(subRepo *repository.SubscriptionRepository) *Subscri
 	return &SubscriptionService{subRepo: subRepo}
 }
 
+func (s *SubscriptionService) AcceptGroupInvitation(ctx context.Context, userID, groupID string, subgroup int, primary bool) error {
+	if subgroup < 0 || subgroup > 100 {
+		return fmt.Errorf("invalid subgroup")
+	}
+	return s.subRepo.AcceptGroupInvitation(ctx, uuid.NewString(), userID, groupID, subgroup, primary)
+}
+
 func (s *SubscriptionService) Subscribe(ctx context.Context, userID, objectID, objectType string) error {
 	id := uuid.New().String()
 	if objectType == "group" {

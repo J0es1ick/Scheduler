@@ -630,7 +630,7 @@ func (s *ParserService) snapshotPublicationHook(
 			if err != nil {
 				return err
 			}
-			if err = publication.EnqueueTeacherChanges(ctx, candidate.Payload.UniversityID, TeacherChanges(beforeLessons, afterLessons)); err != nil {
+			if err = publication.EnqueueTeacherChanges(ctx, candidate.Payload.UniversityID, TeacherChanges(beforeLessons, afterLessons), beforeLessons, afterLessons); err != nil {
 				return err
 			}
 			groupIDs := make(map[string]struct{})
@@ -648,7 +648,7 @@ func (s *ParserService) snapshotPublicationHook(
 					continue
 				}
 				if err = publication.EnqueueScheduleChange(
-					ctx, uuid.NewString(), groupID, "parser", scheduleChangeSummary(diff),
+					ctx, uuid.NewString(), groupID, "parser", scheduleChangeSummary(diff), before[groupID], after[groupID],
 				); err != nil {
 					return err
 				}

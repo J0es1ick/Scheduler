@@ -177,11 +177,12 @@ func main() {
 	notificationWorker := worker.NewNotificationWorker(notificationRepo, bot,
 		time.Duration(cfg.NotificationPollSeconds)*time.Second,
 		worker.NotificationOptions{
-			DailySchedule: handler.PrepareDailySchedule,
-			Schedule:      scheduleService,
-			BatchSize:     cfg.NotificationBatchSize,
-			MaxBatches:    cfg.NotificationMaxBatches,
-			Limiter:       telegramLimiter,
+			DailySchedule:   handler.PrepareDailySchedule,
+			DescribeChanges: scheduleService.DescribeNotifications,
+			Schedule:        scheduleService,
+			BatchSize:       cfg.NotificationBatchSize,
+			MaxBatches:      cfg.NotificationMaxBatches,
+			Limiter:         telegramLimiter,
 		})
 	notificationDone := notificationWorker.Start(ctx, workerMonitor)
 	go keepAdminMenusConfigured(ctx, bot, userRepo, cfg.Admin.PublicURL, telegramLimiter)

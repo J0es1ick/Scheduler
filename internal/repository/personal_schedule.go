@@ -20,15 +20,25 @@ func NewPersonalScheduleRepository(db *sqlx.DB) *PersonalScheduleRepository {
 	return &PersonalScheduleRepository{db: db}
 }
 
+func (r *PersonalScheduleRepository) Freshness(ctx context.Context, universityID string) (*domain.SourceFreshness, error) {
+	return NewUniversityRepository(r.db).GetSourceFreshness(ctx, universityID)
+}
+
 func (r *PersonalScheduleRepository) Targets(ctx context.Context, userID string) ([]domain.PersonalTarget, error) {
+	return r.targets(ctx, userID, false)
+}
+func (r *PersonalScheduleRepository) NotificationTargets(ctx context.Context, userID string) ([]domain.PersonalTarget, error) {
+	return r.targets(ctx, userID, true)
+}
+func (r *PersonalScheduleRepository) targets(ctx context.Context, userID string, includeInactive bool) ([]domain.PersonalTarget, error) {
 	result := []domain.PersonalTarget{}
 	err := r.db.SelectContext(ctx, &result, `SELECT g.id,u.role,g.name,g.university_id,un.name AS university_name,un.timezone,s.subgroup,COALESCE(g.id=u.default_group_id,FALSE) AS is_primary
  FROM users u JOIN subscriptions s ON s.user_id=u.id AND s.object_type='group'
  JOIN groups g ON g.id=s.object_id JOIN universities un ON un.id=g.university_id
- WHERE u.id=$1 AND u.role='student' AND (g.is_active OR EXISTS(SELECT 1 FROM personal_schedule_overrides o WHERE o.user_id=u.id AND o.role='student' AND o.target_id=g.id AND o.needs_review)) AND un.is_active
+ WHERE u.id=$1 AND u.role='student' AND ($2 OR g.is_active OR EXISTS(SELECT 1 FROM personal_schedule_overrides o WHERE o.user_id=u.id AND o.role='student' AND o.target_id=g.id AND o.needs_review)) AND ($2 OR un.is_active)
  UNION ALL SELECT t.id,u.role,t.name,t.university_id,un.name,un.timezone,0,TRUE
  FROM users u JOIN teachers t ON t.id=u.teacher_id JOIN universities un ON un.id=t.university_id
- WHERE u.id=$1 AND u.role='teacher' AND un.is_active ORDER BY is_primary DESC,name,id`, userID)
+ WHERE u.id=$1 AND u.role='teacher' AND ($2 OR un.is_active) ORDER BY is_primary DESC,name,id`, userID, includeInactive)
 	return result, err
 }
 

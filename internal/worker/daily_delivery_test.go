@@ -107,3 +107,17 @@ func TestTeacherRemindersUsePersonalIdentityAndGroupNames(t *testing.T) {
 		t.Fatalf("provider %#v queued %#v", provider, repo.enqueued)
 	}
 }
+
+func TestDailyDeliverySkipsKnownEmptyDayWithoutSending(t *testing.T) {
+	repo := &dailyProgressStub{}
+	w := &NotificationWorker{repository: repo, dailySchedule: func(context.Context, string, time.Time) ([]domain.ScheduleMessage, error) {
+		return nil, domain.ErrEmptyDailySchedule
+	}}
+	item := domain.BotOutboxDelivery{UserID: "42", ScheduleContext: json.RawMessage(`{"date":"2026-10-06","timezone":"Europe/Moscow"}`), ScheduleMessages: json.RawMessage(`[]`)}
+	if err := w.sendDailySchedule(context.Background(), item); err != nil {
+		t.Fatal(err)
+	}
+	if repo.delivered != 0 || len(repo.messages) != 0 {
+		t.Fatal("skipped day recorded Telegram parts")
+	}
+}

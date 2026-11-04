@@ -1,6 +1,11 @@
 package domain
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"errors"
+)
+
+var ErrEmptyDailySchedule = errors.New("skip empty daily schedule")
 
 type ScheduleMessage struct {
 	Text   string          `json:"text,omitempty"`

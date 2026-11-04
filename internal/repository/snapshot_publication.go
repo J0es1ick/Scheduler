@@ -550,7 +550,7 @@ func applyPublicationSnapshot(
 		return nil, err
 	}
 	if hook != nil {
-		if err = hook(ctx, &SnapshotPublication{tx: tx, beforeLessons: beforeLessons}); err != nil {
+		if err = hook(ctx, &SnapshotPublication{tx: tx, beforeLessons: beforeLessons, beforeSemesters: beforeSemesters}); err != nil {
 			return nil, fmt.Errorf("publish snapshot: transactional hook: %w", err)
 		}
 	}

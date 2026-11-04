@@ -33,6 +33,7 @@ type PersonalDay struct {
 	Lessons []PersonalLesson `json:"lessons"`
 }
 type PersonalSchedule struct {
+	Freshness   *domain.SourceFreshness   `json:"freshness"`
 	Publication string                    `json:"publication"`
 	Patterns    []PersonalPattern         `json:"patterns"`
 	Review      *PersonalReview           `json:"review,omitempty"`
@@ -81,6 +82,10 @@ func (s *ScheduleService) PersonalSchedule(ctx context.Context, userID, targetID
 		if change.Role == target.Role && change.TargetID == target.ID {
 			result.Changes = append(result.Changes, change)
 		}
+	}
+	result.Freshness, err = s.personalRepo.Freshness(ctx, target.UniversityID)
+	if err != nil {
+		return nil, err
 	}
 	result.Publication = revision
 	patterns, err := s.personalPatterns(ctx, *target, from, to)
