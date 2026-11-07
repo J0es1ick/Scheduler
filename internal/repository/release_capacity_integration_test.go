@@ -9,6 +9,7 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	operationsrepo "github.com/J0es1ick/Scheduler/internal/repository/operations"
 )
 
 func TestReleaseCapacityPublishes50000Lessons(t *testing.T) {
@@ -16,7 +17,7 @@ func TestReleaseCapacityPublishes50000Lessons(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO universities(id,name) VALUES('capacity','Synthetic'); INSERT INTO data_sources(id,university_id,adapter_type) VALUES('capacity-source','capacity','integration')`); err != nil {
 		t.Fatal(err)
 	}
-	logs := repository.NewParseLogRepository(db)
+	logs := operationsrepo.NewParseLogRepository(db)
 	if _, err := logs.CreateParseLog(ctx, "capacity-log", "capacity-source", "running", 0, ""); err != nil {
 		t.Fatal(err)
 	}

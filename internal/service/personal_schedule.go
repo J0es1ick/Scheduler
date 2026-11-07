@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -14,6 +12,7 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/helpers"
 	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/J0es1ick/Scheduler/internal/searchtext"
+	"github.com/J0es1ick/Scheduler/internal/service/validation"
 )
 
 type PersonalLesson struct {
@@ -216,17 +215,13 @@ type PersonalChangeInput struct {
 	Cancelled   bool                       `json:"cancelled"`
 }
 
-var ErrPersonalInput = errors.New("invalid personal schedule input")
-
-func personalInput(message string) error { return fmt.Errorf("%w: %s", ErrPersonalInput, message) }
-
 func (s *ScheduleService) SavePersonalChange(ctx context.Context, userID string, input PersonalChangeInput) (*domain.PersonalOverride, error) {
 	date, err := time.Parse(time.DateOnly, input.Date)
 	if err != nil || len(input.Date) != 10 {
-		return nil, personalInput("Укажите дату занятия")
+		return nil, validation.PersonalInput("Укажите дату занятия")
 	}
 	if input.Scope != "day" && input.Scope != "semester" && input.Scope != "selected" {
-		return nil, personalInput("Выберите срок действия правки")
+		return nil, validation.PersonalInput("Выберите срок действия правки")
 	}
 	schedule, err := s.PersonalSchedule(ctx, userID, input.TargetID, date, date)
 	if err != nil {
@@ -236,7 +231,7 @@ func (s *ScheduleService) SavePersonalChange(ctx context.Context, userID string,
 		return nil, repository.ErrPersonalConflict
 	}
 	if schedule.Review != nil {
-		return nil, personalInput("Сначала согласуйте правки после обновления вуза")
+		return nil, validation.PersonalInput("Сначала согласуйте правки после обновления вуза")
 	}
 	var selected *PersonalLesson
 	var lesson *domain.Lesson
@@ -249,7 +244,7 @@ func (s *ScheduleService) SavePersonalChange(ctx context.Context, userID string,
 		}
 	}
 	if lesson == nil {
-		return nil, personalInput("Занятие изменилось или больше не опубликовано. Обновите расписание")
+		return nil, validation.PersonalInput("Занятие изменилось или больше не опубликовано. Обновите расписание")
 	}
 	if err = validatePersonalPatch(input.Patch); err != nil {
 		return nil, err
@@ -261,7 +256,7 @@ func (s *ScheduleService) SavePersonalChange(ctx context.Context, userID string,
 	}
 	if input.Scope != "day" {
 		if !selected.CanRepeat {
-			return nil, personalInput("Недостаточно подтверждённых повторов. Выберите конкретную дату")
+			return nil, validation.PersonalInput("Недостаточно подтверждённых повторов. Выберите конкретную дату")
 		}
 		occurrences = selected.Repeats
 		if input.Scope == "selected" {
@@ -270,7 +265,7 @@ func (s *ScheduleService) SavePersonalChange(ctx context.Context, userID string,
 				wanted[d] = true
 			}
 			if len(wanted) == 0 || len(wanted) != len(input.Dates) {
-				return nil, personalInput("Выберите даты без повторов")
+				return nil, validation.PersonalInput("Выберите даты без повторов")
 			}
 			occurrences = []domain.PersonalOccurrence{}
 			for _, occurrence := range selected.Repeats {
@@ -280,7 +275,7 @@ func (s *ScheduleService) SavePersonalChange(ctx context.Context, userID string,
 				}
 			}
 			if len(wanted) > 0 {
-				return nil, personalInput("Выбраны даты вне подтверждённых повторов")
+				return nil, validation.PersonalInput("Выбраны даты вне подтверждённых повторов")
 			}
 		}
 		until, _ = time.Parse(time.DateOnly, occurrences[len(occurrences)-1].Date)
@@ -291,7 +286,7 @@ func (s *ScheduleService) SavePersonalChange(ctx context.Context, userID string,
 	}
 
 	if input.ID == "" && len(schedule.Changes) >= 2000 {
-		return nil, personalInput("Слишком много личных правок. Удалите ненужные")
+		return nil, validation.PersonalInput("Слишком много личных правок. Удалите ненужные")
 	}
 	key := lesson.PersonalKey
 	if key == "" {
@@ -314,31 +309,31 @@ func validatePersonalPatch(p domain.PersonalLessonPatch) error {
 		if field != nil {
 			*field = strings.TrimSpace(*field)
 			if utf8.RuneCountInString(*field) > 300 || strings.ContainsAny(*field, "\r\n\x00") {
-				return personalInput("Поле должно содержать одну строку до 300 символов")
+				return validation.PersonalInput("Поле должно содержать одну строку до 300 символов")
 			}
 		}
 	}
 	if p.Subject != nil && *p.Subject == "" {
-		return personalInput("Введите название занятия")
+		return validation.PersonalInput("Введите название занятия")
 	}
 	if p.Type != nil {
 		switch *p.Type {
 		case domain.LessonTypeLecture, domain.LessonTypePractice, domain.LessonTypeLab, domain.LessonTypeSeminar, domain.LessonTypeExam, domain.LessonTypeCredit, domain.LessonTypeConsultation, domain.LessonTypeOther:
 		default:
-			return personalInput("Неизвестный тип занятия")
+			return validation.PersonalInput("Неизвестный тип занятия")
 		}
 	}
 	if (p.TimeStart == nil) != (p.TimeEnd == nil) {
-		return personalInput("Укажите начало и окончание занятия")
+		return validation.PersonalInput("Укажите начало и окончание занятия")
 	}
 	if p.TimeStart != nil {
-		start, err := ParseDailyTime(*p.TimeStart)
+		start, err := validation.ParseDailyTime(*p.TimeStart)
 		if err != nil {
-			return personalInput("Неверное время начала")
+			return validation.PersonalInput("Неверное время начала")
 		}
-		end, err := ParseDailyTime(*p.TimeEnd)
+		end, err := validation.ParseDailyTime(*p.TimeEnd)
 		if err != nil || end <= start {
-			return personalInput("Окончание должно быть позже начала")
+			return validation.PersonalInput("Окончание должно быть позже начала")
 		}
 		*p.TimeStart = start
 		*p.TimeEnd = end

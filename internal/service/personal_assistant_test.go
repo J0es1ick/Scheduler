@@ -2,10 +2,12 @@ package service
 
 import (
 	"encoding/json"
-	"github.com/J0es1ick/Scheduler/internal/domain"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/J0es1ick/Scheduler/internal/domain"
+	"github.com/J0es1ick/Scheduler/internal/service/validation"
 )
 
 func assistantDate(value string) time.Time { date, _ := time.Parse(time.DateOnly, value); return date }
@@ -133,7 +135,7 @@ func TestNoteBindingSurvivesMoveCancellationAndAmbiguity(t *testing.T) {
 }
 func TestNotificationPreferencesValidation(t *testing.T) {
 	valid := domain.NotificationPreferences{DailyTime: "20:00", DailyWeekdays: 31, DailyDayOffset: 1, ReminderMinutes: 20, QuietStart: "22:00", QuietEnd: "07:00", Version: time.Now()}
-	if err := ValidateNotificationPreferences(valid); err != nil {
+	if err := validation.ValidateNotificationPreferences(valid); err != nil {
 		t.Fatal(err)
 	}
 	for _, modify := range []func(*domain.NotificationPreferences){
@@ -147,7 +149,7 @@ func TestNotificationPreferencesValidation(t *testing.T) {
 	} {
 		p := valid
 		modify(&p)
-		if err := ValidateNotificationPreferences(p); err == nil {
+		if err := validation.ValidateNotificationPreferences(p); err == nil {
 			t.Fatalf("accepted %+v", p)
 		}
 	}

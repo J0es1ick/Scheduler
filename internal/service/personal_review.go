@@ -9,6 +9,7 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/helpers"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	"github.com/J0es1ick/Scheduler/internal/service/validation"
 )
 
 type PersonalPattern struct {
@@ -180,7 +181,7 @@ type PersonalReviewInput struct {
 
 func (s *ScheduleService) ResolvePersonalReview(ctx context.Context, userID string, input PersonalReviewInput) (*PersonalReview, error) {
 	if input.Action != "keep" && input.Action != "discard" {
-		return nil, personalInput("Выберите, сохранить или сбросить правки")
+		return nil, validation.PersonalInput("Выберите, сохранить или сбросить правки")
 	}
 	date := helpers.NormalizeDate(time.Now())
 	schedule, err := s.PersonalSchedule(ctx, userID, input.TargetID, date, date)

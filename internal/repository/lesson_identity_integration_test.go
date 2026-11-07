@@ -11,6 +11,7 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/database"
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	operationsrepo "github.com/J0es1ick/Scheduler/internal/repository/operations"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
@@ -64,7 +65,7 @@ func TestLessonIdentityKeepsOverrideAcrossSourceEditsAndTemporaryAbsence(t *test
 	publish := func(snapshotID, incomingLessonID, subject, teacher, room string, includeLesson bool) {
 		t.Helper()
 		logID := snapshotID + "-log"
-		if _, createErr := repository.NewParseLogRepository(db).CreateParseLog(
+		if _, createErr := operationsrepo.NewParseLogRepository(db).CreateParseLog(
 			ctx, logID, sourceID, "running", 0, "",
 		); createErr != nil {
 			t.Fatal(createErr)
@@ -208,7 +209,7 @@ func TestLessonIdentityPublishesWhenSyntheticSlotOrderChanges(t *testing.T) {
 	publish := func(snapshotID string, lessons []domain.Lesson) {
 		t.Helper()
 		logID := snapshotID + "-log"
-		if _, createErr := repository.NewParseLogRepository(db).CreateParseLog(
+		if _, createErr := operationsrepo.NewParseLogRepository(db).CreateParseLog(
 			ctx, logID, sourceID, "running", len(lessons), "",
 		); createErr != nil {
 			t.Fatal(createErr)

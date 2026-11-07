@@ -9,6 +9,7 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/searchtext"
+	"github.com/J0es1ick/Scheduler/internal/service/validation"
 )
 
 type PersonalNoteInput struct {
@@ -26,20 +27,20 @@ type PersonalNoteInput struct {
 func (s *ScheduleService) SavePersonalNote(ctx context.Context, userID string, input PersonalNoteInput) (*domain.PersonalNote, error) {
 	input.Body = strings.TrimSpace(input.Body)
 	if input.Body == "" || utf8.RuneCountInString(input.Body) > 4000 || strings.ContainsRune(input.Body, 0) {
-		return nil, personalInput("Напишите заметку от 1 до 4000 символов")
+		return nil, validation.PersonalInput("Напишите заметку от 1 до 4000 символов")
 	}
 	item := domain.PersonalNote{ID: input.ID, UserID: userID, Body: input.Body, Completed: input.Completed, Basis: json.RawMessage(`{}`)}
 	if input.DueDate != "" {
 		date, err := time.Parse(time.DateOnly, input.DueDate)
 		if err != nil || len(input.DueDate) != 10 {
-			return nil, personalInput("Укажите срок в формате ГГГГ-ММ-ДД")
+			return nil, validation.PersonalInput("Укажите срок в формате ГГГГ-ММ-ДД")
 		}
 		item.DueDate = &date
 	}
 	if input.ID == "" || input.Rebind {
 		date, err := time.Parse(time.DateOnly, input.Date)
 		if err != nil {
-			return nil, personalInput("Выберите дату занятия")
+			return nil, validation.PersonalInput("Выберите дату занятия")
 		}
 		agenda, err := s.PersonalAgenda(ctx, userID, input.TargetID, date, date)
 		if err != nil {
@@ -64,7 +65,7 @@ func (s *ScheduleService) SavePersonalNote(ctx context.Context, userID string, i
 			}
 		}
 		if !found {
-			return nil, personalInput("Занятие изменилось. Обновите расписание и выберите его снова")
+			return nil, validation.PersonalInput("Занятие изменилось. Обновите расписание и выберите его снова")
 		}
 	}
 	return s.personalRepo.SaveNote(ctx, item, input.Version, input.Rebind)

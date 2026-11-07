@@ -11,6 +11,7 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	operationsrepo "github.com/J0es1ick/Scheduler/internal/repository/operations"
 	"github.com/J0es1ick/Scheduler/internal/service"
 )
 
@@ -74,7 +75,7 @@ func TestRetryCannotOverwriteNewerPublication(t *testing.T) {
 		t.Fatalf("claim B: %+v %v", claim, err)
 	}
 	groups := repository.NewGroupRepository(db)
-	parser := service.NewParserService(repository.NewDataSourceRepository(db), repository.NewParseLogRepository(db), groups, service.NewScheduleService(repository.NewLessonRepository(db), repository.NewSemesterRepository(db), groups), repository.NewParserSnapshotRepository(db), repository.NewNotificationRepository(db), repository.NewParserDiagnosticRepository(db))
+	parser := service.NewParserService(repository.NewDataSourceRepository(db), operationsrepo.NewParseLogRepository(db), groups, service.NewScheduleService(repository.NewLessonRepository(db), repository.NewSemesterRepository(db), groups), repository.NewParserSnapshotRepository(db), repository.NewNotificationRepository(db), operationsrepo.NewParserDiagnosticRepository(db))
 	start := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 4, 0)
 	payload := func(seq int64, room string) domain.ScheduleSnapshot {

@@ -16,6 +16,7 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/database"
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	operationsrepo "github.com/J0es1ick/Scheduler/internal/repository/operations"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
@@ -156,7 +157,7 @@ func TestParserFinalizationRollsBackOnSourceUpdateFailure(t *testing.T) {
 	if _, err := dataSources.CreateDataSource(ctx, sourceID, universityID, "integration", "{}", 3600); err != nil {
 		t.Fatal(err)
 	}
-	parseLogs := repository.NewParseLogRepository(db)
+	parseLogs := operationsrepo.NewParseLogRepository(db)
 	if _, err := parseLogs.CreateParseLog(ctx, logID, sourceID, "running", 0, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +292,7 @@ func TestParserRetentionBoundsParserPayloadsAndHistory(t *testing.T) {
 			t.Errorf("clean up retention audit fixture: %v", err)
 		}
 	})
-	parseLogs := repository.NewParseLogRepository(db)
+	parseLogs := operationsrepo.NewParseLogRepository(db)
 	if _, err := parseLogs.CreateParseLog(ctx, logID, sourceID, "failed", 0, "old failure"); err != nil {
 		t.Fatal(err)
 	}
@@ -441,7 +442,7 @@ func TestDeleteUserRevokesSessionsAndAnonymizesOperationalReferences(t *testing.
 	); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repository.NewParseLogRepository(db).CreateParseLog(
+	if _, err := operationsrepo.NewParseLogRepository(db).CreateParseLog(
 		ctx, logID, sourceID, "success", 0, "",
 	); err != nil {
 		t.Fatal(err)

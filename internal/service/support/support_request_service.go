@@ -1,4 +1,4 @@
-package service
+package support
 
 import (
 	"context"
@@ -8,17 +8,17 @@ import (
 	"unicode/utf8"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
-	"github.com/J0es1ick/Scheduler/internal/repository"
+	supportrepo "github.com/J0es1ick/Scheduler/internal/repository/support"
 	"github.com/google/uuid"
 )
 
 var ErrInvalidSupportRequest = errors.New("invalid support request")
 
 type SupportRequestService struct {
-	repository *repository.SupportRequestRepository
+	repository *supportrepo.SupportRequestRepository
 }
 
-func NewSupportRequestService(repository *repository.SupportRequestRepository) *SupportRequestService {
+func NewSupportRequestService(repository *supportrepo.SupportRequestRepository) *SupportRequestService {
 	return &SupportRequestService{repository: repository}
 }
 

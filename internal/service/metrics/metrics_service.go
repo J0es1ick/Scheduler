@@ -1,17 +1,17 @@
-package service
+package metrics
 
 import (
 	"context"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
-	"github.com/J0es1ick/Scheduler/internal/repository"
+	operationsrepo "github.com/J0es1ick/Scheduler/internal/repository/operations"
 )
 
 type MetricsService struct {
-	repo *repository.MetricsRepository
+	repo *operationsrepo.MetricsRepository
 }
 
-func NewMetricsService(repo *repository.MetricsRepository) *MetricsService {
+func NewMetricsService(repo *operationsrepo.MetricsRepository) *MetricsService {
 	return &MetricsService{repo: repo}
 }
 

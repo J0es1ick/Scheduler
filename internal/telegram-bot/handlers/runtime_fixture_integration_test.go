@@ -13,7 +13,13 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/database"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	operationsrepo "github.com/J0es1ick/Scheduler/internal/repository/operations"
+	supportrepo "github.com/J0es1ick/Scheduler/internal/repository/support"
 	"github.com/J0es1ick/Scheduler/internal/service"
+	catalogservice "github.com/J0es1ick/Scheduler/internal/service/catalog"
+	metricsservice "github.com/J0es1ick/Scheduler/internal/service/metrics"
+	profileservice "github.com/J0es1ick/Scheduler/internal/service/profiles"
+	supportservice "github.com/J0es1ick/Scheduler/internal/service/support"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/state"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -96,7 +102,7 @@ func newRuntimeJourney(t *testing.T) *runtimeJourney {
 	}
 	botDB, adminDB, privacyDB := connectRole(roles[0]), connectRole(roles[1]), connectRole(roles[3])
 	schedule := service.NewScheduleService(repository.NewLessonRepository(botDB), repository.NewSemesterRepository(botDB), repository.NewGroupRepository(botDB))
-	h := NewHandler(schedule, service.NewUserService(repository.NewUserRepository(botDB)), service.NewGroupService(repository.NewGroupRepository(botDB)), service.NewUniversityService(repository.NewUniversityRepository(botDB)), state.NewManager(), service.NewSubscriptionService(repository.NewSubscriptionRepository(botDB)), service.NewSupportRequestService(repository.NewSupportRequestRepository(botDB)), service.NewMetricsService(repository.NewMetricsRepository(botDB)), service.NewChatProfileService(repository.NewChatProfileRepository(botDB)), nil, "", "https://example.test/project")
+	h := NewHandler(schedule, profileservice.NewUserService(repository.NewUserRepository(botDB)), catalogservice.NewGroupService(repository.NewGroupRepository(botDB)), catalogservice.NewUniversityService(repository.NewUniversityRepository(botDB)), state.NewManager(), service.NewSubscriptionService(repository.NewSubscriptionRepository(botDB)), supportservice.NewSupportRequestService(supportrepo.NewSupportRequestRepository(botDB)), metricsservice.NewMetricsService(operationsrepo.NewMetricsRepository(botDB)), profileservice.NewChatProfileService(repository.NewChatProfileRepository(botDB)), nil, "", "https://example.test/project")
 	location, err := time.LoadLocation("Europe/Moscow")
 	if err != nil {
 		t.Fatal(err)

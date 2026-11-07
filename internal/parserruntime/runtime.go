@@ -5,6 +5,7 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/declarative"
 	"github.com/J0es1ick/Scheduler/internal/managedparser"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	operationsrepo "github.com/J0es1ick/Scheduler/internal/repository/operations"
 	"github.com/J0es1ick/Scheduler/internal/scraper/ispu"
 	"github.com/J0es1ick/Scheduler/internal/scraper/isuct"
 	"github.com/J0es1ick/Scheduler/internal/service"
@@ -20,12 +21,12 @@ func New(db *sqlx.DB) *service.ParserService {
 	)
 	parserService := service.NewParserService(
 		repository.NewDataSourceRepository(db),
-		repository.NewParseLogRepository(db),
+		operationsrepo.NewParseLogRepository(db),
 		groupRepo,
 		scheduleService,
 		repository.NewParserSnapshotRepository(db),
 		repository.NewNotificationRepository(db),
-		repository.NewParserDiagnosticRepository(db),
+		operationsrepo.NewParserDiagnosticRepository(db),
 	)
 	parserService.RegisterAdapter(isuct.UniversityID, isuct.New(""))
 	parserService.RegisterAdapter(ispu.UniversityID, ispu.New(""))

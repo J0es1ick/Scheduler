@@ -9,7 +9,8 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
-	"github.com/J0es1ick/Scheduler/internal/service"
+	supportrepo "github.com/J0es1ick/Scheduler/internal/repository/support"
+	supportservice "github.com/J0es1ick/Scheduler/internal/service/support"
 )
 
 func TestTelegramUXFeedbackAndTimeGrid(t *testing.T) {
@@ -23,7 +24,7 @@ func TestTelegramUXFeedbackAndTimeGrid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	support := service.NewSupportRequestService(repository.NewSupportRequestRepository(db))
+	support := supportservice.NewSupportRequestService(supportrepo.NewSupportRequestRepository(db))
 	id, err := support.Submit(ctx, "student", domain.SupportRequestFeedback, "Хочу предложить настройку размера текста в боте")
 	if err != nil {
 		t.Fatal(err)

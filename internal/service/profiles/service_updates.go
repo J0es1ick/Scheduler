@@ -1,6 +1,8 @@
-package service
+package profiles
 
-import "context"
+import (
+	"context"
+)
 
 func (s *UserService) SetServiceUpdates(ctx context.Context, userID string, enabled bool, promptKey string) (bool, error) {
 	return s.userRepo.SetServiceUpdates(ctx, userID, enabled, promptKey)

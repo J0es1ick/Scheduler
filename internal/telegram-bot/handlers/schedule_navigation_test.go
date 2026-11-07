@@ -13,7 +13,8 @@ import (
 	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
-	"github.com/J0es1ick/Scheduler/internal/service"
+	catalogservice "github.com/J0es1ick/Scheduler/internal/service/catalog"
+	profileservice "github.com/J0es1ick/Scheduler/internal/service/profiles"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/state"
@@ -507,7 +508,7 @@ func TestCloseInlineRestoresPersistentMainMenuInPrivateChat(t *testing.T) {
 }
 
 type navigationUserService struct {
-	*service.UserService
+	*profileservice.UserService
 	user domain.User
 }
 
@@ -530,7 +531,7 @@ func (s *navigationUserService) IsAdmin(context.Context, string) (bool, error) {
 }
 
 type navigationGroupService struct {
-	*service.GroupService
+	*catalogservice.GroupService
 	group       domain.Group
 	nameLookups int
 }
@@ -546,7 +547,7 @@ func (s *navigationGroupService) GetGroupByName(context.Context, string, string)
 }
 
 type navigationUniversityService struct {
-	*service.UniversityService
+	*catalogservice.UniversityService
 	universities map[string]domain.University
 }
 

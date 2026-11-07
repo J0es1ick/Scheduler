@@ -8,6 +8,7 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/J0es1ick/Scheduler/internal/service"
+	profileservice "github.com/J0es1ick/Scheduler/internal/service/profiles"
 )
 
 func (s *Server) handlePersonalNotifications(w http.ResponseWriter, r *http.Request) {
@@ -19,7 +20,7 @@ func (s *Server) handlePersonalNotifications(w http.ResponseWriter, r *http.Requ
 			writeAPIError(w, http.StatusBadRequest, "Некорректные настройки")
 			return
 		}
-		if err := service.NewUserService(users).SaveNotificationPreferences(r.Context(), userID, input); err != nil {
+		if err := profileservice.NewUserService(users).SaveNotificationPreferences(r.Context(), userID, input); err != nil {
 			if errors.Is(err, repository.ErrPersonalConflict) {
 				writeAPIError(w, http.StatusConflict, "Настройки уже изменились. Загрузите сохранённые настройки и повторите")
 			} else {

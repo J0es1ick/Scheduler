@@ -11,6 +11,7 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	operationsrepo "github.com/J0es1ick/Scheduler/internal/repository/operations"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )
@@ -249,7 +250,7 @@ func (s *Store) OperationalHealth(ctx context.Context) (*OperationalHealth, erro
 	); err != nil {
 		return nil, fmt.Errorf("load operational health: %w", err)
 	}
-	workerStatus, err := repository.NewWorkerStatusRepository(s.db).Get(
+	workerStatus, err := operationsrepo.NewWorkerStatusRepository(s.db).Get(
 		ctx,
 		domain.LessonReminderWorker,
 	)
@@ -257,7 +258,7 @@ func (s *Store) OperationalHealth(ctx context.Context) (*OperationalHealth, erro
 		return nil, fmt.Errorf("load reminder worker health: %w", err)
 	}
 	result.ReminderWorker = *workerStatus
-	dailyStatus, err := repository.NewWorkerStatusRepository(s.db).Get(ctx, "daily_schedule")
+	dailyStatus, err := operationsrepo.NewWorkerStatusRepository(s.db).Get(ctx, "daily_schedule")
 	if err != nil {
 		return nil, err
 	}

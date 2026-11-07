@@ -7,12 +7,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/J0es1ick/Scheduler/internal/domain"
-	"github.com/J0es1ick/Scheduler/internal/repository"
-	"github.com/J0es1ick/Scheduler/internal/service"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/J0es1ick/Scheduler/internal/domain"
+	"github.com/J0es1ick/Scheduler/internal/repository"
+	operationsrepo "github.com/J0es1ick/Scheduler/internal/repository/operations"
+	"github.com/J0es1ick/Scheduler/internal/service"
+	"github.com/J0es1ick/Scheduler/internal/service/validation"
 )
 
 func TestPersonalScheduleIsolationRecurrenceAndQueue(t *testing.T) {
@@ -202,7 +205,7 @@ func TestPersonalPublicationReviewAndSelectedRepeats(t *testing.T) {
 			day := start.AddDate(0, 0, week*7)
 			lessons = append(lessons, domain.Lesson{ID: fmt.Sprintf("%s-%d", id, week), UniversityID: "review", SemesterID: "term", GroupID: "group", SpecialDate: &day, WeekType: domain.WeekTypeDate, TimeStart: "09:00", TimeEnd: "10:30", Subject: subject, Type: domain.LessonTypeLecture, Room: "100"})
 		}
-		if _, err := repository.NewParseLogRepository(db).CreateParseLog(ctx, id+"-log", "source", "running", 0, ""); err != nil {
+		if _, err := operationsrepo.NewParseLogRepository(db).CreateParseLog(ctx, id+"-log", "source", "running", 0, ""); err != nil {
 			t.Fatal(err)
 		}
 		snapshot := domain.ParserSnapshot{ID: id, DataSourceID: "source", ParseLogID: id + "-log", Status: domain.SnapshotStatusStaged, Publishable: true, GroupCount: 1, LessonCount: len(lessons), Payload: domain.ScheduleSnapshot{UniversityID: "review", SemesterID: "term", StartDate: start, EndDate: start.AddDate(0, 0, 12*7-1), Groups: []domain.SnapshotGroup{{ID: "group", UniversityID: "review", Name: "4/147", Lessons: lessons}}}}
@@ -236,7 +239,7 @@ func TestPersonalPublicationReviewAndSelectedRepeats(t *testing.T) {
 		t.Fatal(err)
 	}
 	input.Dates = []string{"2026-09-08"}
-	if _, err = scheduler.SavePersonalChange(ctx, "review-user", input); !errors.Is(err, service.ErrPersonalInput) {
+	if _, err = scheduler.SavePersonalChange(ctx, "review-user", input); !errors.Is(err, validation.ErrPersonalInput) {
 		t.Fatal("invalid date accepted", err)
 	}
 	publish("identical", "Physics", false)

@@ -9,7 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
-	"github.com/J0es1ick/Scheduler/internal/repository"
+	supportrepo "github.com/J0es1ick/Scheduler/internal/repository/support"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	tele "gopkg.in/telebot.v3"
@@ -104,10 +104,10 @@ func (h *Handler) HandleHotlineSubmission(c tele.Context, input string) error {
 	ctx, cancel := reqCtx()
 	defer cancel()
 	id, err := h.SupportRequestService.Submit(ctx, fmt.Sprint(c.Sender().ID), state.HotlineType, state.HotlineContext+details)
-	if errors.Is(err, repository.ErrSupportRequestBlocked) {
+	if errors.Is(err, supportrepo.ErrSupportRequestBlocked) {
 		return nil
 	}
-	if errors.Is(err, repository.ErrSupportRequestLimit) {
+	if errors.Is(err, supportrepo.ErrSupportRequestLimit) {
 		return c.Send("У вас уже есть три открытых обращения. Дождитесь решения администратора.", hotlineCancelButton(state.FlowNonce))
 	}
 	if err != nil {

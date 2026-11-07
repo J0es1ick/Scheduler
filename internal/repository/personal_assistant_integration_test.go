@@ -5,13 +5,15 @@ package repository_test
 import (
 	"encoding/json"
 	"errors"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/J0es1ick/Scheduler/internal/searchtext"
 	"github.com/J0es1ick/Scheduler/internal/service"
-	"strings"
-	"testing"
-	"time"
+	profileservice "github.com/J0es1ick/Scheduler/internal/service/profiles"
 )
 
 func TestAssistantPreferencesScheduleAndInvalidateQueuedMessages(t *testing.T) {
@@ -35,7 +37,7 @@ func TestAssistantPreferencesScheduleAndInvalidateQueuedMessages(t *testing.T) {
 	preferences.DailyDayOffset = 1
 	preferences.DailyWeekdays = 1
 	preferences.DailySkipEmpty = true
-	if err = service.NewUserService(users).SaveNotificationPreferences(ctx, "42", preferences); err != nil {
+	if err = profileservice.NewUserService(users).SaveNotificationPreferences(ctx, "42", preferences); err != nil {
 		t.Fatal(err)
 	}
 	if err = users.SaveNotificationPreferences(ctx, "42", preferences); !errors.Is(err, repository.ErrPersonalConflict) {

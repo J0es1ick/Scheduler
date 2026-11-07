@@ -13,6 +13,7 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/database"
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	operationsrepo "github.com/J0es1ick/Scheduler/internal/repository/operations"
 	"github.com/J0es1ick/Scheduler/internal/service"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -92,7 +93,7 @@ func TestSignedSnapshotIntakeAndStaging(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	parseLogs := repository.NewParseLogRepository(db)
+	parseLogs := operationsrepo.NewParseLogRepository(db)
 	if _, err = parseLogs.CreateParseLog(ctx, oldParseLogID, oldSourceID, "running", 0, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -137,10 +138,10 @@ func TestSignedSnapshotIntakeAndStaging(t *testing.T) {
 
 	groupRepo := repository.NewGroupRepository(db)
 	parser := service.NewParserService(
-		repository.NewDataSourceRepository(db), repository.NewParseLogRepository(db), groupRepo,
+		repository.NewDataSourceRepository(db), operationsrepo.NewParseLogRepository(db), groupRepo,
 		service.NewScheduleService(repository.NewLessonRepository(db), repository.NewSemesterRepository(db), groupRepo),
 		repository.NewParserSnapshotRepository(db), repository.NewNotificationRepository(db),
-		repository.NewParserDiagnosticRepository(db),
+		operationsrepo.NewParserDiagnosticRepository(db),
 	)
 	ingestion := NewService(repo, parser)
 	server := httptest.NewServer(NewServer(repo).Handler())
@@ -493,7 +494,7 @@ func TestConnectorActivationRollsBackOnPublicationFailure(t *testing.T) {
 	if _, err = dataSources.CreateDataSource(ctx, oldSourceID, universityID, "integration", "{}", 3600); err != nil {
 		t.Fatal(err)
 	}
-	parseLogs := repository.NewParseLogRepository(db)
+	parseLogs := operationsrepo.NewParseLogRepository(db)
 	snapshots := repository.NewParserSnapshotRepository(db)
 	start := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2027, time.January, 31, 0, 0, 0, 0, time.UTC)

@@ -9,7 +9,7 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/searchtext"
-	"github.com/J0es1ick/Scheduler/internal/service"
+	"github.com/J0es1ick/Scheduler/internal/service/validation"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/state"
 	tele "gopkg.in/telebot.v3"
 )
@@ -45,7 +45,7 @@ func (f *roleProfileFake) SetDailySetup(_ context.Context, _ string, step string
 	return nil
 }
 func (f *roleProfileFake) SetDailySchedule(_ context.Context, _ string, enabled bool, clock string) error {
-	parsed, err := service.ParseDailyTime(clock)
+	parsed, err := validation.ParseDailyTime(clock)
 	if err != nil {
 		return err
 	}

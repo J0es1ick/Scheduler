@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
-	"github.com/J0es1ick/Scheduler/internal/service"
+	catalogservice "github.com/J0es1ick/Scheduler/internal/service/catalog"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/state"
 	tele "gopkg.in/telebot.v3"
@@ -66,7 +66,7 @@ func TestQualifiedGroupInput(t *testing.T) {
 }
 
 type inputScenarioGroups struct {
-	*service.GroupService
+	*catalogservice.GroupService
 	groups []domain.Group
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/database"
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	supportrepo "github.com/J0es1ick/Scheduler/internal/repository/support"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jmoiron/sqlx"
@@ -142,7 +143,7 @@ func TestUserRestrictionAPIRequiresOwnerAndCSRF(t *testing.T) {
 		}
 		done := make(chan error, 1)
 		go func() {
-			done <- repository.NewSupportRequestRepository(db).Create(ctx, "waiting-"+target, target, domain.SupportRequestFeedback, "Synthetic feedback concurrent with a restriction")
+			done <- supportrepo.NewSupportRequestRepository(db).Create(ctx, "waiting-"+target, target, domain.SupportRequestFeedback, "Synthetic feedback concurrent with a restriction")
 		}()
 		for {
 			var waiting bool
@@ -163,7 +164,7 @@ func TestUserRestrictionAPIRequiresOwnerAndCSRF(t *testing.T) {
 		if err = tx.Commit(); err != nil {
 			t.Fatal(err)
 		}
-		if err = <-done; !errors.Is(err, repository.ErrSupportRequestBlocked) {
+		if err = <-done; !errors.Is(err, supportrepo.ErrSupportRequestBlocked) {
 			t.Fatalf("submission bypassed ban: %v", err)
 		}
 	})

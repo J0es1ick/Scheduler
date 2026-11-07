@@ -7,13 +7,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/J0es1ick/Scheduler/internal/service"
+	profileservice "github.com/J0es1ick/Scheduler/internal/service/profiles"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/state"
 	tele "gopkg.in/telebot.v3"
 )
 
 type unlinkChatService struct {
-	*service.ChatProfileService
+	*profileservice.ChatProfileService
 	deleted int
 }
 

@@ -9,6 +9,7 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/admin"
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	supportrepo "github.com/J0es1ick/Scheduler/internal/repository/support"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/dto"
 	tele "gopkg.in/telebot.v3"
 )
@@ -41,8 +42,8 @@ func TestRuntimeUserRestrictionsSupportAndDelivery(t *testing.T) {
 		}
 	}
 	change(false, true)
-	support := repository.NewSupportRequestRepository(j.botDB)
-	if err := support.Create(j.ctx, "blocked-request", "42", domain.SupportRequestFeedback, "This feedback must never be accepted"); !errors.Is(err, repository.ErrSupportRequestBlocked) {
+	support := supportrepo.NewSupportRequestRepository(j.botDB)
+	if err := support.Create(j.ctx, "blocked-request", "42", domain.SupportRequestFeedback, "This feedback must never be accepted"); !errors.Is(err, supportrepo.ErrSupportRequestBlocked) {
 		t.Fatalf("support restriction: %v", err)
 	}
 	j.h.StateManager.Set(42, &dto.UserState{Step: "awaiting_hotline_submission", HotlineType: domain.SupportRequestFeedback})

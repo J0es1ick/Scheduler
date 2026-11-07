@@ -13,6 +13,7 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/database"
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	operationsrepo "github.com/J0es1ick/Scheduler/internal/repository/operations"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
@@ -69,9 +70,9 @@ func TestPostgresRepositoryFlow(t *testing.T) {
 	users := repository.NewUserRepository(db)
 	subscriptions := repository.NewSubscriptionRepository(db)
 	reminders := repository.NewReminderRepository(db)
-	workers := repository.NewWorkerStatusRepository(db)
+	workers := operationsrepo.NewWorkerStatusRepository(db)
 	dataSources := repository.NewDataSourceRepository(db)
-	parseLogs := repository.NewParseLogRepository(db)
+	parseLogs := operationsrepo.NewParseLogRepository(db)
 	snapshots := repository.NewParserSnapshotRepository(db)
 	notifications := repository.NewNotificationRepository(db)
 	if _, err = notifications.ClaimPending(ctx, 1); err != nil {

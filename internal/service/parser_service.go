@@ -16,11 +16,11 @@ import (
 	"time"
 
 	connector "github.com/J0es1ick/Scheduler/connector/v1"
-	"github.com/J0es1ick/Scheduler/internal/snapshotconvert"
-
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	operationsrepo "github.com/J0es1ick/Scheduler/internal/repository/operations"
 	"github.com/J0es1ick/Scheduler/internal/scraper"
+	"github.com/J0es1ick/Scheduler/internal/snapshotconvert"
 	"github.com/google/uuid"
 )
 
@@ -41,24 +41,24 @@ var (
 
 type ParserService struct {
 	dataSourceRepo   *repository.DataSourceRepository
-	parseLogRepo     *repository.ParseLogRepository
+	parseLogRepo     *operationsrepo.ParseLogRepository
 	groupRepo        *repository.GroupRepository
 	scheduleSvc      *ScheduleService
 	snapshotRepo     *repository.ParserSnapshotRepository
 	notificationRepo *repository.NotificationRepository
-	diagnosticRepo   *repository.ParserDiagnosticRepository
+	diagnosticRepo   *operationsrepo.ParserDiagnosticRepository
 	adapters         map[string]scraper.SourceAdapter
 	adapterFactories map[string]func(config string) (scraper.SourceAdapter, error)
 }
 
 func NewParserService(
 	dataSourceRepo *repository.DataSourceRepository,
-	parseLogRepo *repository.ParseLogRepository,
+	parseLogRepo *operationsrepo.ParseLogRepository,
 	groupRepo *repository.GroupRepository,
 	scheduleSvc *ScheduleService,
 	snapshotRepo *repository.ParserSnapshotRepository,
 	notificationRepo *repository.NotificationRepository,
-	diagnosticRepo *repository.ParserDiagnosticRepository,
+	diagnosticRepo *operationsrepo.ParserDiagnosticRepository,
 ) *ParserService {
 	return &ParserService{
 		dataSourceRepo:   dataSourceRepo,

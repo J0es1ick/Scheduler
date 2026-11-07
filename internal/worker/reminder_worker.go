@@ -13,6 +13,7 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	operationsrepo "github.com/J0es1ick/Scheduler/internal/repository/operations"
 	"github.com/J0es1ick/Scheduler/internal/service"
 )
 
@@ -57,7 +58,7 @@ type reminderScheduleCache map[string]map[string][]domain.Lesson
 
 func NewReminderWorker(
 	repository *repository.ReminderRepository,
-	statusRepository *repository.WorkerStatusRepository,
+	statusRepository *operationsrepo.WorkerStatusRepository,
 	scheduleService *service.ScheduleService,
 	interval time.Duration,
 ) *ReminderWorker {

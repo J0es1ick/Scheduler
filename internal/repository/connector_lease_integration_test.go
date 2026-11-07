@@ -12,6 +12,7 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/database"
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	operationsrepo "github.com/J0es1ick/Scheduler/internal/repository/operations"
 	"github.com/J0es1ick/Scheduler/internal/service"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -151,12 +152,12 @@ func TestExpiredConnectorLeaseCannotPublishSchedule(t *testing.T) {
 
 	groupRepo := repository.NewGroupRepository(db)
 	parser := service.NewParserService(
-		repository.NewDataSourceRepository(db), repository.NewParseLogRepository(db), groupRepo,
+		repository.NewDataSourceRepository(db), operationsrepo.NewParseLogRepository(db), groupRepo,
 		service.NewScheduleService(
 			repository.NewLessonRepository(db), repository.NewSemesterRepository(db), groupRepo,
 		),
 		repository.NewParserSnapshotRepository(db), repository.NewNotificationRepository(db),
-		repository.NewParserDiagnosticRepository(db),
+		operationsrepo.NewParserDiagnosticRepository(db),
 	)
 	start := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, time.December, 31, 0, 0, 0, 0, time.UTC)

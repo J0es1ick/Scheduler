@@ -8,6 +8,7 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/admin"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	operationsrepo "github.com/J0es1ick/Scheduler/internal/repository/operations"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )
@@ -124,7 +125,7 @@ func TestOldestPendingMetricCountsOnlyDeliverableMessages(t *testing.T) {
 
 func assertOldestPending(t *testing.T, ctx context.Context, db *sqlx.DB, minimum int64) {
 	t.Helper()
-	serviceMetrics, err := repository.NewMetricsRepository(db).Get(ctx)
+	serviceMetrics, err := operationsrepo.NewMetricsRepository(db).Get(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

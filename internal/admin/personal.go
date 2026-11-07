@@ -11,6 +11,7 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/repository"
 	"github.com/J0es1ick/Scheduler/internal/service"
+	"github.com/J0es1ick/Scheduler/internal/service/validation"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/keyboards"
 )
 
@@ -220,8 +221,8 @@ func (s *Server) personalError(w http.ResponseWriter, err error) {
 		writeAPIError(w, http.StatusForbidden, "Это расписание недоступно. Проверьте профиль в боте")
 	case errors.Is(err, repository.ErrPersonalConflict):
 		writeAPIError(w, http.StatusConflict, "Правка уже изменилась. Обновите расписание и повторите")
-	case errors.Is(err, service.ErrPersonalInput):
-		writeAPIError(w, http.StatusBadRequest, err.Error()[len(service.ErrPersonalInput.Error())+2:])
+	case errors.Is(err, validation.ErrPersonalInput):
+		writeAPIError(w, http.StatusBadRequest, err.Error()[len(validation.ErrPersonalInput.Error())+2:])
 	default:
 		slog.Error("personal schedule request failed", "err", err)
 		writeAPIError(w, http.StatusInternalServerError, "Не удалось сохранить или загрузить личное расписание")

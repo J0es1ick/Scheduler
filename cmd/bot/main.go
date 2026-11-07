@@ -19,7 +19,13 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/logging"
 	"github.com/J0es1ick/Scheduler/internal/miniapp"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	operationsrepo "github.com/J0es1ick/Scheduler/internal/repository/operations"
+	supportrepo "github.com/J0es1ick/Scheduler/internal/repository/support"
 	"github.com/J0es1ick/Scheduler/internal/service"
+	catalogservice "github.com/J0es1ick/Scheduler/internal/service/catalog"
+	metricsservice "github.com/J0es1ick/Scheduler/internal/service/metrics"
+	profileservice "github.com/J0es1ick/Scheduler/internal/service/profiles"
+	supportservice "github.com/J0es1ick/Scheduler/internal/service/support"
 	botpkg "github.com/J0es1ick/Scheduler/internal/telegram-bot"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/handlers"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/state"
@@ -100,22 +106,22 @@ func main() {
 	groupRepo := repository.NewGroupRepository(db.DB)
 	universityRepo := repository.NewUniversityRepository(db.DB)
 	subscriptionRepo := repository.NewSubscriptionRepository(db.DB)
-	supportRequestRepo := repository.NewSupportRequestRepository(db.DB)
-	metricsRepo := repository.NewMetricsRepository(db.DB)
+	supportRequestRepo := supportrepo.NewSupportRequestRepository(db.DB)
+	metricsRepo := operationsrepo.NewMetricsRepository(db.DB)
 	chatProfileRepo := repository.NewChatProfileRepository(db.DB)
 	reminderRepo := repository.NewReminderRepository(db.DB)
-	workerStatusRepo := repository.NewWorkerStatusRepository(db.DB)
+	workerStatusRepo := operationsrepo.NewWorkerStatusRepository(db.DB)
 	notificationRepo := repository.NewNotificationRepository(db.DB)
 
 	// --- Сервисы ---
 	scheduleService := service.NewScheduleService(lessonRepo, semesterRepo, groupRepo)
-	userService := service.NewUserService(userRepo)
+	userService := profileservice.NewUserService(userRepo)
 	subscriptionService := service.NewSubscriptionService(subscriptionRepo)
-	supportRequestService := service.NewSupportRequestService(supportRequestRepo)
-	metricsService := service.NewMetricsService(metricsRepo)
-	chatProfileService := service.NewChatProfileService(chatProfileRepo)
-	groupService := service.NewGroupService(groupRepo)
-	universityService := service.NewUniversityService(universityRepo)
+	supportRequestService := supportservice.NewSupportRequestService(supportRequestRepo)
+	metricsService := metricsservice.NewMetricsService(metricsRepo)
+	chatProfileService := profileservice.NewChatProfileService(chatProfileRepo)
+	groupService := catalogservice.NewGroupService(groupRepo)
+	universityService := catalogservice.NewUniversityService(universityRepo)
 	// --- Telegram ---
 	stateCleanupDone := stateManager.StartCleanup(ctx, time.Minute)
 	handler := handlers.NewHandler(

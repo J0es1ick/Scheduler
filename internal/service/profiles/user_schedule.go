@@ -1,12 +1,11 @@
-package service
+package profiles
 
 import (
 	"context"
 	"fmt"
-	"strings"
-	"time"
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
+	"github.com/J0es1ick/Scheduler/internal/service/validation"
 )
 
 func (s *UserService) GetTeacher(ctx context.Context, id string) (*domain.Teacher, error) {
@@ -31,17 +30,8 @@ func (s *UserService) SetTeacherView(ctx context.Context, userID string, format 
 	return s.userRepo.SetTeacherView(ctx, userID, format)
 }
 
-func ParseDailyTime(value string) (string, error) {
-	value = strings.TrimSpace(value)
-	parsed, err := time.Parse("15:04", value)
-	if err != nil || len(value) != 5 {
-		return "", fmt.Errorf("укажите время в формате ЧЧ:ММ, например 06:00")
-	}
-	return parsed.Format("15:04"), nil
-}
-
 func (s *UserService) SetDailySchedule(ctx context.Context, userID string, enabled bool, clock string) error {
-	clock, err := ParseDailyTime(clock)
+	clock, err := validation.ParseDailyTime(clock)
 	if err != nil {
 		return err
 	}

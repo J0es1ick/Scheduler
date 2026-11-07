@@ -7,6 +7,10 @@ import (
 
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/service"
+	catalogservice "github.com/J0es1ick/Scheduler/internal/service/catalog"
+	metricsservice "github.com/J0es1ick/Scheduler/internal/service/metrics"
+	profileservice "github.com/J0es1ick/Scheduler/internal/service/profiles"
+	supportservice "github.com/J0es1ick/Scheduler/internal/service/support"
 	"github.com/J0es1ick/Scheduler/internal/telegram-bot/state"
 	"github.com/J0es1ick/Scheduler/internal/telegramlimit"
 )
@@ -27,8 +31,8 @@ type Handler struct {
 	UserService           userService
 	GroupService          groupService
 	SubscriptionService   subscriptionService
-	SupportRequestService *service.SupportRequestService
-	MetricsService        *service.MetricsService
+	SupportRequestService *supportservice.SupportRequestService
+	MetricsService        *metricsservice.MetricsService
 	ChatProfileService    chatProfileService
 	TelegramLimiter       *telegramlimit.Limiter
 	AdminPublicURL        string
@@ -108,14 +112,14 @@ type subscriptionService interface {
 
 func NewHandler(
 	scheduleService *service.ScheduleService,
-	userService *service.UserService,
-	groupService *service.GroupService,
-	universityService *service.UniversityService,
+	userService *profileservice.UserService,
+	groupService *catalogservice.GroupService,
+	universityService *catalogservice.UniversityService,
 	stateManager *state.Manager,
 	subscriptionService *service.SubscriptionService,
-	supportRequestService *service.SupportRequestService,
-	metricsService *service.MetricsService,
-	chatProfileService *service.ChatProfileService,
+	supportRequestService *supportservice.SupportRequestService,
+	metricsService *metricsservice.MetricsService,
+	chatProfileService *profileservice.ChatProfileService,
 	telegramLimiter *telegramlimit.Limiter,
 	adminPublicURL string,
 	projectURL string,

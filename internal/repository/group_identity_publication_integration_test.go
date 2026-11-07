@@ -12,6 +12,7 @@ import (
 	"github.com/J0es1ick/Scheduler/internal/database"
 	"github.com/J0es1ick/Scheduler/internal/domain"
 	"github.com/J0es1ick/Scheduler/internal/repository"
+	operationsrepo "github.com/J0es1ick/Scheduler/internal/repository/operations"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
@@ -38,7 +39,7 @@ func TestPublicationPersistsExternalGroupIdentityMapping(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repository.NewParseLogRepository(db).CreateParseLog(
+	if _, err := operationsrepo.NewParseLogRepository(db).CreateParseLog(
 		ctx, parseLogID, sourceID, "running", 0, "",
 	); err != nil {
 		t.Fatal(err)
@@ -170,7 +171,7 @@ func TestDisabledSourceCannotPublishSnapshot(t *testing.T) {
 	cleanupRepositoryUniversity(t, db, universityID)
 
 	createRepositoryPublicationFixture(t, ctx, db, universityID, sourceID)
-	if _, err := repository.NewParseLogRepository(db).CreateParseLog(
+	if _, err := operationsrepo.NewParseLogRepository(db).CreateParseLog(
 		ctx, parseLogID, sourceID, "running", 0, "",
 	); err != nil {
 		t.Fatal(err)
