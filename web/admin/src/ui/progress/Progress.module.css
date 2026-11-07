@@ -1,0 +1,19 @@
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+.refresh-spinning {
+  animation: control-refresh 800ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes control-refresh {
+  to {
+    transform: rotate(360deg);
+  }
+}

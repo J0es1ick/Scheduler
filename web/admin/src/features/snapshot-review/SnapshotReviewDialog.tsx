@@ -1,3 +1,10 @@
+import { formatDateTime, number } from "../../shared/lib/format";
+import { classNames } from "../../../../shared/classNames";
+import dialogStyles from "../../ui/dialog/Dialog.module.css";
+import styles from "./SnapshotReviewDialog.module.css";
+import layoutStyles from "../../ui/layout/Layout.module.css";
+import stateStyles from "../../ui/state/State.module.css";
+import buttonStyles from "../../ui/button/Button.module.css";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
@@ -8,15 +15,15 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { api } from "../../api";
-import { DialogPortal, formatDateTime, number } from "../../components";
+import { api } from "../../shared/api";
+import { DialogPortal } from "../../ui";
 import type {
   ParserSnapshot,
   SnapshotGroupDiff,
   SnapshotGroupStatus,
   SnapshotPreview,
   SnapshotScheduleComparison,
-} from "../../types";
+} from "../../shared/model";
 import { hasAlternatingWeeks } from "../schedule-shared/weekSections";
 import { formatSnapshotDate, snapshotGroupStatusLabels } from "./model";
 import { SnapshotSchedulePanel } from "./SnapshotSchedulePanel";
@@ -155,18 +162,18 @@ export function SnapshotReviewDialog({
   return (
     <DialogPortal>
       <div
-        className="dialog-backdrop snapshot-review-backdrop"
+        className={classNames(dialogStyles["dialog-backdrop"], styles["snapshot-review-backdrop"])}
         role="presentation"
       >
         <section
-          className="snapshot-review-dialog"
+          className={styles["snapshot-review-dialog"]}
           role="dialog"
           aria-modal="true"
           aria-labelledby="snapshot-review-title"
         >
-          <header className="snapshot-review-header">
-            <div className="snapshot-review-title">
-              <span className="eyebrow">
+          <header className={styles["snapshot-review-header"]}>
+            <div className={styles["snapshot-review-title"]}>
+              <span className={layoutStyles["eyebrow"]}>
                 {approvalOnly
                   ? "Проверка перед активацией"
                   : "Проверка перед публикацией"}
@@ -177,7 +184,7 @@ export function SnapshotReviewDialog({
               </p>
             </div>
             <button
-              className="dialog-close"
+              className={dialogStyles["dialog-close"]}
               data-dialog-dismiss
               onClick={onClose}
               aria-label="Закрыть"
@@ -186,15 +193,15 @@ export function SnapshotReviewDialog({
             </button>
           </header>
 
-          <div className="snapshot-review-body">
+          <div className={styles["snapshot-review-body"]}>
             {previewLoading ? (
-              <div className="snapshot-review-loading">
-                <span className="spinner" />
+              <div className={styles["snapshot-review-loading"]}>
+                <span className={styles["spinner"]} />
                 <strong>Сравниваем снимки</strong>
                 <p>Готовим список групп и отличия от опубликованной версии.</p>
               </div>
             ) : previewError || !preview ? (
-              <div className="snapshot-review-error">
+              <div className={styles["snapshot-review-error"]}>
                 <ShieldAlert size={24} />
                 <strong>Сравнение недоступно</strong>
                 <p>{previewError || "Снимок не найден"}</p>
@@ -202,9 +209,9 @@ export function SnapshotReviewDialog({
             ) : (
               <>
                 <SnapshotSummary preview={preview} />
-                <div className="snapshot-review-workspace">
-                  <aside className="snapshot-group-browser">
-                    <div className="snapshot-group-search">
+                <div className={styles["snapshot-review-workspace"]}>
+                  <aside className={styles["snapshot-group-browser"]}>
+                    <div className={styles["snapshot-group-search"]}>
                       <Search size={16} />
                       <input
                         value={query}
@@ -213,7 +220,7 @@ export function SnapshotReviewDialog({
                         aria-label="Поиск группы в снимке"
                       />
                     </div>
-                    <div className="snapshot-group-filters">
+                    <div className={styles["snapshot-group-filters"]}>
                       <FilterButton
                         active={filter === "attention"}
                         label="Изменения"
@@ -237,7 +244,7 @@ export function SnapshotReviewDialog({
                         onClick={() => setFilter("unchanged")}
                       />
                     </div>
-                    <div className="snapshot-group-list">
+                    <div className={styles["snapshot-group-list"]}>
                       {filteredGroups.length ? (
                         filteredGroups.map((group) => (
                           <SnapshotGroupButton
@@ -248,7 +255,7 @@ export function SnapshotReviewDialog({
                           />
                         ))
                       ) : (
-                        <div className="snapshot-group-empty">
+                        <div className={styles["snapshot-group-empty"]}>
                           <Search size={19} />
                           <strong>Группы не найдены</strong>
                           <p>Измените запрос или выберите другой фильтр.</p>
@@ -257,19 +264,19 @@ export function SnapshotReviewDialog({
                     </div>
                   </aside>
 
-                  <main className="snapshot-schedule-comparison">
+                  <main className={styles["snapshot-schedule-comparison"]}>
                     {scheduleLoading ? (
-                      <div className="snapshot-schedule-loading">
-                        <span className="spinner" /> Загружаем расписание группы
+                      <div className={styles["snapshot-schedule-loading"]}>
+                        <span className={styles["spinner"]} /> Загружаем расписание группы
                       </div>
                     ) : scheduleError ? (
-                      <div className="snapshot-review-error is-compact">
+                      <div className={classNames(styles["snapshot-review-error"], stateStyles["is-compact"])}>
                         <ShieldAlert size={20} />
                         <p>{scheduleError}</p>
                       </div>
                     ) : schedule ? (
                       <>
-                        <header className="snapshot-comparison-heading">
+                        <header className={styles["snapshot-comparison-heading"]}>
                           <div>
                             <span>
                               {snapshotGroupStatusLabels[schedule.status]}
@@ -279,7 +286,7 @@ export function SnapshotReviewDialog({
                           </div>
                           <ArrowRight size={20} />
                         </header>
-                        <div className="snapshot-schedule-columns">
+                        <div className={styles["snapshot-schedule-columns"]}>
                           <SnapshotSchedulePanel
                             title="Опубликовано сейчас"
                             subtitle="Последний снимок, который видят пользователи"
@@ -299,7 +306,7 @@ export function SnapshotReviewDialog({
                         </div>
                       </>
                     ) : (
-                      <div className="snapshot-schedule-empty-state">
+                      <div className={styles["snapshot-schedule-empty-state"]}>
                         <BookOpen size={25} />
                         <strong>Выберите группу</strong>
                         <p>Здесь появится расписание до и после публикации.</p>
@@ -311,7 +318,7 @@ export function SnapshotReviewDialog({
             )}
           </div>
 
-          <footer className="snapshot-review-footer">
+          <footer className={styles["snapshot-review-footer"]}>
             <p>
               {approvalOnly
                 ? "Одобрение не меняет рабочее расписание. Снимок будет применён вместе с активацией источника одной транзакцией."
@@ -319,14 +326,14 @@ export function SnapshotReviewDialog({
             </p>
             <div>
               <button
-                className="button button-danger-soft"
+                className={classNames(buttonStyles["button"], buttonStyles["button-danger-soft"])}
                 disabled={busy}
                 onClick={() => void reject()}
               >
                 <X size={15} /> Отклонить
               </button>
               <button
-                className="button button-primary"
+                className={classNames(buttonStyles["button"], buttonStyles["button-primary"])}
                 disabled={busy || !snapshot.publishable}
                 onClick={() => void publish()}
               >
@@ -345,20 +352,20 @@ export function SnapshotReviewDialog({
 
 function SnapshotSummary({ preview }: { preview: SnapshotPreview }) {
   return (
-    <section className="snapshot-review-summary">
-      <div className="snapshot-version-comparison">
+    <section className={styles["snapshot-review-summary"]}>
+      <div className={styles["snapshot-version-comparison"]}>
         <article>
           <span>Опубликовано</span>
           <strong>{number.format(preview.current_group_count)} групп</strong>
           <p>{number.format(preview.current_lesson_count)} занятий</p>
         </article>
         <ArrowRight size={19} />
-        <article className="is-candidate">
+        <article className={stateStyles["is-candidate"]}>
           <span>Новый снимок</span>
           <strong>{number.format(preview.candidate_group_count)} групп</strong>
           <p>{number.format(preview.candidate_lesson_count)} занятий</p>
         </article>
-        <article className="snapshot-period">
+        <article className={styles["snapshot-period"]}>
           <span>Период нового снимка</span>
           <strong>
             {formatSnapshotDate(preview.candidate_start_date)} —{" "}
@@ -371,15 +378,15 @@ function SnapshotSummary({ preview }: { preview: SnapshotPreview }) {
           </p>
         </article>
       </div>
-      <div className="snapshot-delta-strip">
-        <span className="is-changed">
+      <div className={styles["snapshot-delta-strip"]}>
+        <span className={stateStyles["is-changed"]}>
           <BookOpen size={15} /> Изменено групп:{" "}
           {preview.summary.changed_groups}
         </span>
-        <span className="is-added">
+        <span className={stateStyles["is-added"]}>
           <Users size={15} /> Новых: {preview.summary.added_groups}
         </span>
-        <span className="is-removed">
+        <span className={stateStyles["is-removed"]}>
           <Users size={15} /> Исчезло: {preview.summary.removed_groups}
         </span>
         <span>
@@ -403,7 +410,7 @@ function FilterButton({
   onClick: () => void;
 }) {
   return (
-    <button className={active ? "is-active" : ""} onClick={onClick}>
+    <button className={active ? stateStyles["is-active"] : undefined} onClick={onClick}>
       {label} <span>{number.format(count)}</span>
     </button>
   );
@@ -420,7 +427,7 @@ function SnapshotGroupButton({
 }) {
   return (
     <button
-      className={`snapshot-group-item is-${group.status} ${selected ? "is-selected" : ""}`}
+      className={classNames(styles["snapshot-group-item"], stateStyles[`is-${group.status}`], selected ? stateStyles["is-selected"] : undefined)}
       onClick={onClick}
     >
       <div>

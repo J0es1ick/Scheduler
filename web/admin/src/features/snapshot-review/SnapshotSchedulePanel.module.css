@@ -1,0 +1,305 @@
+@value is-candidate as sharedIsCandidate, is-all as sharedIsAll, is-even as sharedIsEven, is-added as sharedIsAdded, is-removed as sharedIsRemoved from "../../ui/state/State.module.css";
+
+.snapshot-schedule-panel {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.snapshot-schedule-panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 14px 9px;
+}
+
+.snapshot-schedule-panel > header span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.snapshot-schedule-panel > header h4 {
+  margin: 2px 0 0;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.snapshot-schedule-panel > header > strong {
+  display: grid;
+  place-items: center;
+  min-width: 29px;
+  height: 29px;
+  padding: 0 7px;
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.snapshot-schedule-panel.sharedIsCandidate > header > strong {
+  background: var(--olive-soft);
+  color: var(--olive-dark);
+}
+
+.snapshot-schedule-subtitle {
+  margin: 0;
+  padding: 0 14px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.snapshot-week-sections {
+  display: grid;
+  gap: 13px;
+  padding: 10px;
+}
+
+.snapshot-week-section {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--inset-surface, #fbf8f1);
+}
+
+.snapshot-week-section.sharedIsAll {
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.snapshot-week-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 11px;
+  border-bottom: 1px solid var(--line);
+  background: var(--inset-surface, #f2ede3);
+}
+
+.snapshot-week-section.sharedIsEven .snapshot-week-heading {
+  background: var(--added-surface, #eef0e8);
+}
+
+.snapshot-week-heading > div {
+  min-width: 0;
+}
+
+.snapshot-week-heading span {
+  color: var(--muted-light);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.snapshot-week-heading h5 {
+  margin: 2px 0 0;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+}
+
+.snapshot-week-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.snapshot-week-heading > strong {
+  display: grid;
+  place-items: center;
+  min-width: 25px;
+  height: 25px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.snapshot-week-empty {
+  padding: 22px 14px;
+  color: var(--muted-light);
+  font-size: 12px;
+  text-align: center;
+}
+
+.snapshot-schedule-days {
+  display: grid;
+  gap: 9px;
+  padding: 8px;
+}
+
+.snapshot-week-section.sharedIsAll .snapshot-schedule-days {
+  padding: 0;
+}
+
+.snapshot-schedule-day {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-muted);
+}
+
+.snapshot-schedule-day > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.snapshot-schedule-day > header span,
+.snapshot-schedule-day > header em {
+  color: var(--muted-light);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.snapshot-schedule-day h5 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+
+.snapshot-schedule-day > div {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+}
+
+.snapshot-lesson-card {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.snapshot-lesson-card.sharedIsAdded {
+  border-color: var(--accent-border, #afc19f);
+  border-left-color: var(--olive);
+  background: var(--added-surface, #f6f8f1);
+}
+
+.snapshot-lesson-card.sharedIsRemoved {
+  border-color: var(--danger-border, #dfb8af);
+  border-left-color: var(--red);
+  background: var(--removed-surface, #fcf3f0);
+}
+
+.snapshot-lesson-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.snapshot-lesson-topline > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.snapshot-lesson-topline em {
+  color: var(--rust);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.snapshot-lesson-card > small {
+  color: var(--rust);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.snapshot-lesson-card h6 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.snapshot-lesson-details {
+  display: grid;
+  gap: 3px;
+}
+
+.snapshot-lesson-details span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.snapshot-lesson-card footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
+}
+
+.snapshot-lesson-card footer span {
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.snapshot-schedule-empty {
+  display: grid;
+  justify-items: center;
+  min-height: 220px;
+  align-content: center;
+  padding: 28px;
+  color: var(--muted-light);
+  text-align: center;
+}
+
+.snapshot-schedule-empty strong {
+  margin-top: 9px;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.snapshot-schedule-empty p {
+  max-width: 260px;
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (max-width: 520px) {
+  .snapshot-week-heading {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .snapshot-week-heading p {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    text-align: left;
+  }
+}

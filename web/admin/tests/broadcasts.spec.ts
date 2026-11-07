@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { expectReadableTheme } from "./theme-contrast";
-import type { Broadcast } from "../src/api/broadcasts";
+import type { Broadcast } from "../src/shared/api/broadcasts";
 
 async function setup(page: Page, role = "owner") {
   const broadcast: Broadcast = {
@@ -184,13 +184,13 @@ for (const width of [320, 390, 768, 1440])
     await expect(
       page.getByRole("button", { name: "Проверить и отправить" }),
     ).toBeEnabled();
-    await expect(page.locator(".attachment-list li")).toHaveCount(2);
+    await expect(page.locator("[class*=\"_attachment-list_\"] li")).toHaveCount(2);
     await page.getByRole("button", { name: "Выше: Документ-2.txt" }).click();
     await page.getByRole("button", { name: "Проверить и отправить" }).click();
     await expect(
       page.getByRole("button", { name: "Отправить 12 пользователям" }),
     ).toBeVisible();
-    await expect(page.locator(".telegram-attachment").first()).toContainText(
+    await expect(page.locator("[class*=\"_telegram-attachment_\"]").first()).toContainText(
       "Документ-2.txt",
     );
     expect(
@@ -273,7 +273,7 @@ for (const width of [320, 1440])
     await expect(
       page.getByRole("button", { name: "Отправить 20 пользователям" }),
     ).toBeVisible();
-    await expect(page.locator(".telegram-message-unsubscribe")).toHaveCount(0);
+    await expect(page.locator("[class*=\"_telegram-message-unsubscribe_\"]")).toHaveCount(0);
     expect(broadcast.audience_mode).toBe("all_users");
     await page.getByRole("radio", { name: "Все подписавшиеся", exact: true }).check();
     await expect(
@@ -283,13 +283,13 @@ for (const width of [320, 1440])
     await expect(
       page.getByRole("button", { name: "Отправить 12 пользователям" }),
     ).toBeVisible();
-    await expect(page.locator(".telegram-message-unsubscribe")).toBeVisible();
+    await expect(page.locator("[class*=\"_telegram-message-unsubscribe_\"]")).toBeVisible();
     await page.getByRole("radio", { name: "Все пользователи", exact: true }).check();
     await page.getByRole("button", { name: "Проверить и отправить" }).click();
     await expect(
       page.getByText("Аудитория: Все пользователи · важное объявление"),
     ).toBeVisible();
-    await expect(page.locator(".telegram-message-unsubscribe")).toHaveCount(0);
+    await expect(page.locator("[class*=\"_telegram-message-unsubscribe_\"]")).toHaveCount(0);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(width);

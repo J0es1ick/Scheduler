@@ -1,0 +1,263 @@
+@value is-admin as sharedIsAdmin, is-blocked as sharedIsBlocked from "../../ui/state/State.module.css";
+
+@value button as sharedButton from "../../ui/button/Button.module.css";
+
+.user-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.user-card {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-muted);
+}
+
+.user-avatar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.user-avatar.sharedIsAdmin {
+  border-color: var(--accent-border, #aeb5a0);
+  background: var(--olive-soft);
+  color: var(--olive-dark);
+}
+
+.user-avatar i {
+  display: none;
+}
+
+.user-copy {
+  min-width: 0;
+}
+
+.user-copy > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.user-copy h3 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--ink);
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+
+.admin-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: var(--olive-soft);
+  color: var(--olive-dark);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.user-copy p {
+  margin: 4px 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.user-copy > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.user-copy > div:last-child span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.user-card .sharedButton {
+  min-height: 35px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.role-select {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--olive-dark);
+}
+
+.role-select select {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+
+.user-actions {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.user-restrictions {
+  display: grid;
+  gap: 8px;
+}
+
+.user-restrictions .sharedButton {
+  white-space: normal;
+  min-height: 40px;
+  margin: 0;
+}
+
+.restriction-status {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.restriction-status.sharedIsBlocked {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.users-page .user-card {
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: start;
+}
+
+.user-actions {
+  grid-column: 1 / -1;
+}
+
+.user-actions .role-select select {
+  min-width: 0;
+  width: 100%;
+}
+
+.user-restrictions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.user-restrictions > :nth-child(2) {
+  grid-row: 2;
+}
+
+.user-restrictions > :nth-child(3) {
+  grid-row: 1;
+  grid-column: 2;
+}
+
+@media (max-width: 420px) {
+  .user-restrictions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .user-restrictions > :nth-child(n) {
+    grid-row: auto;
+    grid-column: auto;
+  }
+}
+
+.user-restrictions .sharedButton {
+  font-size: 12px;
+  min-height: 44px;
+}
+
+.user-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 24px;
+  margin: 16px 0 4px;
+}
+
+.user-details > div {
+  min-width: 0;
+}
+
+.user-details dt {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+
+.user-details dd {
+  color: var(--ink);
+  font-size: 13px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .user-details {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+}
+
+.user-copy p,
+.user-copy > div:last-child span {
+  font-size: 12px;
+}
+
+.user-copy h3 {
+  font-size: 13px;
+}
+
+.admin-label {
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+
+@media (max-width: 820px) {
+  .user-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 580px) {
+  .user-card {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+  .user-card .sharedButton {
+    grid-column: 1 / -1;
+  }
+}
+
+.user-card {
+  box-shadow: none;
+}
+
+.user-card {
+  border-radius: var(--radius);
+  box-shadow: 0 2px 6px var(--shadow-soft);
+}
+
+.user-card {
+  box-shadow: 0 3px 12px var(--shadow-soft), inset 0 1px 0 color-mix(in srgb, var(--surface) 80%, var(--ink) 20%);
+}

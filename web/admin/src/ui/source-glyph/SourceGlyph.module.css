@@ -1,0 +1,42 @@
+@value is-small as sharedIsSmall from "../state/State.module.css";
+
+.source-glyph {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border: 1px solid var(--accent-border, #bdc2b3);
+  border-radius: 6px;
+  background: var(--olive-soft);
+  color: var(--olive-dark);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.source-glyph i {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--olive);
+}
+
+.source-glyph.sharedIsSmall {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.source-glyph {
+  border-radius: 5px;
+}
+
+.source-glyph {
+  border-radius: 12px;
+}

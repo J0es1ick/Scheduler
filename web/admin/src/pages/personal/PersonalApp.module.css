@@ -1,0 +1,324 @@
+@value button as sharedButton from "../../ui/button/Button.module.css";
+
+@value theme-control-caption as sharedThemeControlCaption, theme-device-button as sharedThemeDeviceButton, theme-switch as sharedThemeSwitch from "../../ui/theme-switch/ThemeSwitch.module.css";
+
+@value personal-check as sharedPersonalCheck from "../../features/personal-shared/PersonalUI.module.css";
+
+@value personal-settings as sharedPersonalSettings from "../../features/personal-notifications/NotificationCenter.module.css";
+
+@media (min-width: 621px) {
+  html:has(.personal-app) {
+    scrollbar-gutter: stable;
+  }
+}
+
+html:has(.personal-app),
+body:has(.personal-app),
+:global(#root):has(.personal-app) {
+  overflow-x: clip;
+}
+
+.personal-app {
+  --personal-safe-top: max(env(safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px), var(--tg-content-safe-area-inset-top, 0px));
+  --personal-safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px), var(--tg-content-safe-area-inset-bottom, 0px));
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: max(24px, var(--personal-safe-top)) max(24px, env(safe-area-inset-right, 0px)) max(48px, var(--personal-safe-bottom)) max(24px, env(safe-area-inset-left, 0px));
+}
+
+.personal-app .sharedButton {
+  min-height: 44px;
+  touch-action: manipulation;
+}
+
+.personal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.personal-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.personal-brand > span:last-child {
+  display: grid;
+  gap: 2px;
+}
+
+.personal-brand strong {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.personal-brand small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.personal-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: var(--olive-soft);
+  color: var(--olive-dark);
+  border: 1px solid var(--accent-border);
+}
+
+.personal-workspace,
+.personal-welcome {
+  animation: ui-rise-in var(--motion-panel) var(--ease-out);
+}
+
+.personal-welcome {
+  padding: 64px 0;
+}
+
+.personal-welcome h1,
+.personal-intro h1 {
+  font-size: clamp(28px, 4vw, 38px);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.7px;
+  margin-bottom: 12px;
+}
+
+.personal-welcome p,
+.personal-intro p {
+  color: var(--muted);
+  max-width: 620px;
+  line-height: 1.65;
+}
+
+.personal-intro {
+  margin: 28px 0 24px;
+}
+
+.personal-intro > .sharedButton {
+  margin-bottom: 16px;
+}
+
+.personal-destinations {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 32px;
+}
+
+.personal-destinations > * {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: 12px;
+  padding: 26px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 4px 18px var(--shadow-soft);
+  text-align: left;
+  text-decoration: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.personal-destinations > * > svg:first-child {
+  color: var(--olive-dark);
+  width: 44px;
+  height: 44px;
+  padding: 10px;
+  background: var(--olive-soft);
+  border-radius: 12px;
+}
+
+.personal-destinations strong {
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.personal-destinations span {
+  color: var(--muted);
+}
+
+.personal-destination-arrow {
+  position: absolute;
+  top: 26px;
+  right: 24px;
+  color: var(--muted);
+  transition: transform var(--motion-panel) var(--ease-out);
+}
+
+.personal-app label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  min-width: 0;
+}
+
+.personal-app input,
+.personal-app select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.personal-app input:focus-visible,
+.personal-app select:focus-visible {
+  border-color: var(--olive);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .personal-destinations > *:hover {
+    border-color: var(--accent-border);
+    box-shadow: 0 8px 24px var(--shadow-soft);
+    transform: translateY(-2px);
+  }
+  .personal-destinations > *:hover .personal-destination-arrow {
+    transform: translate(2px, -2px);
+  }
+}
+
+@media (max-width: 620px) {
+  .personal-app {
+    padding: max(16px, var(--personal-safe-top)) max(12px, env(safe-area-inset-right, 0px)) max(36px, var(--personal-safe-bottom)) max(12px, env(safe-area-inset-left, 0px));
+  }
+  .personal-header {
+    gap: 8px;
+    padding-bottom: 16px;
+  }
+  .personal-header .sharedThemeControlCaption,
+  .personal-header .sharedThemeDeviceButton {
+    display: none;
+  }
+  .personal-header .sharedThemeSwitch {
+    min-height: 44px;
+  }
+  .personal-brand {
+    gap: 8px;
+  }
+  .personal-brand strong {
+    font-size: 14px;
+  }
+  .personal-brand small {
+    font-size: 10px;
+  }
+  .personal-brand-mark {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+  }
+  .personal-intro {
+    margin: 24px 2px 20px;
+  }
+  .personal-intro p {
+    font-size: 13px;
+    margin-bottom: 0;
+  }
+  .personal-destinations {
+    grid-template-columns: 1fr;
+  }
+  .personal-welcome {
+    padding: 32px 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .personal-app *,
+  .personal-app *::before,
+  .personal-app *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+  .personal-destinations > *:hover,
+  .personal-destinations > *:hover .personal-destination-arrow {
+    transform: none;
+  }
+}
+
+.personal-tabs {
+  display: grid;
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  gap: 6px;
+  padding: 6px;
+  margin-bottom: 24px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.personal-tabs button {
+  min-height: 48px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--motion-fast),color var(--motion-fast);
+}
+
+.personal-tabs button[aria-current] {
+  color: var(--olive-dark);
+  background: var(--olive-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-border);
+}
+
+.personal-app .sharedPersonalCheck {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink);
+  min-height: 44px;
+}
+
+.personal-app .sharedPersonalCheck input {
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  flex: 0 0 20px;
+  accent-color: var(--olive-dark);
+}
+
+@media (max-width: 620px) {
+  .personal-tabs button {
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
+  }
+  .personal-app .sharedPersonalSettings input,
+  .personal-app .sharedPersonalSettings select {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .personal-tabs button {
+    transition: none;
+  }
+}

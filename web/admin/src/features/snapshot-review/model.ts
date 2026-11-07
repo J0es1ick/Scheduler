@@ -1,4 +1,4 @@
-import type { SnapshotGroupStatus, SnapshotLesson } from "../../types";
+import type { SnapshotGroupStatus, SnapshotLesson } from "../../shared/model";
 
 export const snapshotDays = [
   "Понедельник",

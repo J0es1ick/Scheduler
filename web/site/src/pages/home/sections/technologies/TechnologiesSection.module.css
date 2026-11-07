@@ -1,0 +1,62 @@
+.public-technologies {
+  padding: 28px 0;
+}
+
+.public-technologies summary {
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.public-tech-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 30px;
+  margin-top: 28px;
+}
+
+.public-tech-card > div {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.public-tech-card h3 {
+  font-size: 15px;
+}
+
+.public-tech-card svg {
+  color: var(--muted);
+}
+
+.public-tech-card ul {
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.public-tech-card li {
+  padding: 4px 0;
+}
+
+@media (max-width: 760px) {
+  .public-tech-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+  }
+}
+
+.public-technologies details[open] .public-tech-grid {
+  animation: ui-rise-in var(--motion-panel) var(--ease-out);
+}
+
+.public-technologies {
+  padding-block: 30px;
+}
+
+.public-technologies summary {
+  min-height: 44px;
+  padding-block: 10px;
+  color: var(--muted);
+}

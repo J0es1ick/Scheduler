@@ -1,3 +1,7 @@
+import { classNames } from "../../../../shared/classNames";
+import styles from "./AppLayout.module.css";
+import stateStyles from "../../ui/state/State.module.css";
+import buttonStyles from "../../ui/button/Button.module.css";
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { installSurfaceLight } from "../../../../shared/surfaceLight";
 import {
@@ -13,8 +17,8 @@ import {
   ShieldCheck,
   Users,
 } from "lucide-react";
-import { LogoMark } from "../../components";
-import type { AdminIdentity, AdminRole } from "../../types";
+import { LogoMark } from "../../ui";
+import type { AdminIdentity, AdminRole } from "../../shared/model";
 
 export type ViewName =
   | "overview"
@@ -168,12 +172,12 @@ export function AppLayout({
   }).format(new Date());
 
   return (
-    <div className="app-shell" ref={shellRef}>
-      <aside className="sidebar">
+    <div className={styles["app-shell"]} ref={shellRef}>
+      <aside className={styles["sidebar"]}>
         <LogoMark />
-        <nav ref={navigationRef} className="desktop-nav" aria-label="Основная навигация">
-          <span className="nav-indicator" aria-hidden="true" />
-          <span className="nav-caption">Управление</span>
+        <nav ref={navigationRef} className={styles["desktop-nav"]} aria-label="Основная навигация">
+          <span className={styles["nav-indicator"]} aria-hidden="true" />
+          <span className={styles["nav-caption"]}>Управление</span>
           {navigation
             .filter((item) => canAccessView(item.id, user.role))
             .map((item) => {
@@ -182,7 +186,7 @@ export function AppLayout({
                 <button
                   key={item.id}
                   aria-current={view === item.id ? "page" : undefined}
-                  className={view === item.id ? "is-active" : ""}
+                  className={view === item.id ? stateStyles["is-active"] : undefined}
                   onClick={() => onNavigate(item.id)}
                 >
                   <Icon size={19} />
@@ -191,12 +195,12 @@ export function AppLayout({
               );
             })}
         </nav>
-        <div className="sidebar-status">
+        <div className={styles["sidebar-status"]}>
           <Activity size={15} />
           <span>Scheduler · административный доступ</span>
         </div>
-        <div className="sidebar-user">
-          <div className="avatar">
+        <div className={styles["sidebar-user"]}>
+          <div className={styles["avatar"]}>
             {user.name.replace("@", "").slice(0, 1).toUpperCase()}
           </div>
           <div>
@@ -213,24 +217,24 @@ export function AppLayout({
         </div>
       </aside>
 
-      <main className="main-area">
-        <header className="topbar">
-          <div className="topbar-heading" key={view}>
-            <span className="mobile-brand">
+      <main className={styles["main-area"]}>
+        <header className={styles["topbar"]}>
+          <div className={styles["topbar-heading"]} key={view}>
+            <span className={styles["mobile-brand"]}>
               <LogoMark compact />
             </span>
             <p>{date}</p>
             <h1>{current.title}</h1>
             <span>{current.subtitle}</span>
           </div>
-          <div className="topbar-actions">
-            <a className="button button-ghost" href="/app">
+          <div className={styles["topbar-actions"]}>
+            <a className={classNames(buttonStyles["button"], buttonStyles["button-ghost"])} href="/app">
               К выбору сервиса
             </a>
             {themeControl}
             {canAccessView("audit", user.role) && (
               <button
-                className="topbar-audit"
+                className={styles["topbar-audit"]}
                 onClick={() => onNavigate("audit")}
                 aria-label="Открыть аудит"
               >
@@ -239,7 +243,7 @@ export function AppLayout({
             )}
           </div>
         </header>
-        <div className="mobile-sections">
+        <div className={styles["mobile-sections"]}>
           <label htmlFor="mobile-section">Раздел</label>
           <select
             id="mobile-section"
@@ -254,17 +258,17 @@ export function AppLayout({
                 </option>
               ))}
           </select>
-          <button className="button button-ghost" onClick={onLogout}>
+          <button className={classNames(buttonStyles["button"], buttonStyles["button-ghost"])} onClick={onLogout}>
             Выйти
           </button>
         </div>
-        <div className="content-area">{children}</div>
+        <div className={styles["content-area"]}>{children}</div>
       </main>
 
-      <nav className="mobile-nav" aria-label="Мобильная навигация">
+      <nav className={styles["mobile-nav"]} aria-label="Мобильная навигация">
         {canAccessView("overview", user.role) && (
           <button
-            className={view === "overview" ? "is-active" : ""}
+            className={view === "overview" ? stateStyles["is-active"] : undefined}
             aria-current={view === "overview" ? "page" : undefined}
             onClick={() => onNavigate("overview")}
           >
@@ -274,7 +278,7 @@ export function AppLayout({
         )}
         {canAccessView("sources", user.role) && (
           <button
-            className={view === "sources" ? "is-active" : ""}
+            className={view === "sources" ? stateStyles["is-active"] : undefined}
             aria-current={view === "sources" ? "page" : undefined}
             onClick={() => onNavigate("sources")}
           >
@@ -284,7 +288,7 @@ export function AppLayout({
         )}
         {canAccessView("editor", user.role) && (
           <button
-            className={`mobile-primary ${view === "editor" ? "is-active" : ""}`}
+            className={classNames(styles["mobile-primary"], view === "editor" ? stateStyles["is-active"] : undefined)}
             aria-current={view === "editor" ? "page" : undefined}
             onClick={() => onNavigate("editor")}
             aria-label="Редактор"
@@ -294,7 +298,7 @@ export function AppLayout({
         )}
         {canAccessView("support", user.role) && (
           <button
-            className={view === "support" ? "is-active" : ""}
+            className={view === "support" ? stateStyles["is-active"] : undefined}
             aria-current={view === "support" ? "page" : undefined}
             onClick={() => onNavigate("support")}
           >
@@ -304,7 +308,7 @@ export function AppLayout({
         )}
         {canAccessView("users", user.role) && (
           <button
-            className={view === "users" ? "is-active" : ""}
+            className={view === "users" ? stateStyles["is-active"] : undefined}
             aria-current={view === "users" ? "page" : undefined}
             onClick={() => onNavigate("users")}
           >

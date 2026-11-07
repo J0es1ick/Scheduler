@@ -1,0 +1,275 @@
+@value button as sharedButton, text-button as sharedTextButton from "../../ui/button/Button.module.css";
+
+.personal-dialog[open] {
+  border-radius: 14px;
+  animation: ui-dialog-in var(--motion-panel) var(--ease-out);
+}
+
+.personal-dialog::backdrop {
+  animation: ui-fade-in var(--motion-control) ease-out;
+}
+
+.personal-dialog .sharedButton {
+  min-height: 44px;
+  touch-action: manipulation;
+}
+
+.personal-eyebrow {
+  font-size: 13px;
+  color: var(--olive-dark);
+}
+
+.personal-dialog label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  min-width: 0;
+}
+
+.personal-dialog input,
+.personal-dialog select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.personal-dialog input:focus-visible,
+.personal-dialog select:focus-visible {
+  border-color: var(--olive);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.personal-note {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.personal-tag {
+  display: inline-block;
+  color: var(--olive-dark);
+  background: var(--olive-soft);
+  padding: 3px 8px;
+  font-size: 11px;
+  margin-top: 8px;
+  border-radius: 5px;
+}
+
+.personal-empty-day {
+  color: var(--muted);
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  font-size: 13px;
+}
+
+.personal-dialog {
+  --dialog-gap: 24px;
+  position: fixed;
+  inset: calc(var(--app-viewport-top, 0px) + var(--personal-safe-top, 0px)) 0 auto;
+  width: min(600px, calc(100% - 32px));
+  max-height: calc(var(--app-viewport-height, 100dvh) - var(--personal-safe-top, 0px) - var(--dialog-gap) * 2);
+  margin: var(--dialog-gap) auto 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+
+.personal-dialog::backdrop {
+  background: var(--backdrop);
+  backdrop-filter: blur(3px);
+}
+
+.personal-dialog form {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: calc(var(--app-viewport-height, 100dvh) - var(--personal-safe-top, 0px) - var(--dialog-gap) * 2 - 2px);
+}
+
+.personal-dialog header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--line);
+  outline: none;
+}
+
+.personal-dialog h2 {
+  margin: 4px 0 0;
+  font-size: 23px;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.personal-dialog header .sharedButton {
+  width: 44px;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.personal-dialog small {
+  color: var(--muted);
+}
+
+.personal-dialog fieldset {
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.personal-dialog .personal-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.personal-check input {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  accent-color: var(--olive);
+  margin: 0;
+}
+
+.personal-dialog footer {
+  display: flex;
+  justify-content: end;
+  gap: 10px;
+  padding: 16px 24px max(16px, var(--personal-safe-bottom, 0px));
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.personal-dialog details {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.personal-dialog summary {
+  cursor: pointer;
+  min-height: 44px;
+  align-content: center;
+}
+
+.personal-dialog details p {
+  overflow-wrap: anywhere;
+  margin: 8px 0 0;
+}
+
+.personal-error {
+  padding: 12px;
+  border: 1px solid var(--danger-border);
+  border-radius: 10px;
+  background: var(--removed-surface);
+  color: var(--red);
+  overflow-wrap: anywhere;
+}
+
+.personal-error .sharedTextButton {
+  min-height: 44px;
+  display: block;
+}
+
+.personal-dialog details[open] p {
+  animation: ui-fade-in var(--motion-control) ease-out;
+}
+
+@media (max-width: 620px) {
+  .personal-dialog {
+    --dialog-gap: 12px;
+    width: 100%;
+    max-width: 100%;
+    height: calc(var(--app-viewport-height, 100dvh) - var(--personal-safe-top, 0px) - 12px);
+    max-height: none;
+    border-bottom: 0;
+    border-radius: 18px 18px 0 0;
+  }
+  .personal-dialog[open] {
+    border-radius: 18px 18px 0 0;
+    animation: personal-sheet-in var(--motion-panel) var(--ease-out);
+  }
+  .personal-dialog form {
+    height: 100%;
+    max-height: none;
+  }
+  .personal-dialog header {
+    padding: 18px 16px 14px;
+  }
+  .personal-dialog h2 {
+    font-size: 21px;
+  }
+  .personal-dialog input,
+  .personal-dialog select {
+    font-size: 16px;
+  }
+  .personal-dialog footer {
+    padding: 12px 16px max(12px, var(--personal-safe-bottom, 0px));
+  }
+  .personal-dialog footer .sharedButton {
+    flex: 1;
+    min-height: 48px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .personal-dialog::backdrop {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+.personal-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 14px;
+}
+
+.personal-dialog .personal-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink);
+  min-height: 44px;
+}
+
+.personal-dialog .personal-check input {
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  flex: 0 0 20px;
+  accent-color: var(--olive-dark);
+}
+
+@keyframes personal-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

@@ -1,0 +1,14 @@
+@value page-stack as sharedPageStack, card-surface as sharedCardSurface from "../ui/layout/Layout.module.css";
+
+.page-transition {
+  min-width: 0;
+  animation: ui-fade-in var(--motion-control) ease-out;
+}
+
+.page-transition > .sharedPageStack > .sharedCardSurface {
+  animation: ui-fade-in 420ms ease-out backwards;
+}
+
+.page-transition > .sharedPageStack > .sharedCardSurface:nth-child(n + 3) {
+  animation-delay: 70ms;
+}

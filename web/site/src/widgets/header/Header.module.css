@@ -1,0 +1,304 @@
+@value is-open as sharedIsOpen from "../../shared/ui/status/Status.module.css";
+
+.public-header-cta:hover {
+  background: #185638;
+}
+
+.public-header {
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.public-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 76px;
+  gap: 30px;
+}
+
+.public-header nav {
+  display: flex;
+  gap: 22px;
+  align-items: center;
+}
+
+.public-header nav > a {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.public-header nav > a:hover:not(.public-header-cta) {
+  color: var(--accent);
+}
+
+.public-header-cta {
+  background: var(--accent);
+  color: #fff;
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 5px;
+}
+
+.public-menu-button {
+  display: none;
+  border: 1px solid var(--line);
+  background: transparent;
+  width: 38px;
+  height: 38px;
+  border-radius: 5px;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (max-width: 1020px) {
+  .public-header nav {
+    gap: 15px;
+  }
+  .public-header nav > a {
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 760px) {
+  .public-header-inner {
+    min-height: 66px;
+    flex-wrap: wrap;
+    gap: 0;
+  }
+  .public-menu-button {
+    display: inline-flex;
+  }
+  .public-header nav {
+    display: none;
+    width: 100%;
+    padding: 16px 0;
+    border-top: 1px solid var(--line);
+  }
+  .public-header nav.sharedIsOpen {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+  .public-header nav > a {
+    font-size: 15px;
+    padding: 12px 4px;
+  }
+  .public-header nav > a.public-header-cta {
+    justify-content: center;
+    margin-top: 8px;
+  }
+}
+
+.public-header {
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.public-header nav > a:not(.public-header-cta) {
+  position: relative;
+}
+
+.public-header nav > a:not(.public-header-cta)::after {
+  content: "";
+  position: absolute;
+  bottom: -9px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--motion-panel) var(--ease-out);
+}
+
+.public-header nav > a[aria-current="location"] {
+  color: var(--accent);
+}
+
+.public-header nav > a[aria-current="location"]::after,
+.public-header nav > a:not(.public-header-cta):focus-visible::after {
+  transform: scaleX(1);
+}
+
+.public-header-cta {
+  border-radius: 9px;
+}
+
+.public-header-cta {
+  box-shadow: 0 1px 2px #163e2420, inset 0 1px 0 #ffffff20;
+}
+
+.public-header-cta > svg {
+  transition: transform var(--motion-panel) var(--ease-out);
+}
+
+.public-menu-icon {
+  display: grid;
+  place-items: center;
+}
+
+.public-menu-icon svg {
+  grid-area: 1 / 1;
+  transition: opacity var(--motion-control) ease, transform var(--motion-panel) var(--ease-out);
+}
+
+.public-menu-icon svg:last-child {
+  opacity: 0;
+  transform: rotate(-45deg) scale(0.8);
+}
+
+.public-menu-icon[data-open="true"] svg:first-child {
+  opacity: 0;
+  transform: rotate(45deg) scale(0.8);
+}
+
+.public-menu-icon[data-open="true"] svg:last-child {
+  opacity: 1;
+  transform: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .public-header-cta:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px -8px #1b543847;
+  }
+  .public-header-cta:hover > svg {
+    transform: translate(2px, -2px);
+  }
+  .public-header nav > a:hover::after {
+    transform: scaleX(1);
+  }
+}
+
+.public-header-cta:active {
+  transform: translateY(0) scale(0.98);
+  transition-duration: 80ms;
+}
+
+@media (max-width: 760px) {
+  .public-nav-shell {
+    width: 100%;
+    display: grid;
+    grid-template-rows: 0fr;
+    visibility: hidden;
+    transition: grid-template-rows var(--motion-panel) var(--ease-out), visibility var(--motion-panel);
+  }
+  .public-nav-shell[data-open="true"] {
+    grid-template-rows: 1fr;
+    visibility: visible;
+  }
+  .public-header .public-nav-shell nav {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    min-height: 0;
+    overflow: hidden;
+    padding: 0;
+    border: 0;
+    opacity: 0;
+    transform: translateY(-6px);
+    transition: opacity var(--motion-control) ease, transform var(--motion-panel) var(--ease-out);
+  }
+  .public-header .public-nav-shell[data-open="true"] nav {
+    opacity: 1;
+    transform: none;
+  }
+  .public-header nav > a:not(.public-header-cta)::after {
+    display: none;
+  }
+  .public-header nav > a[aria-current="location"] {
+    background: var(--accent-soft);
+    border-radius: 6px;
+  }
+  .public-header nav > a {
+    padding-inline: 12px;
+  }
+  .public-header nav > a.public-header-cta {
+    margin-bottom: 16px;
+  }
+  .public-menu-button {
+    width: 44px;
+    height: 44px;
+    border-radius: 9px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .public-header-cta:hover,
+  .public-header-cta:active,
+  .public-header-cta:hover > svg {
+    transform: none;
+  }
+}
+
+.public-header {
+  width: min(1208px, calc(100% - 32px));
+  margin: 16px auto 0;
+  top: 16px;
+  border: 1px solid #ffffff21;
+  border-radius: 24px;
+  background: #14211ce8;
+  backdrop-filter: blur(24px) saturate(130%);
+  box-shadow: inset 0 1px 0 #ffffff0a, 0 12px 40px #00000024;
+}
+
+.public-header-inner {
+  width: calc(100% - 40px);
+  min-height: 70px;
+  gap: 20px;
+}
+
+.public-header-cta {
+  border-radius: 100px;
+  min-height: 48px;
+}
+
+.public-header-cta {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: #c0f6d0;
+  box-shadow: inset 0 1px 0 #ffffff80, 0 4px 20px #a6edbb15;
+}
+
+.public-header-cta:hover {
+  background: #c0f6d0;
+  color: var(--on-accent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .public-header-cta:hover {
+    box-shadow: 0 8px 32px -12px #a6edbb66;
+  }
+}
+
+@media (max-width: 1020px) {
+  .public-header nav {
+    gap: 12px;
+  }
+}
+
+@media (max-width: 760px) {
+  .public-header {
+    width: calc(100% - 24px);
+    top: 10px;
+    margin-top: 10px;
+    border-radius: 20px;
+  }
+  .public-header-inner {
+    width: calc(100% - 28px);
+    min-height: 64px;
+    gap: 0;
+  }
+  .public-menu-button {
+    border-radius: 13px;
+  }
+}

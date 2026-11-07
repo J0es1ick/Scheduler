@@ -105,9 +105,9 @@ for (const width of [320, 390, 768, 1440])
       { support_blocked: false },
     ]);
     for (const selector of [
-      ".user-card",
-      ".user-actions",
-      ".user-restrictions",
+      "[class*=\"_user-card_\"]",
+      "[class*=\"_user-actions_\"]",
+      "[class*=\"_user-restrictions_\"]",
     ]) {
       const bounds = await page.locator(selector).boundingBox();
       expect(bounds!.x).toBeGreaterThanOrEqual(0);
@@ -189,7 +189,7 @@ test("teacher card shows personal schedule and daily time", async ({
     card.getByText("Преподаватель · Иванов Иван Иванович · Тестовый вуз"),
   ).toBeVisible();
   await expect(
-    card.locator(".user-details > div").filter({
+    card.locator("[class*=\"_user-details_\"] > div").filter({
       has: page.getByText("Ежедневное расписание", { exact: true }),
     }),
   ).toContainText("06:30 · Europe/Moscow");
@@ -202,8 +202,8 @@ test("user details have separate labels", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 1000 });
   await setup(page);
   await page.goto("/#/users");
-  await expect(page.locator(".user-details dt")).toHaveCount(6);
-  await expect(page.locator(".user-details")).toContainText(
+  await expect(page.locator("[class*=\"_user-details_\"] dt")).toHaveCount(6);
+  await expect(page.locator("[class*=\"_user-details_\"]")).toContainText(
     "Ежедневное расписание",
   );
   await page.screenshot({

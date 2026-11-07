@@ -1,5 +1,7 @@
+import styles from "./ErrorBoundary.module.css";
+import layoutStyles from "../ui/layout/Layout.module.css";
 import { Component, type ErrorInfo, type ReactNode } from "react";
-import { getCSRFToken } from "../api";
+import { getCSRFToken } from "../shared/api";
 
 interface Props {
   children: ReactNode;
@@ -35,9 +37,9 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.failed) {
       return (
-        <main className="fatal-error">
+        <main className={styles["fatal-error"]}>
           <section>
-            <p className="eyebrow">Ошибка интерфейса</p>
+            <p className={layoutStyles["eyebrow"]}>Ошибка интерфейса</p>
             <h1>Страница не смогла продолжить работу</h1>
             <p>
               Данные не изменены. Перезагрузите страницу; техническая информация

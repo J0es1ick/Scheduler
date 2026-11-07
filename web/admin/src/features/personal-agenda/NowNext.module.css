@@ -1,0 +1,93 @@
+@value personal-eyebrow as sharedPersonalEyebrow from "../personal-shared/PersonalUI.module.css";
+
+.personal-now {
+  padding: clamp(20px,4vw,32px);
+  margin-top: 20px;
+  border: 1px solid var(--accent-border);
+  border-radius: 20px;
+  background: linear-gradient(130deg,var(--olive-soft),var(--surface));
+  animation: ui-rise-in var(--motion-panel) var(--ease-out);
+}
+
+.personal-now-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.personal-now-heading small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.personal-now .sharedPersonalEyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.personal-now h2 {
+  font-size: clamp(23px,5vw,31px);
+  line-height: 1.25;
+  margin: 20px 0 8px;
+  overflow-wrap: anywhere;
+}
+
+.personal-now p {
+  line-height: 1.6;
+}
+
+.personal-next {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  margin-top: 22px;
+  padding: 18px 0;
+  border-top: 1px solid var(--accent-border);
+}
+
+.personal-next>div {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.personal-next small {
+  color: var(--muted);
+}
+
+.personal-next span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.personal-now-footer {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.personal-transfer {
+  background: var(--olive-soft);
+  padding: 12px;
+  border-radius: 9px;
+}
+
+@media (max-width: 620px) {
+  .personal-now-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .personal-now h2 {
+    margin-top: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .personal-now {
+    animation: none;
+  }
+}

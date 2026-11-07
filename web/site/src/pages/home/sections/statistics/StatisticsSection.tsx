@@ -1,0 +1,41 @@
+import { classNames } from "../../../../../../shared/classNames";
+import styles from "./StatisticsSection.module.css";
+import sectionStyles from "../../../../shared/ui/section/Section.module.css";
+import type { PublicInfo } from "../../../../features/public-info/model";
+import { Metric } from "../../../../shared/ui/metric/Metric";
+
+interface StatisticsSectionProps {
+  info: PublicInfo | null;
+  loading: boolean;
+}
+
+export function StatisticsSection({ info, loading }: StatisticsSectionProps) {
+  return (
+    <section className={styles["public-stats"]} aria-label="Статистика проекта">
+      <div className={classNames(sectionStyles["public-container"], styles["public-stats-inner"])} data-reveal>
+        <div className={styles["public-stats-title"]}>
+          <span>
+            {!loading && !info ? "Статистика недоступна" : "Показатели сервиса"}
+          </span>
+          <p>
+            {!loading && !info
+              ? "Не удалось получить данные. Повторите загрузку позже; бот доступен по ссылке."
+              : "Показатели обновляются вместе с данными проекта."}
+          </p>
+        </div>
+        <Metric
+          value={info?.universities}
+          label="подключённых вуза"
+          loading={loading}
+        />
+        <Metric value={info?.users} label="пользователей" loading={loading} />
+        <Metric value={info?.groups} label="учебных групп" loading={loading} />
+        <Metric
+          value={info?.lessons}
+          label="занятий в базе"
+          loading={loading}
+        />
+      </div>
+    </section>
+  );
+}

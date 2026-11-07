@@ -1,0 +1,134 @@
+@value is-stale as sharedIsStale, is-disabled as sharedIsDisabled, is-error as sharedIsError from "../../../../shared/ui/status/Status.module.css";
+
+@value public-container as sharedPublicContainer from "../../../../shared/ui/section/Section.module.css";
+
+.public-status {
+  padding-top: 48px;
+  padding-bottom: 48px;
+}
+
+.public-status-list article {
+  display: grid;
+  grid-template-columns: 24px minmax(120px, 1fr) minmax(130px, auto) 30px;
+  align-items: center;
+  gap: 18px;
+  padding: 20px 0;
+  border-top: 1px solid var(--line);
+}
+
+.public-status-icon {
+  color: #32714b;
+}
+
+.public-status-list .sharedIsStale .public-status-icon,
+.public-status-list .sharedIsDisabled .public-status-icon {
+  color: #886118;
+}
+
+.public-status-list .sharedIsError .public-status-icon {
+  color: #ad4035;
+}
+
+.public-status-list h3 {
+  font-size: 17px;
+  margin-bottom: 5px;
+}
+
+.public-status-list p,
+.public-status-list time {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.public-status-list a {
+  color: var(--accent);
+}
+
+@media (max-width: 760px) {
+  .public-status-list article {
+    grid-template-columns: 22px minmax(0, 1fr) 24px;
+    gap: 12px;
+  }
+  .public-status-list time {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .public-status-list a {
+    grid-column: 3;
+    grid-row: 1;
+  }
+}
+
+.public-status-list article {
+  transition: background-color var(--motion-control) ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .public-status-list article:hover {
+    background: color-mix(in srgb, var(--accent-soft) 40%, transparent);
+  }
+}
+
+.public-status {
+  padding-top: 24px;
+}
+
+.public-status > .sharedPublicContainer {
+  padding: 32px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: #ffffff04;
+}
+
+.public-status-list article:last-child {
+  padding-bottom: 0;
+}
+
+.public-status-icon {
+  color: var(--accent);
+}
+
+.public-status-list .sharedIsStale .public-status-icon,
+.public-status-list .sharedIsDisabled .public-status-icon {
+  color: #f1ce91;
+}
+
+.public-status-list .sharedIsError .public-status-icon {
+  color: #ffb1a5;
+}
+
+.public-status-list a {
+  display: grid;
+  place-items: center;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.public-status-list article {
+  grid-template-columns: 24px minmax(120px, 1fr) minmax(130px, auto) 44px;
+}
+
+@media (max-width: 1020px) {
+  .public-status {
+    padding-top: 8px;
+  }
+}
+
+@media (max-width: 760px) {
+  .public-status {
+    padding-top: 0;
+  }
+  .public-status > .sharedPublicContainer {
+    padding: 24px;
+  }
+  .public-status-list article {
+    grid-template-columns: 22px minmax(0, 1fr) 44px;
+    gap: 8px;
+  }
+}
+
+@media (max-width: 400px) {
+  .public-status > .sharedPublicContainer {
+    padding: 20px;
+  }
+}

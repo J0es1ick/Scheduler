@@ -1,0 +1,154 @@
+@value is-added as sharedIsAdded, is-deleted as sharedIsDeleted from "../../../ui/state/State.module.css";
+
+.ledger-dialog {
+  width: min(100%, 620px);
+  max-height: min(88vh, 760px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 22px 70px var(--shadow-raised, rgba(50, 43, 33, 0.22));
+}
+
+.ledger-dialog > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 21px 22px 17px;
+  border-bottom: 1px solid var(--line);
+}
+
+.change-ledger-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid var(--line);
+  color: var(--olive-dark);
+}
+
+.change-ledger-head h2 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 22px;
+}
+
+.change-ledger-head p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ledger-empty {
+  padding: 34px 22px;
+  line-height: 1.6;
+}
+
+.ledger-list {
+  display: grid;
+  flex: 1;
+  overflow: auto;
+  padding: 0 22px;
+}
+
+.ledger-list article {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 28px;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.ledger-list article:has(.sharedIsAdded) {
+  grid-template-columns: 34px minmax(0, 1fr);
+}
+
+.ledger-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 22px;
+  border-radius: 4px;
+  background: var(--olive-soft);
+  color: var(--olive-dark);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.ledger-mark.sharedIsDeleted {
+  background: var(--rust-soft);
+  color: var(--red);
+}
+
+.ledger-mark.sharedIsAdded {
+  background: var(--added-surface, #edf0e6);
+  color: var(--olive-dark);
+}
+
+.ledger-list article > div {
+  display: grid;
+  min-width: 0;
+}
+
+.ledger-list strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ledger-list article > div span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ledger-list button {
+  display: grid;
+  place-items: center;
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--olive-dark);
+}
+
+.ledger-note {
+  display: flex;
+  align-items: start;
+  gap: 7px;
+  padding: 15px 22px 17px;
+  margin: 0;
+  border-top: 1px solid var(--line);
+  color: var(--olive-dark);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.change-ledger-head p,
+.ledger-list article > div span,
+.ledger-note {
+  font-size: 12px;
+}
+
+.ledger-mark {
+  font-size: 12px;
+}
+
+.ledger-list strong {
+  font-size: 13px;
+}
+
+@media (max-width: 1380px) {
+  .change-ledger {
+    position: static;
+  }
+}

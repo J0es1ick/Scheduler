@@ -1,0 +1,55 @@
+.is-error {
+  color: var(--red);
+}
+
+.is-compact {}
+
+.is-active {}
+
+.is-small {}
+
+.has-error {}
+
+.is-disabled {}
+
+.has-group-status {}
+
+.is-inactive {}
+
+.is-manual {}
+
+.is-archived {}
+
+.is-admin {}
+
+.is-selected {}
+
+.active {}
+
+.is-blocked {}
+
+.has-title {}
+
+.is-added {}
+
+.is-deleted {}
+
+.is-candidate {}
+
+.is-changed {}
+
+.is-removed {}
+
+.is-all {}
+
+.is-even {}
+
+.is-loading {}
+
+.has-lessons {}
+
+.is-cancelled {}
+
+.is-completed {}
+
+.is-running {}

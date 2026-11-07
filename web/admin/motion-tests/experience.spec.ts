@@ -38,7 +38,7 @@ for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
     await mockSite(page);
     await page.goto("http://127.0.0.1:15174");
-    const example = page.locator(".public-hero-product");
+    const example = page.locator("[class*=\"_public-hero-product_\"]");
     await expect(example).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
     const height = (await example.boundingBox())!.height;
@@ -63,7 +63,7 @@ for (const width of [320, 390, 768, 1440]) {
     await expect(page.getByText("ИГХТУ", { exact: true }).first()).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
     await page.locator("#technologies summary").click();
-    await expect(page.locator(".public-tech-grid")).toBeVisible();
+    await expect(page.locator("[class*=\"_public-tech-grid_\"]")).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     await page.screenshot({ path: info.outputPath("site.png"), fullPage: true, animations: "disabled" });
   });
@@ -72,16 +72,16 @@ for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
     await mockAdmin(page);
     await page.goto("/#/overview");
-    await expect(page.locator(".metric-strip")).toBeVisible();
+    await expect(page.locator("[class*=\"_metric-strip_\"]")).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
     await page.screenshot({ path: info.outputPath("admin.png"), fullPage: true, animations: "disabled" });
     if (width > 1100) {
-      await page.locator(".desktop-nav").getByRole("button", { name: "Рассылки", exact: true }).click();
-      const active = page.locator('.desktop-nav [aria-current="page"]');
+      await page.locator("[class*=\"_desktop-nav_\"]").getByRole("button", { name: "Рассылки", exact: true }).click();
+      const active = page.locator("[class*=\"_desktop-nav_\"] [aria-current=\"page\"]");
       await expect(active).toHaveText("Рассылки");
       await expect.poll(async () => {
         const selected = await active.boundingBox();
-        const indicator = await page.locator(".nav-indicator").boundingBox();
+        const indicator = await page.locator("[class*=\"_nav-indicator_\"]").boundingBox();
         return Math.abs(selected!.y - indicator!.y);
       }).toBeLessThan(1);
     } else {
@@ -106,7 +106,7 @@ test("reduced motion applies immediately and preserves all content", async ({ pa
   await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
   await mockAdmin(page);
   await page.goto("http://127.0.0.1:15173/#/overview");
-  await expect(page.locator(".metric-strip")).toBeVisible();
+  await expect(page.locator("[class*=\"_metric-strip_\"]")).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
   await page.getByRole("switch", { name: "Тёмная тема" }).click();
   await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
@@ -124,7 +124,7 @@ test("surface lighting follows the pointer and stops when motion is disabled", a
   await page.setViewportSize({ width: 1440, height: 1000 });
   await mockSite(page);
   await page.goto("http://127.0.0.1:15174");
-  const product = page.locator(".public-hero-product");
+  const product = page.locator("[class*=\"_public-hero-product_\"]");
   await product.hover({ position: { x: 70, y: 60 } });
   await expect(product).toHaveAttribute("data-light-active", "true");
   await expect.poll(() => product.evaluate((element) => Math.abs(Number.parseFloat((element as HTMLElement).style.getPropertyValue("--light-x")) - 70))).toBeLessThan(2);
@@ -139,7 +139,7 @@ test("surface lighting follows the pointer and stops when motion is disabled", a
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await mockAdmin(page);
   await page.goto("http://127.0.0.1:15173/#/overview");
-  const metric = page.locator(".metric-strip article").first();
+  const metric = page.locator("[class*=\"_metric-strip_\"] article").first();
   await metric.hover();
   await expect(metric).toHaveAttribute("data-light-active", "true");
   await expectReadableTheme(page);
@@ -152,10 +152,10 @@ test("personal schedule preview and final action remain usable on a narrow phone
   await page.setViewportSize({ width: 320, height: 740 });
   await mockSite(page);
   await page.goto("http://127.0.0.1:15174");
-  await page.locator(".public-personal-feature").scrollIntoViewIfNeeded();
+  await page.locator("[class*=\"_public-personal-feature_\"]").scrollIntoViewIfNeeded();
   await expect(page.getByLabel("Пример личной правки")).toBeVisible();
   await expect(page.getByText("Изменено только для вас")).toBeVisible();
-  await page.locator(".public-final-cta").scrollIntoViewIfNeeded();
+  await page.locator("[class*=\"_public-final-cta_\"]").scrollIntoViewIfNeeded();
   const launch = page.getByRole("link", { name: "Запустить Scheduler" });
   await expect(launch).toHaveAttribute("href", "https://t.me/schedule_free_bot");
   await launch.focus();
@@ -169,7 +169,7 @@ test("desktop sidebar remains reachable in a short window", async ({ page }) => 
   await page.setViewportSize({ width: 1280, height: 600 });
   await mockAdmin(page);
   await page.goto("/#/overview");
-  const sidebar = page.locator(".sidebar");
+  const sidebar = page.locator("[class*=\"_sidebar_\"]");
   const logout = sidebar.getByRole("button", { name: "Выйти", exact: true });
   await logout.scrollIntoViewIfNeeded();
   await expect(logout).toBeInViewport();

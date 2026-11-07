@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { setup } from "./personal-fixture";
-import { dayOverview, type Agenda } from "../src/personal/NowNext";
+import { dayOverview, type Agenda } from "../src/features/personal-agenda/model";
 
 test("day overview follows local time without repeated network requests", async ({ page }) => {
   await setup(page);
@@ -37,7 +37,7 @@ test("notification settings preserve opt-outs and preview saved tomorrow setting
   await page.getByRole("button", { name: "Сохранить настройки" }).click();
   await expect(page.getByRole("status")).toHaveText("Сохранено");
   expect(state.notificationRequests[0]).toMatchObject({ daily_enabled:true,daily_day_offset:1,daily_time:"20:00",daily_weekdays:31,daily_skip_empty:true,changes:false,reminder_enabled:false,service_updates:null });
-  await expect(page.locator(".personal-preview")).toContainText("Расписание на завтра");
+  await expect(page.locator("[class*=\"_personal-preview_\"]")).toContainText("Расписание на завтра");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 

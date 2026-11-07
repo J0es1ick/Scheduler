@@ -1,0 +1,32 @@
+.log-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  max-width: 100%;
+  padding: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.log-tabs button {
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 10px 14px;
+  min-height: 44px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+}
+
+.log-tabs button[aria-selected="true"] {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.log-tabs button:focus-visible {
+  outline: 2px solid var(--olive);
+  outline-offset: -2px;
+}

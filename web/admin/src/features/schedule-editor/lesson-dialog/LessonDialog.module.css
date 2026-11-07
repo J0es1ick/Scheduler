@@ -1,0 +1,187 @@
+@value dialog-actions as sharedDialogActions from "../../../ui/dialog/Dialog.module.css";
+
+.manual-review {
+  padding: 22px 24px 24px;
+}
+
+.manual-review-notice {
+  display: flex;
+  align-items: start;
+  gap: 11px;
+  padding: 14px;
+  border: 1px solid var(--accent-border, #c8cdbd);
+  border-radius: 6px;
+  background: var(--olive-soft);
+  color: var(--olive-dark);
+}
+
+.manual-review-notice strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.manual-review-notice p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.manual-review dl {
+  display: grid;
+  gap: 0;
+  margin: 18px 0 22px;
+  border-top: 1px solid var(--line);
+}
+
+.manual-review dl > div {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.manual-review dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.manual-review dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.manual-review > .sharedDialogActions {
+  justify-content: flex-end;
+}
+
+.lesson-dialog {
+  width: min(100%, 720px);
+  max-height: min(92vh, 840px);
+  overflow: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 22px 70px var(--shadow-raised, rgba(50, 43, 33, 0.22));
+}
+
+.lesson-dialog > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.lesson-dialog h2 {
+  margin: 5px 0 0;
+  color: var(--ink);
+  font-size: 24px;
+}
+
+.lesson-dialog header p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.lesson-dialog form {
+  padding: 22px 24px 24px;
+}
+
+.field-wide {
+  grid-column: 1 / -1;
+}
+
+.lesson-dialog footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 20px;
+  margin-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.lesson-dialog footer > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.lesson-dialog header p,
+.lesson-dialog footer > span {
+  font-size: 12px;
+}
+
+@media (max-width: 580px) {
+  .lesson-dialog {
+    max-height: 96vh;
+  }
+  .lesson-dialog > header,
+  .lesson-dialog form {
+    padding: 18px;
+  }
+  .field-wide {
+    grid-column: auto;
+  }
+  .lesson-dialog footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .lesson-dialog footer .sharedDialogActions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.recurrence-summary {
+  padding: 16px;
+  background: var(--surface-muted);
+  border-radius: 6px;
+}
+
+.recurrence-summary fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  border: 1px solid var(--line);
+}
+
+.recurrence-summary fieldset input {
+  width: auto;
+  min-height: auto;
+  margin-right: 6px;
+}
+
+.conflict-comparison {
+  padding: 16px;
+  background: var(--rust-soft);
+  border: 1px solid var(--rust);
+  border-radius: 6px;
+}
+
+.conflict-comparison td,
+.conflict-comparison th {
+  padding: 8px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 767px) {
+  .lesson-dialog footer {
+    position: sticky;
+    bottom: 0;
+    background: var(--surface);
+    padding: 12px;
+    z-index: 2;
+    flex-wrap: wrap;
+  }
+}
+
+.editor-dialog {
+  border-radius: 6px;
+}

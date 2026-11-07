@@ -1,5 +1,5 @@
-import { api } from "../../api";
-import type { EditorSchedule } from "../../types";
+import { api } from "../../shared/api";
+import type { EditorSchedule } from "../../shared/model";
 import {
   datePart,
   days,

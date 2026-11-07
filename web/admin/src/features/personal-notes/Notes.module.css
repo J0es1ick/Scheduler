@@ -1,0 +1,123 @@
+@value is-completed as sharedIsCompleted from "../../ui/state/State.module.css";
+
+@value personal-dialog as sharedPersonalDialog from "../personal-shared/PersonalUI.module.css";
+
+.personal-note-editor-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.personal-notes h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.personal-review-note {
+  background: var(--olive-soft);
+  padding: 12px;
+  border-radius: 9px;
+}
+
+.personal-notes {
+  animation: ui-rise-in var(--motion-panel) var(--ease-out);
+}
+
+.personal-note-card {
+  padding: 24px;
+  margin: 18px 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+}
+
+.personal-note-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.65;
+}
+
+.personal-note-card.sharedIsCompleted {
+  opacity: .75;
+}
+
+.personal-note-card small {
+  color: var(--muted);
+}
+
+.personal-note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.personal-note-dialog {
+  width: min(560px,calc(100vw - 24px));
+  padding: 24px;
+}
+
+.personal-note-dialog form {
+  display: grid;
+  gap: 18px;
+}
+
+.personal-note-dialog h2 {
+  margin: 0;
+  font-size: 23px;
+}
+
+.personal-note-dialog textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 140px;
+  padding: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.personal-rebind-options {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+@media (max-width: 620px) {
+  .personal-note-card {
+    padding: 16px;
+  }
+  .personal-note-dialog {
+    padding: 20px 16px;
+    max-height: calc(100dvh - 24px);
+  }
+  .personal-note-dialog input,
+  .personal-note-dialog textarea {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .personal-notes {
+    animation: none;
+  }
+}
+
+.sharedPersonalDialog.personal-rebind {
+  margin: auto;
+}
+
+.personal-note-editor-heading > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.personal-note-editor-heading > button {
+  flex-shrink: 0;
+}

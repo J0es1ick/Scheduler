@@ -1,0 +1,310 @@
+@value has-group-status as sharedHasGroupStatus, is-inactive as sharedIsInactive, is-active as sharedIsActive, is-manual as sharedIsManual, is-archived as sharedIsArchived from "../../ui/state/State.module.css";
+
+@value table-head as sharedTableHead, table-row as sharedTableRow from "../../ui/table/Table.module.css";
+
+@value button as sharedButton from "../../ui/button/Button.module.css";
+
+@value segmented-control as sharedSegmentedControl from "../../ui/form/Form.module.css";
+
+@value search-field as sharedSearchField from "../../ui/search/SearchField.module.css";
+
+.data-toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(240px, 1fr) 220px;
+  gap: 10px;
+}
+
+.data-toolbar.sharedHasGroupStatus {
+  grid-template-columns: auto minmax(220px, 1fr) 190px 170px 160px;
+}
+
+.active-filter {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+  border: 1px solid var(--accent-border, #c8cdbd);
+  border-radius: 6px;
+  background: var(--olive-soft);
+  color: var(--olive-dark);
+  font-size: 12px;
+}
+
+.active-filter button {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--olive-dark);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.groups-table .sharedTableHead,
+.groups-table .sharedTableRow {
+  grid-template-columns: minmax(185px, 1.25fr)
+    minmax(150px, 0.9fr)
+    minmax(105px, 0.65fr)
+    minmax(215px, 1.2fr)
+    minmax(92px, 0.55fr)
+    minmax(150px, 0.9fr);
+}
+
+.groups-table .sharedTableRow > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.groups-table .sharedTableRow > div:first-child > * {
+  min-width: 0;
+}
+
+.groups-table .sharedTableRow strong,
+.groups-table .sharedTableRow span {
+  white-space: nowrap;
+}
+
+.group-directory-row.sharedIsInactive {
+  background: color-mix(in srgb, var(--surface-muted) 72%, var(--surface));
+}
+
+.group-name-button {
+  display: grid;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+}
+
+.group-name-button:hover strong {
+  color: var(--olive-dark);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.group-lifecycle {
+  display: grid;
+  gap: 4px;
+}
+
+.groups-table .group-lifecycle strong,
+.groups-table .group-lifecycle span {
+  white-space: normal;
+}
+
+.group-lifecycle strong::before {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--muted-light);
+  content: "";
+}
+
+.group-lifecycle.sharedIsActive strong::before {
+  background: var(--olive);
+}
+
+.group-lifecycle.sharedIsManual strong::before {
+  background: var(--ochre);
+}
+
+.group-lifecycle.sharedIsArchived strong::before {
+  background: var(--muted-light);
+}
+
+.group-row-actions {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.group-row-actions .sharedButton {
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.directory-count {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.group-lifecycle-dialog {
+  width: min(100%, 520px);
+}
+
+.group-impact-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.group-impact-summary span {
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.lesson-browser {
+  display: grid;
+  gap: 14px;
+}
+
+.lesson-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.lesson-card {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.lesson-time {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--paper-deep);
+  border-right: 1px solid var(--line);
+}
+
+.lesson-time strong {
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+}
+
+.lesson-time span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.lesson-time i {
+  position: absolute;
+  right: -4px;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--surface);
+  border-radius: 50%;
+  background: var(--olive);
+}
+
+.lesson-main {
+  padding: 16px;
+}
+
+.lesson-type {
+  color: var(--rust);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.lesson-main h3 {
+  margin: 6px 0;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.lesson-main p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.lesson-main > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.lesson-main > div span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.active-filter,
+.active-filter button,
+.lesson-time span,
+.lesson-main p,
+.lesson-main > div span {
+  font-size: 12px;
+}
+
+.lesson-type {
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+
+.lesson-main h3 {
+  font-size: 14px;
+}
+
+@media (max-width: 1380px) {
+  .data-toolbar,
+  .data-toolbar.sharedHasGroupStatus {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .data-toolbar .sharedSegmentedControl {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+
+@media (max-width: 820px) {
+  .data-toolbar,
+  .data-toolbar.sharedHasGroupStatus {
+    grid-template-columns: 1fr;
+  }
+  .data-toolbar .sharedSearchField {
+    grid-column: auto;
+  }
+  .lesson-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 580px) {
+  .groups-table .sharedTableRow {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    min-height: 0;
+    padding: 13px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+  .groups-table .group-row-actions {
+    grid-column: 1 / -1;
+    display: flex;
+  }
+  .groups-table .sharedTableRow > div:first-child {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+  .groups-table .sharedTableRow > div:first-child::before {
+    grid-column: 1 / -1;
+  }
+}
+
+.data-page {}

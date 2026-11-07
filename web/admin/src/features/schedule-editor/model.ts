@@ -1,4 +1,4 @@
-import type { EditorLesson, SemesterOption, RecurrenceRule } from "../../types";
+import type { EditorLesson, SemesterOption, RecurrenceRule } from "../../shared/model";
 import type { ScheduleWeekFilter } from "../schedule-shared/weekSections";
 
 export const days = [

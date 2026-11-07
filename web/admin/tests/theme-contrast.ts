@@ -4,18 +4,18 @@ export async function expectReadableTheme(page: Page) {
   const failures = await page
     .locator(
       [
-        ".desktop-nav button",
-        ".status-pill",
-        ".button-primary:not(:disabled)",
-        ".source-transport-warning",
-        ".snapshot-quarantine",
-        ".identity-conflict",
-        ".snapshot-lesson-card",
-        ".snapshot-lesson-card h4",
-        ".snapshot-group-item.is-changed span",
-        ".board-lesson",
-        ".login-submit:not(:disabled)",
-        ".theme-control-caption strong",
+        "[class*=\"_desktop-nav_\"] button",
+        "[class*=\"_status-pill_\"]",
+        "[class*=\"_button-primary_\"]:not(:disabled)",
+        "[class*=\"_source-transport-warning_\"]",
+        "[class*=\"_snapshot-quarantine_\"]",
+        "[class*=\"_identity-conflict_\"]",
+        "[class*=\"_snapshot-lesson-card_\"]",
+        "[class*=\"_snapshot-lesson-card_\"] h4",
+        "[class*=\"_snapshot-group-item_\"].is-changed span",
+        "[class*=\"_board-lesson_\"]",
+        "[class*=\"_login-submit_\"]:not(:disabled)",
+        "[class*=\"_theme-control-caption_\"] strong",
       ].join(","),
     )
     .evaluateAll((elements) => {

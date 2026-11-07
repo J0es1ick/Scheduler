@@ -1,14 +1,14 @@
-import { useViewState } from "../../hooks/useViewState";
+import { useViewState } from "../../shared/hooks/useViewState";
 import { useEffect, useMemo, useState } from "react";
-import { APIError, api } from "../../api";
-import type { ToastMessage } from "../../components";
-import { useDebounced, useRemote } from "../../hooks";
+import { APIError, api } from "../../shared/api";
+import type { ToastMessage } from "../../ui";
+import { useDebounced, useRemote } from "../../shared/hooks";
 import type {
   EditorLesson,
   EditorSchedule,
   GroupView,
   LessonMutationPayload,
-} from "../../types";
+} from "../../shared/model";
 import { buildScheduleWeekSections } from "../schedule-shared/weekSections";
 import type { LessonForm, WeekFilter } from "./model";
 

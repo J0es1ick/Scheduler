@@ -1,0 +1,107 @@
+.run-marker {
+  display: grid;
+  place-items: center;
+}
+
+.run-marker span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--olive);
+}
+
+.run-feed {
+  border-top: 1px solid var(--line);
+}
+
+.run-feed article {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 110px 190px;
+  gap: 12px;
+  align-items: center;
+  min-height: 66px;
+  border-bottom: 1px solid var(--line);
+}
+
+.run-feed article:last-child {
+  border-bottom: 0;
+}
+
+.run-main,
+.run-records {
+  display: grid;
+}
+
+.run-main strong,
+.run-records strong,
+.run-duration > strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.run-main span,
+.run-records span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.run-duration {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  text-align: right;
+}
+
+.run-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--muted-light);
+}
+
+.run-published,
+.run-staged {
+  background: var(--olive);
+}
+
+.run-failed,
+.run-rejected {
+  background: var(--red);
+}
+
+.run-quarantined {
+  background: var(--rust);
+}
+
+.run-main span,
+.run-records span {
+  font-size: 12px;
+}
+
+.run-main strong,
+.run-records strong,
+.run-duration > strong {
+  font-size: 13px;
+}
+
+@media (max-width: 580px) {
+  .run-feed article {
+    grid-template-columns: 14px minmax(0, 1fr) auto;
+  }
+}
+
+@media (max-width: 580px) {
+  .run-records,
+.run-duration > strong {
+    display: none;
+  }
+}
+
+@media (max-width: 580px) {
+  .run-duration {
+    grid-template-columns: 1fr;
+  }
+}

@@ -133,17 +133,17 @@ for (const width of [320, 390, 768, 1440])
       "parser-worker",
     );
     expect(requests.at(-1)?.searchParams.get("source")).toBe("ispu-main");
-    await page.locator(".service-log-entry summary").click();
+    await page.locator("[class*=\"_service-log-entry_\"] summary").click();
     await expect(page.getByLabel("Поля записи")).toContainText(
       "permission denied for table groups",
     );
-    expect(await page.locator(".service-log-entry script").count()).toBe(0);
+    expect(await page.locator("[class*=\"_service-log-entry_\"] script").count()).toBe(0);
     await page.getByRole("button", { name: "Раньше", exact: true }).click();
     await expect(
       page.getByText("Earlier record", { exact: true }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Позже", exact: true }).click();
-    await expect(page.locator(".service-log-message")).toContainText(
+    await expect(page.locator("[class*=\"_service-log-message_\"]")).toContainText(
       "permission denied",
     );
     expect(
@@ -152,9 +152,9 @@ for (const width of [320, 390, 768, 1440])
       ),
     ).toBeTruthy();
     for (const selector of [
-      ".main-area",
-      ".service-logs",
-      ".service-log-filters",
+      "[class*=\"_main-area_\"]",
+      "[class*=\"_service-logs_\"]",
+      "[class*=\"_service-log-filters_\"]",
     ]) {
       const bounds = await page.locator(selector).boundingBox();
       expect(bounds?.x, selector).toBeGreaterThanOrEqual(0);
@@ -178,7 +178,7 @@ test("service logs keep previous data on refresh failure and retry", async ({
     }),
   );
   await page.goto("/#/logs");
-  await expect(page.locator(".service-log-message")).toBeVisible();
+  await expect(page.locator("[class*=\"_service-log-message_\"]")).toBeVisible();
   failed = true;
   await page
     .getByRole("button", { name: "Обновить журнал", exact: true })
@@ -187,7 +187,7 @@ test("service logs keep previous data on refresh failure and retry", async ({
     page.getByText("Ниже показаны данные последней успешной загрузки."),
   ).toBeVisible();
   await expect(page.getByText(/logs-outage-42/)).toBeVisible();
-  await expect(page.locator(".service-log-message")).toBeVisible();
+  await expect(page.locator("[class*=\"_service-log-message_\"]")).toBeVisible();
   failed = false;
   await page
     .getByRole("button", { name: "Обновить журнал", exact: true })
@@ -268,7 +268,7 @@ test("diagnostic tabs load separately and restore selections", async ({
   await expect(
     page.getByRole("heading", { name: "Запуски парсеров", exact: true }),
   ).toBeVisible();
-  await expect(page.locator(".service-logs")).toHaveCount(0);
+  await expect(page.locator("[class*=\"_service-logs_\"]")).toHaveCount(0);
   expect(runs).toBeGreaterThan(0);
   await page
     .getByRole("tab", { name: "Запуски парсеров", exact: true })
@@ -330,7 +330,7 @@ for (const width of [320, 390, 768, 1440])
     });
     await expect(consoleView).toContainText("bot first");
     await expect(
-      consoleView.locator(".log-console-record").first(),
+      consoleView.locator("[class*=\"_log-console-record_\"]").first(),
     ).toContainText("bot first");
     await expect(consoleView).toContainText(
       "permission denied for table groups",
@@ -359,10 +359,10 @@ for (const width of [320, 390, 768, 1440])
       page.getByRole("region", { name: "Консоль: PostgreSQL", exact: true }),
     ).toContainText("postgres first");
     for (const selector of [
-      ".main-area",
-      ".service-logs",
-      ".log-console",
-      '.log-tabs[aria-label="Потоки приложения"]',
+      "[class*=\"_main-area_\"]",
+      "[class*=\"_service-logs_\"]",
+      "[class*=\"_log-console_\"]",
+      "[class*=\"_log-tabs_\"][aria-label=\"Потоки приложения\"]",
     ]) {
       const bounds = await page.locator(selector).boundingBox();
       expect(bounds!.x, selector).toBeGreaterThanOrEqual(0);
@@ -374,8 +374,8 @@ for (const width of [320, 390, 768, 1440])
     await expect(page.getByLabel("Компонент", { exact: true })).toHaveValue(
       "postgres",
     );
-    await expect(page.locator(".service-log-entry")).toHaveCount(2);
-    await expect(page.locator(".log-console")).toHaveCount(0);
+    await expect(page.locator("[class*=\"_service-log-entry_\"]")).toHaveCount(2);
+    await expect(page.locator("[class*=\"_log-console_\"]")).toHaveCount(0);
   });
 
 test("changing console streams ignores an older response", async ({ page }) => {
@@ -415,11 +415,11 @@ test("changing console streams ignores an older response", async ({ page }) => {
   await page
     .getByRole("tab", { name: "Административный API", exact: true })
     .click();
-  await expect(page.locator(".log-console")).toContainText(
+  await expect(page.locator("[class*=\"_log-console_\"]")).toContainText(
     "current admin response",
   );
   releaseBot?.();
-  await expect(page.locator(".log-console")).not.toContainText(
+  await expect(page.locator("[class*=\"_log-console_\"]")).not.toContainText(
     "outdated bot response",
   );
 });
@@ -448,7 +448,7 @@ test("console refresh preserves reading position until following is resumed", as
   );
   await page.goto("/#/logs");
   await page.getByRole("switch", { name: "Консольный вид логов" }).click();
-  const consoleView = page.locator(".log-console");
+  const consoleView = page.locator("[class*=\"_log-console_\"]");
   const distance = () =>
     consoleView.evaluate(
       (node) => node.scrollHeight - node.scrollTop - node.clientHeight,
@@ -462,7 +462,7 @@ test("console refresh preserves reading position until following is resumed", as
   await page
     .getByRole("button", { name: "Обновить журнал", exact: true })
     .click();
-  await expect(consoleView.locator(".log-console-record")).toHaveCount(count);
+  await expect(consoleView.locator("[class*=\"_log-console-record_\"]")).toHaveCount(count);
   await expect
     .poll(() => consoleView.evaluate((node) => node.scrollTop))
     .toBe(150);
@@ -477,7 +477,7 @@ test("console refresh preserves reading position until following is resumed", as
   await page
     .getByRole("button", { name: "Обновить журнал", exact: true })
     .click();
-  await expect(consoleView.locator(".log-console-record")).toHaveCount(count);
+  await expect(consoleView.locator("[class*=\"_log-console-record_\"]")).toHaveCount(count);
   await expect.poll(distance).toBeLessThan(2);
 });
 

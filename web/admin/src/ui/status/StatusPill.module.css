@@ -1,0 +1,79 @@
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 25px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.status-healthy,
+.status-success {
+  border-color: var(--accent-border, #c9cfbd);
+  background: var(--olive-soft);
+  color: var(--olive-dark);
+}
+
+.status-running {
+  border-color: var(--warning-border, #d8c59f);
+  background: var(--warning-surface, #f5ebd6);
+  color: var(--warning-ink, #7b622f);
+}
+
+.status-stale {
+  border-color: var(--warning-border, #d8c59f);
+  background: var(--warning-surface, #f5ebd6);
+  color: var(--warning-ink, #7b622f);
+}
+
+.status-quarantined {
+  border-color: var(--warning-border, #c99e78);
+  background: var(--warning-surface, #f2e2d2);
+  color: var(--warning-ink, #7a4f36);
+}
+
+.status-disabled {
+  border-color: var(--line-strong);
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
+.status-error,
+.status-failed {
+  border-color: var(--danger-border, #dfb5aa);
+  background: var(--rust-soft);
+  color: var(--red);
+}
+
+.status-pill {
+  font-size: 13px;
+}
+
+.status-pill {
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.status-approved {}
+
+.status-rejected {}
+
+.status-active {}
+
+.status-pending_review {}
+
+.status-testing {}
+
+.status-suspended {}
+
+.status-archived {}
+
+.status-sending {}

@@ -1,6 +1,6 @@
 import { expect, type Page } from "@playwright/test";
-import type { Note } from "../src/personal/Notes";
-import { shiftDate } from "../src/personal/api";
+import type { Note } from "../src/features/personal-notes/Notes";
+import { shiftDate } from "../src/features/personal-shared/api";
 
 export async function setup(page: Page, admin = false, options: { week?: boolean; teacher?: boolean } = {}) {
   await page.route("**/telegram-web-app.js", (route) => route.fulfill({ contentType: "text/javascript", body: "" }));

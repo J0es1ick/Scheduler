@@ -1,0 +1,13 @@
+.section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.section-title h2 {
+  margin: 2px 0 0;
+  color: var(--ink);
+  font-size: 20px;
+}

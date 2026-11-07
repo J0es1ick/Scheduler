@@ -19,7 +19,7 @@ for (const width of [320, 390, 768, 1440]) {
     const heading = page.locator("#personal-day-2026-10-07");
     await expect.poll(async () => {
       const box = (await heading.boundingBox())!;
-      const controls = (await page.locator(".personal-calendar-controls").boundingBox())!;
+      const controls = (await page.locator("[class*=\"_personal-calendar-controls_\"]").boundingBox())!;
       return controls.y >= 0 && box.y >= controls.y + controls.height && box.y < 500;
     }).toBe(true);
     const edit = heading.locator("..").getByRole("button", { name: /Изменить Теоретическая/ });
@@ -29,7 +29,7 @@ for (const width of [320, 390, 768, 1440]) {
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
     await settled(page);
-    await expect(page.locator(".personal-dialog header")).toBeFocused();
+    await expect(page.locator("[class*=\"_personal-dialog_\"] header")).toBeFocused();
     const box = (await dialog.boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(width);
@@ -60,20 +60,20 @@ test("refresh keeps lessons and scroll position through slow and failed response
   let release = () => { };
   state.scheduleGate = new Promise<void>((resolve) => { release = resolve; });
   await page.getByRole("button", { name: "Обновить расписание" }).click();
-  await expect(page.locator(".personal-days")).toHaveAttribute("aria-busy", "true");
+  await expect(page.locator("[class*=\"_personal-days_\"]")).toHaveAttribute("aria-busy", "true");
   await expect(heading).toBeVisible();
   await expect(page.getByRole("button", { name: /Изменить Теоретическая/ }).first()).toBeDisabled();
   expect(Math.abs(await page.evaluate(() => scrollY) - position)).toBeLessThan(2);
   state.scheduleError = true;
   release();
   await expect(page.getByRole("alert")).toContainText("Временно недоступно");
-  await expect(page.locator(".personal-days")).toHaveAttribute("aria-busy", "false");
+  await expect(page.locator("[class*=\"_personal-days_\"]")).toHaveAttribute("aria-busy", "false");
   await expect(heading).toBeVisible();
   state.scheduleError = false;
   state.scheduleGate = undefined;
   await page.getByRole("button", { name: "Обновить расписание" }).click();
   await expect(page.getByRole("alert")).toHaveCount(0);
-  await expect(page.locator(".personal-days")).toHaveAttribute("aria-busy", "false");
+  await expect(page.locator("[class*=\"_personal-days_\"]")).toHaveAttribute("aria-busy", "false");
 });
 
 test("editor fits the keyboard viewport and Telegram safe areas", async ({ page }) => {
@@ -107,7 +107,7 @@ test("teacher schedule retains group names and honors reduced motion", async ({ 
   await page.setViewportSize({ width: 390, height: 844 });
   await setup(page, false, { teacher: true });
   await page.goto("/app");
-  await expect(page.locator(".personal-lesson-copy small")).toContainText("4/147");
+  await expect(page.locator("[class*=\"_personal-lesson-copy_\"] small")).toContainText("4/147");
   await expect(page.getByRole("combobox", { name: "Расписание", exact: true })).toHaveValue("group");
   await settled(page);
   await page.getByRole("button", { name: /Изменить Теоретическая/ }).click();

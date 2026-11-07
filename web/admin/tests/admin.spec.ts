@@ -78,7 +78,7 @@ async function mockAuthenticated(page: Page) {
 }
 
 async function expectViewportDialog(page: Page) {
-  const backdrop = page.locator(".dialog-backdrop").last();
+  const backdrop = page.locator("[class*=\"_dialog-backdrop_\"]").last();
   await expect(backdrop).toBeVisible();
   expect(
     await backdrop.evaluate(
@@ -148,7 +148,7 @@ for (const width of [320, 1440]) {
     const data = overviewNotices();
     await page.route("**/api/dashboard", (route) => json(route, data));
     await page.goto("/#/overview");
-    const notices = page.locator(".dismissible-notice");
+    const notices = page.locator("[class*=\"_dismissible-notice_\"]");
     await expect(notices).toHaveCount(3);
     await expect(page.getByRole("region", { name: "Ежедневная отправка расписания" })).toHaveClass(/notice-neutral/);
     for (const close of await page.getByRole("button", { name: /^Скрыть уведомление/ }).all()) {
@@ -224,7 +224,7 @@ test("dismissed refresh errors stay hidden during retries and return after recov
   await page.route("**/api/dashboard", (route) => json(route,
     failed ? { error: "Источник временно недоступен" } : dashboard, failed ? 503 : 200));
   await page.goto("/#/overview");
-  await expect(page.locator(".metric-strip")).toBeVisible();
+  await expect(page.locator("[class*=\"_metric-strip_\"]")).toBeVisible();
   const notice = page.getByRole("alert", { name: "Не удалось обновить данные" });
   failed = true;
   await refreshOverview(page);
@@ -248,7 +248,7 @@ for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await mockOverviewNavigation(page);
     await page.goto("/#/overview");
-    const metrics = page.locator(".metric-strip");
+    const metrics = page.locator("[class*=\"_metric-strip_\"]");
     await metrics.getByRole("button", { name: /занятий в расписании/ }).click();
     await expect(page).toHaveURL(/#\/data$/);
     await expect(page.getByRole("heading", { name: "Справочники", exact: true })).toBeVisible();
@@ -282,7 +282,7 @@ for (const role of ["read_only", "support", "editor", "reviewer", "operator"]) {
   test(`overview shortcuts respect ${role} permissions`, async ({ page }) => {
     await mockOverviewNavigation(page, role);
     await page.goto("/#/overview");
-    const metrics = page.locator(".metric-strip");
+    const metrics = page.locator("[class*=\"_metric-strip_\"]");
     await expect(metrics).toBeVisible();
     await expect(metrics.getByRole("button", { name: /пользователей бота/ })).toHaveCount(0);
     const canOpenSources = role === "reviewer" || role === "operator";
@@ -324,7 +324,7 @@ test("general feedback can be read and filtered in support", async ({
     .selectOption("feedback");
   await expect.poll(() => filters.includes("feedback")).toBe(true);
   await expect(
-    page.locator(".support-card").getByText("Пожелания и обратная связь"),
+    page.locator("[class*=\"_support-card_\"]").getByText("Пожелания и обратная связь"),
   ).toBeVisible();
 });
 
@@ -1148,7 +1148,7 @@ test("group directory manages active and archived groups safely", async ({
 
   await page.getByLabel("Состояние групп").selectOption("inactive");
   const archivedRow = page
-    .locator(".group-directory-row")
+    .locator("[class*=\"_group-directory-row_\"]")
     .filter({ hasText: "2-ЭЭ-В" });
   await expect(archivedRow).toHaveCount(1);
   const requestsBeforeSave = requestedStatuses.length;

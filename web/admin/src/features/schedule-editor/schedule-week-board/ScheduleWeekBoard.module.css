@@ -1,0 +1,312 @@
+@value has-title as sharedHasTitle, is-manual as sharedIsManual from "../../../ui/state/State.module.css";
+
+@value type-lab as sharedTypeLab, type-practice as sharedTypePractice, type-seminar as sharedTypeSeminar, type-exam as sharedTypeExam, type-credit as sharedTypeCredit, type-other as sharedTypeOther from "../../../ui/lesson-type/LessonType.module.css";
+
+.schedule-week-section {
+  min-width: 0;
+}
+
+.schedule-week-section.sharedHasTitle {
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-overlay, rgba(255, 253, 248, 0.48));
+}
+
+.schedule-week-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 2px 3px 13px;
+}
+
+.schedule-week-heading span {
+  color: var(--rust);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.schedule-week-heading h3 {
+  margin: 3px 0 0;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.schedule-week-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.week-board {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(190px, 1fr));
+  gap: 9px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.day-column {
+  min-height: 590px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-muted);
+}
+
+.day-column > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  min-height: 90px;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-deep);
+}
+
+.day-column > header > div {
+  display: grid;
+}
+
+.day-column > header > div > span {
+  color: var(--rust);
+  font-family: var(--font-ui);
+  font-size: 12px;
+}
+
+.day-column h3 {
+  margin: 5px 0 3px;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.day-column header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.day-add {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--olive-dark);
+}
+
+.day-lessons {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 9px;
+}
+
+.day-empty {
+  min-height: 115px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 7px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.day-empty:hover {
+  border-color: var(--olive);
+  color: var(--olive-dark);
+}
+
+.board-lesson {
+  position: relative;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--olive);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.board-lesson.sharedTypeLab {
+  border-left-color: var(--rust);
+}
+
+.board-lesson.sharedTypePractice,
+.board-lesson.sharedTypeSeminar {
+  border-left-color: var(--ochre);
+}
+
+.board-lesson.sharedTypeExam,
+.board-lesson.sharedTypeCredit {
+  border-left-color: var(--red);
+}
+
+.board-lesson.sharedTypeOther {
+  border-left-color: var(--muted);
+}
+
+.board-lesson.sharedIsManual {
+  background: var(--manual-surface, #fffaf0);
+}
+
+.board-lesson-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.board-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--olive-dark);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.board-lesson-head > div {
+  display: flex;
+  gap: 3px;
+}
+
+.board-lesson-head button {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.board-lesson-head button:hover {
+  background: var(--paper-deep);
+  color: var(--ink);
+}
+
+.board-type {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--rust);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.board-lesson h4 {
+  margin: 5px 0 10px;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.board-details {
+  display: grid;
+  gap: 5px;
+}
+
+.board-details span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.board-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.board-meta > span {
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: var(--paper-deep);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.board-meta .manual-badge {
+  background: var(--rust-soft);
+  color: var(--rust);
+}
+
+.restore-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  margin-top: 9px;
+  border: 0;
+  background: transparent;
+  color: var(--olive-dark);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.day-column header p,
+.board-details span {
+  font-size: 12px;
+}
+
+.board-type {
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+
+.board-lesson h4 {
+  font-size: 14px;
+}
+
+.board-meta > span {
+  font-size: 12px;
+}
+
+.day-column > header > div > span,
+.board-time,
+.restore-inline {
+  font-size: 12px;
+}
+
+@media (max-width: 580px) {
+  .week-board {
+    grid-template-columns: repeat(7, 210px);
+  }
+  .schedule-week-heading {
+    align-items: start;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .schedule-week-heading p {
+    line-height: 1.35;
+  }
+  .day-column {
+    min-height: 500px;
+  }
+}

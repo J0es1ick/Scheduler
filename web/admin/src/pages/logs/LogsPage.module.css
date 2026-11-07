@@ -1,0 +1,18 @@
+@value section-title as sharedSectionTitle from "../../ui/section-title/SectionTitle.module.css";
+
+.logs-page {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.logs-page > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.logs-page .sharedSectionTitle {
+  flex-wrap: wrap;
+}
+
+.log-tab-panel {
+  min-width: 0;
+}

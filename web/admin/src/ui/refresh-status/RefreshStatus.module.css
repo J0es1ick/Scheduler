@@ -1,0 +1,14 @@
+.refresh-warning {
+  padding: 14px 18px;
+  border: 1px solid var(--rust);
+  border-radius: 6px;
+  background: var(--rust-soft);
+}
+
+.refresh-warning p {
+  margin-bottom: 8px;
+}
+
+.refresh-warning {
+  animation: ui-fade-in var(--motion-control) ease-out;
+}

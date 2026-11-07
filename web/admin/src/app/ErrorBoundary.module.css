@@ -1,0 +1,23 @@
+.fatal-error {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 32px;
+}
+
+.fatal-error section {
+  width: min(560px, 100%);
+  padding: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.fatal-error h1 {
+  margin: 8px 0 12px;
+}
+
+.fatal-error button {
+  margin-top: 20px;
+}

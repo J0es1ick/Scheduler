@@ -1,26 +1,27 @@
+import styles from "./App.module.css";
 import { explicitlyLoggedOut, setExplicitLogout } from "./logoutState";
-import { RefreshStatus } from "./RefreshStatus";
+import { RefreshStatus } from "../ui/refresh-status/RefreshStatus";
 import { useMiniApp } from "./useMiniApp";
 import { useTheme } from "./useTheme";
-import { ThemeSwitch } from "./ThemeSwitch";
-import { clearViewState, presetViewState } from "../hooks/useViewState";
+import { ThemeSwitch } from "../ui/theme-switch/ThemeSwitch";
+import { clearViewState, presetViewState } from "../shared/hooks/useViewState";
 import { lazy, Suspense, useEffect, useState } from "react";
-import { APIError, api } from "../api";
-import { LoadingBlock, Toasts, type ToastMessage } from "../components";
-import { AuditPage } from "../pages/AuditPage";
-import { DataPage } from "../pages/DataPage";
-import { ConnectorsPage } from "../pages/ConnectorsPage";
-import { EditorPage } from "../pages/EditorPage";
-import { LoginPage } from "../pages/LoginPage";
-import { LogsPage, type LogTab } from "../pages/LogsPage";
-import { OverviewPage } from "../pages/OverviewPage";
-import { SourcesPage } from "../pages/SourcesPage";
-import { SupportPage } from "../pages/SupportPage";
-import { UsersPage } from "../pages/UsersPage";
-import type { AdminIdentity } from "../types";
+import { APIError, api } from "../shared/api";
+import { LoadingBlock, Toasts, type ToastMessage } from "../ui";
+import { AuditPage } from "../pages/audit/AuditPage";
+import { DataPage } from "../pages/data/DataPage";
+import { ConnectorsPage } from "../pages/connectors/ConnectorsPage";
+import { EditorPage } from "../pages/editor/EditorPage";
+import { LoginPage } from "../pages/login/LoginPage";
+import { LogsPage, type LogTab } from "../pages/logs/LogsPage";
+import { OverviewPage } from "../pages/overview/OverviewPage";
+import { SourcesPage } from "../pages/sources/SourcesPage";
+import { SupportPage } from "../pages/support/SupportPage";
+import { UsersPage } from "../pages/users/UsersPage";
+import type { AdminIdentity } from "../shared/model";
 import { AppLayout, canAccessView, type ViewName } from "./layout/AppLayout";
 
-const BroadcastsPage = lazy(() => import("../pages/BroadcastsPage").then(module => ({ default: module.BroadcastsPage })));
+const BroadcastsPage = lazy(() => import("../pages/broadcasts/BroadcastsPage").then(module => ({ default: module.BroadcastsPage })));
 
 const knownViews: ViewName[] = [
   "overview",
@@ -285,7 +286,7 @@ export default function App() {
         onLogout={() => void logout()}
       >
         <RefreshStatus />
-        <div className="page-transition" key={view}>{page}</div>
+        <div className={styles["page-transition"]} key={view}>{page}</div>
       </AppLayout>
       <Toasts items={toasts} />
     </>

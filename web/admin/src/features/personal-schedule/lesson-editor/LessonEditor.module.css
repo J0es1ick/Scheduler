@@ -1,0 +1,77 @@
+@value personal-dialog as sharedPersonalDialog, personal-error as sharedPersonalError, personal-check as sharedPersonalCheck from "../../personal-shared/PersonalUI.module.css";
+
+.personal-dialog-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 22px 24px;
+  scrollbar-gutter: stable;
+}
+
+.personal-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.sharedPersonalDialog .personal-cancel-check {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+
+.personal-cancel-check:has(:checked) {
+  border-color: var(--accent-border);
+  background: var(--olive-soft);
+}
+
+.personal-dialog-body > .sharedPersonalError {
+  margin: 16px 0 0;
+}
+
+.sharedPersonalDialog .personal-repeat-dates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 3px;
+}
+
+.personal-repeat-dates legend {
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.personal-repeat-dates .sharedPersonalCheck {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.personal-repeat-dates .sharedPersonalCheck:has(:checked) {
+  border-color: var(--accent-border);
+  background: var(--olive-soft);
+}
+
+.personal-repeat-dates {
+  animation: ui-fade-in var(--motion-control) ease-out;
+}
+
+@media (max-width: 620px) {
+  .personal-dialog-body {
+    padding: 18px 16px;
+    scrollbar-gutter: auto;
+  }
+  .personal-form-row {
+    gap: 10px;
+  }
+}
+
+@media (max-width: 360px) {
+  .sharedPersonalDialog .personal-repeat-dates {
+    grid-template-columns: 1fr;
+  }
+}

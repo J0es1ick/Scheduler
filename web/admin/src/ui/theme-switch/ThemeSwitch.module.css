@@ -1,0 +1,127 @@
+.theme-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.theme-control-caption {
+  display: grid;
+  gap: 3px;
+}
+
+.theme-control-caption strong {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.theme-control-caption span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.theme-switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 64px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.theme-switch-track {
+  position: absolute;
+  inset: 6px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
+.theme-switch-track > svg {
+  z-index: 1;
+  pointer-events: none;
+}
+
+.theme-switch-track > svg:first-child {
+  color: var(--on-accent, #fffdf8);
+}
+
+.theme-switch[aria-checked="true"] .theme-switch-track > svg:first-child {
+  color: var(--muted);
+}
+
+.theme-switch[aria-checked="true"] .theme-switch-track > svg:nth-child(2) {
+  color: var(--on-accent, #fffdf8);
+}
+
+.theme-switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--olive);
+  transition: transform 160ms ease;
+}
+
+.theme-switch[aria-checked="true"] .theme-switch-thumb {
+  transform: translateX(32px);
+}
+
+.theme-switch:hover .theme-switch-track {
+  border-color: var(--olive);
+}
+
+.theme-device-button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.theme-device-button:hover {
+  border-color: var(--line-strong);
+  background: var(--surface);
+}
+
+.theme-device-button[aria-pressed="true"] {
+  color: var(--olive-dark);
+  background: var(--olive-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-switch-thumb {
+    transition: none;
+  }
+}
+
+.theme-switch-thumb {
+  transition: transform var(--motion-panel) var(--ease-out);
+}
+
+.theme-switch-track {
+  transition: background-color var(--motion-control) ease, border-color var(--motion-control) ease;
+}
+
+.theme-switch-track,
+.theme-switch,
+.theme-device-button {
+  border-radius: 12px;
+}
+
+.theme-switch-thumb {
+  border-radius: 8px;
+}

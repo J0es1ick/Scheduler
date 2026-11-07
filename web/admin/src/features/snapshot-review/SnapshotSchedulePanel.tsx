@@ -1,5 +1,8 @@
+import { classNames } from "../../../../shared/classNames";
+import styles from "./SnapshotSchedulePanel.module.css";
+import stateStyles from "../../ui/state/State.module.css";
 import { CalendarRange, Clock3, MapPin, UserRound } from "lucide-react";
-import type { SnapshotLesson } from "../../types";
+import type { SnapshotLesson } from "../../shared/model";
 import { buildScheduleWeekSections } from "../schedule-shared/weekSections";
 import {
   formatSnapshotDate,
@@ -31,7 +34,7 @@ export function SnapshotSchedulePanel({
   );
 
   return (
-    <section className={`snapshot-schedule-panel is-${tone}`}>
+    <section className={classNames(styles["snapshot-schedule-panel"], stateStyles[`is-${tone}`])}>
       <header>
         <div>
           <span>
@@ -41,16 +44,16 @@ export function SnapshotSchedulePanel({
         </div>
         <strong>{lessons.length}</strong>
       </header>
-      <p className="snapshot-schedule-subtitle">{subtitle}</p>
+      <p className={styles["snapshot-schedule-subtitle"]}>{subtitle}</p>
       {lessons.length ? (
-        <div className="snapshot-week-sections">
+        <div className={styles["snapshot-week-sections"]}>
           {weekSections.map((section) => (
             <section
-              className={`snapshot-week-section is-${section.key}`}
+              className={classNames(styles["snapshot-week-section"], stateStyles[`is-${section.key}`])}
               key={section.key}
             >
               {section.title && (
-                <header className="snapshot-week-heading">
+                <header className={styles["snapshot-week-heading"]}>
                   <div>
                     <span>Учебная неделя</span>
                     <h5>{section.title}</h5>
@@ -64,7 +67,7 @@ export function SnapshotSchedulePanel({
           ))}
         </div>
       ) : (
-        <div className="snapshot-schedule-empty">
+        <div className={styles["snapshot-schedule-empty"]}>
           <CalendarRange size={22} />
           <strong>Занятий нет</strong>
           <p>{emptyText}</p>
@@ -77,19 +80,19 @@ export function SnapshotSchedulePanel({
 function SnapshotDays({ lessons }: { lessons: SnapshotLesson[] }) {
   if (!lessons.length) {
     return (
-      <div className="snapshot-week-empty">В этой части недели занятий нет</div>
+      <div className={styles["snapshot-week-empty"]}>В этой части недели занятий нет</div>
     );
   }
 
   return (
-    <div className="snapshot-schedule-days">
+    <div className={styles["snapshot-schedule-days"]}>
       {snapshotDays.map((day, index) => {
         const dayLessons = lessons.filter(
           (lesson) => snapshotLessonDay(lesson) === index + 1,
         );
         if (!dayLessons.length) return null;
         return (
-          <section className="snapshot-schedule-day" key={day}>
+          <section className={styles["snapshot-schedule-day"]} key={day}>
             <header>
               <span>{String(index + 1).padStart(2, "0")}</span>
               <h5>{day}</h5>
@@ -117,8 +120,8 @@ function SnapshotLessonCard({ lesson }: { lesson: SnapshotLesson }) {
       : "Период действия не указан";
 
   return (
-    <article className={`snapshot-lesson-card is-${lesson.diff}`}>
-      <div className="snapshot-lesson-topline">
+    <article className={classNames(styles["snapshot-lesson-card"], stateStyles[`is-${lesson.diff}`])}>
+      <div className={styles["snapshot-lesson-topline"]}>
         <span>
           <Clock3 size={13} /> {lesson.time_start}–{lesson.time_end}
         </span>
@@ -128,7 +131,7 @@ function SnapshotLessonCard({ lesson }: { lesson: SnapshotLesson }) {
       </div>
       <small>{snapshotLessonTypeLabels[lesson.type] ?? lesson.type}</small>
       <h6>{lesson.subject || "Предмет не указан"}</h6>
-      <div className="snapshot-lesson-details">
+      <div className={styles["snapshot-lesson-details"]}>
         <span>
           <UserRound size={13} /> {lesson.teacher || "Преподаватель не указан"}
         </span>

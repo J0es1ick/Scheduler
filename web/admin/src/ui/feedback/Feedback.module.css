@@ -1,0 +1,95 @@
+.loading-stack {
+  display: grid;
+  gap: 9px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.skeleton {
+  height: 54px;
+  border-radius: 6px;
+  background: var(--inset-surface, #ece6da);
+  animation: skeleton 1.2s ease-in-out infinite alternate;
+}
+
+.state-block {
+  min-height: 138px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 13px;
+  padding: 22px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-overlay, rgba(255, 253, 248, 0.45));
+  color: var(--muted);
+}
+
+.state-block > div {
+  display: grid;
+  gap: 4px;
+}
+
+.state-block strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.state-block p {
+  margin: 0;
+  font-size: 12px;
+}
+
+.state-error svg {
+  color: var(--red);
+}
+
+.state-block p {
+  font-size: 12px;
+}
+
+.state-block strong {
+  font-size: 13px;
+}
+
+.state-block {
+  animation: ui-fade-in var(--motion-control) ease-out;
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  animation: none;
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--surface) 75%, transparent), transparent);
+  animation: skeleton-sweep 1.8s ease-in-out infinite;
+  animation-delay: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after {
+    display: none;
+  }
+}
+
+@keyframes skeleton {
+  to {
+    opacity: 0.45;
+  }
+}
+
+@keyframes skeleton-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
